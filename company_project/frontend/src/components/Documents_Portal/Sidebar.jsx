@@ -1,5 +1,7 @@
 const Sidebar = ({ setSelectedType }) => {
 
+  
+
   const menus = [
     "Summary",
     "Commercial",

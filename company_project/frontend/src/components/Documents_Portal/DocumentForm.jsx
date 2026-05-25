@@ -21,8 +21,10 @@ const DocumentForm = ({ selectedType }) => {
     reservationNo: "",
     customerName: "",
     enteredBy: "",
-    requestDate: getCurrentDate(),
-    requestTime: getCurrentTime(),
+    requestDate: "",
+    requestTime: "",
+    Date: getCurrentDate(),
+    Time: getCurrentTime(),
     status: "Empty"
   });
 
@@ -37,21 +39,21 @@ const DocumentForm = ({ selectedType }) => {
   }, [selectedType]);
 
   // Real-Time Clock
-  useEffect(() => {
+  // useEffect(() => {
 
-    const timer = setInterval(() => {
+  //   const timer = setInterval(() => {
 
-      setFormData(prev => ({
-        ...prev,
-        requestDate: getCurrentDate(),
-        requestTime: getCurrentTime()
-      }));
+  //     setFormData(prev => ({
+  //       ...prev,
+  //       requestDate: getCurrentDate(),
+  //       requestTime: getCurrentTime()
+  //     }));
 
-    }, 1000);
+  //   }, 1000);
 
-    return () => clearInterval(timer);
+  //   return () => clearInterval(timer);
 
-  }, []);
+  // }, []);
 
   // Input Change
   const handleChange = (e) => {
@@ -101,29 +103,34 @@ const DocumentForm = ({ selectedType }) => {
   };
 
   // Upload Excel
-  const handleExcelUpload = async (e) => {
+ const handleExcelUpload = async (e) => {
 
-    const file = e.target.files[0];
+  const file = e.target.files[0];
 
-    const formData = new FormData();
+  const formData = new FormData();
 
-    formData.append("file", file);
+  formData.append("file", file);
 
-    try {
+  try {
 
-      await axios.post(
-        "http://localhost:8080/api/excel/upload",
-        formData
-      );
+    const res = await axios.post(
+      "http://localhost:8080/api/excel/upload",
+      formData,
+      {
+        headers: {
+          "Content-Type": "multipart/form-data"
+        }
+      }
+    );
 
-      alert("Excel Uploaded Successfully");
+    alert(res.data);
 
-    } catch (error) {
+  } catch (error) {
 
-      console.log(error);
+    console.log(error);
 
-    }
-  };
+  }
+};
 
   return (
 
@@ -202,19 +209,30 @@ const DocumentForm = ({ selectedType }) => {
             className="form-input"
           />
 
-          <input
-            type="text"
-            value={formData.requestDate}
-            readOnly
-            className="form-input readonly-input"
-          />
 
-          <input
-            type="text"
-            value={formData.requestTime}
-            readOnly
-            className="form-input readonly-input"
-          />
+        <input
+          type="date"
+          value={formData.requestDate}
+          onChange={(e) =>
+            setFormData({
+              ...formData,
+              requestDate: e.target.value
+            })
+          }
+          className="form-input"
+        />
+
+        <input
+        type="time"
+        value={formData.requestTime}
+        onChange={(e) =>
+          setFormData({
+            ...formData,
+            requestTime: e.target.value
+          })
+        }
+        className="form-input"
+      />
 
           <input
             type="text"
@@ -235,4 +253,9 @@ const DocumentForm = ({ selectedType }) => {
   );
 };
 
+
+// if (doc.getRequestDate() == null || doc.getRequestTime() == null) {
+//     return ResponseEntity.badRequest()
+//             .body("Date and Time required");
+// }
 export default DocumentForm;

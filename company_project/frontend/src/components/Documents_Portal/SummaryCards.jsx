@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
-import { getDocuments } from "../../services/Documents_Portal/api";
+import axios from "axios";
 
 const SummaryCards = () => {
 
-  const [data, setData] = useState({});
+  const [data, setData] = useState([]);
 
   useEffect(() => {
     load();
@@ -11,43 +11,41 @@ const SummaryCards = () => {
 
   const load = async () => {
 
-    const res = await getDocuments();
+    try {
 
-    const counts = {
-      Commercial: 0,
-      Balance: 0,
-      "Cost Center": 0,
-      Domestic: 0,
-      "Sales Order": 0
-    };
+      const res = await axios.get(
+        "http://localhost:8080/api/documents"
+      );
 
-    res.data.forEach(d => {
-      if (counts[d.jobType] !== undefined) {
-        counts[d.jobType]++;
-      }
-    });
+      const counts = {
+        Commercial: 0,
+        Balance: 0,
+        "Cost Center": 0,
+        Domestic: 0,
+        "Sales Order": 0
+      };
 
-    setData(counts);
+      res.data.forEach(d => {
+        if (counts[d.jobType] !== undefined) {
+          counts[d.jobType]++;
+        }
+      });
+
+      setData(counts);
+
+    } catch (error) {
+      console.log(error);
+    }
   };
 
   return (
-
-    <div className="summary-grid">
-
-      {Object.keys(data).map((key, index) => (
-
-        <div
-          key={index}
-          className="summary-box"
-        >
-
-          <h3>{key}</h3>
-          <h1>{data[key]}</h1>
-
+    <div style={{ display: "flex", gap: 10 }}>
+      {Object.keys(data).map(k => (
+        <div key={k} style={{ padding: 10 }}>
+          <h3>{k}</h3>
+          <p>{data[k]}</p>
         </div>
-
       ))}
-
     </div>
   );
 };

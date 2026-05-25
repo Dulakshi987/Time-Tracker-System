@@ -34,25 +34,25 @@ const ExcelUpload = () => {
     }
   };
 
-  return (
+  // return (
 
-    <div className="excel-container">
+  //   <div className="excel-container">
 
-      <button
-        className="download-btn"
-        onClick={downloadTemplate}
-      >
-        Download Excel Format
-      </button>
+  //     <button
+  //       className="download-btn"
+  //       onClick={downloadTemplate}
+  //     >
+  //       Download Excel Format
+  //     </button>
 
-      <input
-        type="file"
-        accept=".xlsx"
-        onChange={handleUpload}
-      />
+  //     <input
+  //       type="file"
+  //       accept=".xlsx"
+  //       onChange={handleUpload}
+  //     />
 
-    </div>
-  );
+  //   </div>
+  // );
 };
 
 export default ExcelUpload;
