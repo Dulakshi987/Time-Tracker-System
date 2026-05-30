@@ -1,4 +1,6 @@
 import React from "react";
+import DashboardChart
+from "./DashboardChart";
 
 const Dashboard = () => {
   return (
@@ -7,5 +9,7 @@ const Dashboard = () => {
     </div>
   );
 };
+
+
 
 export default Dashboard;

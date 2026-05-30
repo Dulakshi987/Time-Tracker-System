@@ -1,6 +1,9 @@
 package com.controller.Documents_Portal;
 
+// import java.util.Map;
 import java.time.LocalDateTime;
+// import java.util.ArrayList;
+// import java.util.HashMap;
 import java.util.List;
 
 import com.entity.Document;
@@ -56,7 +59,20 @@ public class DocumentController {
 
     // ================= GET ALL =================
     @GetMapping
-    public List<Document> getAll() {
-        return repository.findAll();
+    public List<Document> getAll(
+        @RequestParam(required = false) String fromDate,
+        @RequestParam(required = false) String toDate,
+        @RequestParam(required = false) String type
+) {
+
+    if (fromDate != null && toDate != null) {
+        return repository.findByDateRange(fromDate, toDate);
     }
+
+    if (type != null && !type.equalsIgnoreCase("All")) {
+        return repository.findByJobType(type);
+    }
+
+    return repository.findAll();
 }
+} 

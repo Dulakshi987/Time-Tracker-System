@@ -1,18 +1,30 @@
 import { useEffect, useState } from "react";
-import { getByType } from "../../services/Documents_Portal/api";
+import { getByType, getByDateRange } from "../../services/Documents_Portal/api";
 
-const DocumentList = ({ selectedType }) => {
+const DocumentList = ({ selectedType, chartFilter }) => {
 
   const [documents, setDocuments] = useState([]);
 
   useEffect(() => {
     loadDocuments();
-  }, [selectedType]);
+  }, [selectedType, chartFilter]);
 
   const loadDocuments = async () => {
     try {
-      const res = await getByType(selectedType);
+
+      let res;
+
+      if (chartFilter?.fromDate || chartFilter?.toDate) {
+        res = await getByDateRange(
+          chartFilter.fromDate,
+          chartFilter.toDate
+        );
+      } else {
+        res = await getByType(selectedType);
+      }
+
       setDocuments(res.data);
+
     } catch (error) {
       console.log(error);
     }
@@ -50,8 +62,6 @@ const DocumentList = ({ selectedType }) => {
               <td>{doc.requestDate}</td>
               <td>{doc.requestTime}</td>
               <td className="pending">{doc.status}</td>
-
-              {/* ✅ THIS IS IMPORTANT */}
               <td>
                 {doc.createdDatetime
                   ? new Date(doc.createdDatetime).toLocaleString()

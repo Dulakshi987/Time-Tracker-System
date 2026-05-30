@@ -5,39 +5,48 @@ import SummaryCards from "./components/Documents_Portal/SummaryCards";
 import DocumentForm from "./components/Documents_Portal/DocumentForm";
 import DocumentList from "./components/Documents_Portal/DocumentList";
 import ExcelUpload from "./components/Documents_Portal/ExcelUpload";
+import DashboardChart from "./pages/Documents_Portal/DashboardChart";
+import ChartFilter from "./pages/Documents_Portal/ChartFilter";
 
 function App() {
 
   const [selectedType, setSelectedType] = useState("Summary");
 
-  return (
+  const [chartFilter, setChartFilter] = useState({
+    fromDate: "",
+    toDate: ""
+  });
 
+  const handleFilter = (fromDate, toDate) => {
+    setChartFilter({ fromDate, toDate });
+  };
+
+  return (
     <div className="dashboard-container">
 
       <Sidebar setSelectedType={setSelectedType} />
 
       <div className="main-content">
 
-        {/* TOP BAR */}
         <div className="topbar">
-          <h1 className="typewriter">
-            Welcome! Documents Entering Portal
-          </h1>
+          <h1>Documents Portal</h1>
         </div>
 
-        {/* SUMMARY DASHBOARD */}
         {selectedType === "Summary" && (
           <>
             <SummaryCards />
 
+            <ChartFilter onFilter={handleFilter} />
 
+            <DashboardChart chartFilter={chartFilter} />
 
-            {/* TABLE */}
-            <DocumentList selectedType="All" />
+            <DocumentList
+              selectedType="All"
+              chartFilter={chartFilter}
+            />
           </>
         )}
 
-        {/* FORM + LIST */}
         {selectedType !== "Summary" && (
           <>
             <DocumentForm selectedType={selectedType} />
@@ -47,7 +56,6 @@ function App() {
         )}
 
       </div>
-
     </div>
   );
 }
