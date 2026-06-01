@@ -1,0 +1,233 @@
+/* RESET */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+  font-family: Arial, sans-serif;
+}
+
+/* PAGE WRAPPER */
+.issue-container {
+  max-width: 900px;
+  margin: 20px auto;
+  background: #ffffff;
+  padding: 25px;
+  border-radius: 14px;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.08);
+}
+
+/* TITLE */
+.issue-container h2 {
+  text-align: center;
+  margin-bottom: 20px;
+  color: #1e293b;
+}
+
+/* FORM ROW */
+.row {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+/* INPUTS */
+input, select {
+  flex: 1;
+  padding: 11px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  outline: none;
+  transition: 0.2s;
+}
+
+input:focus, select:focus {
+  border-color: #2563eb;
+  box-shadow: 0 0 5px rgba(37,99,235,0.2);
+}
+
+/* BUTTON ROW (START / END) */
+.btn-row {
+  display: flex;
+  justify-content: center;
+  gap: 60px;   /* 👈 big gap between buttons */
+  margin-top: 15px;
+}
+
+/* START BUTTON */
+.start-btn {
+  flex: 1;
+  padding: 14px;
+  background: #16a34a;
+  color: white;
+  border: none;
+  border-radius: 10px;
+  font-size: 15px;
+  cursor: pointer;
+  transition: 0.3s;
+}
+
+.start-btn:hover {
+  background: #15803d;
+}
+
+/* END BUTTON */
+.end-btn {
+  flex: 1;
+  padding: 14px;
+  background: #dc2626;
+  color: white;
+  border: none;
+  border-radius: 10px;
+  font-size: 15px;
+  cursor: pointer;
+  transition: 0.3s;
+}
+
+.end-btn:hover {
+  background: #b91c1c;
+}
+
+/* SAVE BUTTON */
+.save-btn {
+  width: 100%;
+  padding: 14px;
+  background: #2563eb;
+  color: white;
+  border: none;
+  border-radius: 10px;
+  font-size: 16px;
+  cursor: pointer;
+  margin-top: 15px;
+}
+
+.save-btn:hover {
+  background: #1d4ed8;
+}
+
+/* DURATION BOX */
+.duration-box {
+  text-align: center;
+  margin-top: 15px;
+  padding: 12px;
+  background: #f1f5f9;
+  border-radius: 10px;
+  font-weight: bold;
+  color: #0f172a;
+}
+
+/* SMALL LABEL */
+.label {
+  font-size: 13px;
+  color: #64748b;
+  margin-bottom: 5px;
+}
+
+/* RESPONSIVE */
+@media (max-width: 768px) {
+
+  .row {
+    flex-direction: column;
+  }
+
+  .btn-row {
+    flex-direction: column;
+    gap: 15px;
+  }
+}
+
+
+.form-container {
+  max-width: 600px;
+  margin: auto;
+  background: white;
+  padding: 20px;
+  border-radius: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+label {
+  font-weight: bold;
+  font-size: 13px;
+  margin-top: 10px;
+}
+
+select, input {
+  padding: 10px;
+  border-radius: 8px;
+  border: 1px solid #ccc;
+}
+
+/* focus effect */
+select:focus, input:focus {
+  border-color: #2563eb;
+  outline: none;
+}
+
+.form-container {
+  max-width: 650px;
+  margin: auto;
+  background: white;
+  padding: 20px;
+  border-radius: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+label {
+  font-size: 13px;
+  font-weight: bold;
+  color: #334155;
+}
+
+input, select {
+  padding: 10px;
+  border: 1px solid #ccc;
+  border-radius: 8px;
+}
+
+/* SAVE BUTTON */
+.save-btn {
+  background: #2563eb;
+  color: white;
+  padding: 12px;
+  border: none;
+  border-radius: 10px;
+  cursor: pointer;
+}
+
+/* BUTTON ROW */
+.btn-row {
+  display: flex;
+  gap: 40px;
+  justify-content: center;
+}
+
+.start-btn {
+  flex: 1;
+  background: green;
+  color: white;
+  padding: 12px;
+  border-radius: 10px;
+  border: none;
+}
+
+.end-btn {
+  flex: 1;
+  background: red;
+  color: white;
+  padding: 12px;
+  border-radius: 10px;
+  border: none;
+}
+
+/* DURATION */
+.duration-box {
+  text-align: center;
+  background: #f1f5f9;
+  padding: 10px;
+  border-radius: 8px;
+  font-weight: bold;
+}

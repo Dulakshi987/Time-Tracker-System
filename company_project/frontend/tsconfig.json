@@ -19,5 +19,5 @@
     "strict": false,
     "ignoreDeprecations": "6.0"
   },
-  "include": ["src/**/*.jsx", "src/**/*.js"]
+  "include": ["src/**/*.jsx", "src/**/*.js", "src/services/Issue_Print_Portal/api.ts"]
 }

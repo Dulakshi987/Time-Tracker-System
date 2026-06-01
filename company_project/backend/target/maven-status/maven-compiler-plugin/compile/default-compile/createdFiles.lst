@@ -1,10 +1,10 @@
-com\utils\ExcelHelper.class
 com\repository\DocumentRepository.class
-com\service\DocumentService.class
 com\controller\Documents_Portal\ExcelController.class
 com\config\CorsConfig.class
-com\controller\Documents_Portal\DocumentController.class
 com\utils\ExcelHelper$1.class
 com\WarehouseApplication.class
 com\entity\Document.class
+com\utils\ExcelHelper.class
+com\service\DocumentService.class
+com\controller\Documents_Portal\DocumentController.class
 com\service\DocumentServiceImpl.class
