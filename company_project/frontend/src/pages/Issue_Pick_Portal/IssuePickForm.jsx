@@ -207,7 +207,9 @@ function DocumentCard({ doc, onStart, onHold, onEnd }) {
       {/* ── Head ── */}
       <div className="ip-card-head">
         <div>
-          <div className="ip-doc-no">Doc #{doc.id}</div>
+          <div className="ip-doc-no">
+            {doc.printDocumentNo ? doc.printDocumentNo : `Doc #${doc.id}`}
+          </div>
           <div style={{ color: jColor, fontWeight: 700, fontSize: "0.78rem", marginTop: 2 }}>
             {doc.jobType || "—"}
           </div>

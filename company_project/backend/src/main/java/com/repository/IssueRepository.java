@@ -13,4 +13,9 @@ public interface IssueRepository extends JpaRepository<Issue, Long> {
     List<Issue> findByCustomerName(String customerName);
     List<Issue> findByPrintStatus(String printStatus);
     List<Issue> findByCheckStatus(String checkStatus);
+    List<Issue> findByDeliveryStatus(String deliveryStatus);
+
+    List<Issue> findByCheckStatusOrderByIdAsc(String checkStatus);
+
+
 }

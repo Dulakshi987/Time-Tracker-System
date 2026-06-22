@@ -141,5 +141,49 @@ public class Issue {
     private String wrongMaterialSku;            // SKU or Description
  
     @Column(name = "wrong_material_qty")
-    private String wrongMaterialQty;    
+    private String wrongMaterialQty;   
+    
+    // ── Delivery Portal fields ────────────────────────────────────────
+    @Column(name = "delivery_status")
+    private String deliveryStatus;               // PENDING / IN_PROGRESS / ON_HOLD / COMPLETED / CANCELLED
+ 
+    @Column(name = "delivery_start_time")
+    private LocalDateTime deliveryStartTime;
+ 
+    @Column(name = "delivery_end_time")
+    private LocalDateTime deliveryEndTime;
+ 
+    @Column(name = "delivery_hold_time")
+    private LocalDateTime deliveryHoldTime;
+ 
+    @Column(name = "delivery_resume_time")
+    private LocalDateTime deliveryResumeTime;
+ 
+    @Column(name = "delivery_hold_reason")
+    private String deliveryHoldReason;
+ 
+    @Column(name = "delivery_held_by")
+    private String deliveryHeldBy;
+ 
+    @Column(name = "delivery_total_hold_seconds")
+    private Long deliveryTotalHoldSeconds;
+ 
+    @Column(name = "delivery_duration_seconds")
+    private Long deliveryDurationSeconds;
+ 
+    @Column(name = "delivered_by")
+    private String deliveredBy;
+ 
+    @Column(name = "delivery_vehicle_no")
+    private String deliveryVehicleNo;
+ 
+    // ── Delivery Cancel fields (NEW) ──────────────────────────────────
+    @Column(name = "delivery_cancel_reason")
+    private String deliveryCancelReason;
+ 
+    @Column(name = "delivery_cancelled_by")
+    private String deliveryCancelledBy;
+ 
+    @Column(name = "delivery_cancel_time")
+    private LocalDateTime deliveryCancelTime;
 }

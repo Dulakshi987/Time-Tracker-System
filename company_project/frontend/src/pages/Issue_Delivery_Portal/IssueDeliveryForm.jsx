@@ -1,17 +1,24 @@
 import { useState, useEffect, useCallback } from "react";
-// import DateRangeFilter from "./DateRangeFilter";
-import "./IssueCheck.css";
+import "./IssueDelivery.css";
 
-const API_BASE = "http://localhost:8080/api/check-portal";
+const API_BASE = "http://localhost:8080/api/delivery-portal";
 const AUTO_REFRESH = 10000;
 
-const PEOPLE_OPTIONS = ["Kavishaka", "Anushi", "Chaminda"];
+const PEOPLE_OPTIONS = ["Shanuka", "Chameera", "Randunu"];
 
 const HOLD_REASONS = [
-  "Printer not available",
-  "Material shortage",
+  "Vehicle not available",
+  "Customer not reachable",
+  "Address issue",
   "Waiting for approval",
-  "Machine breakdown",
+  "Other",
+];
+
+const CANCEL_REASONS = [
+  "Customer rejected",
+  "Wrong delivery address",
+  "Order cancelled by customer",
+  "Material damaged",
   "Other",
 ];
 
@@ -49,6 +56,7 @@ function jobTypeColor(jt) {
 
 function statusClass(s) {
   const v = (s || "").toLowerCase();
+  if (v.includes("cancel"))   return "cancelled";
   if (v.includes("hold"))     return "onhold";
   if (v.includes("progress")) return "inprogress";
   if (v.includes("complete") || v.includes("done")) return "completed";
@@ -57,7 +65,13 @@ function statusClass(s) {
 
 function statusLabel(s) {
   const c = statusClass(s);
-  return { pending: "Pending", inprogress: "In Progress", onhold: "On Hold", completed: "Check Done" }[c];
+  return {
+    pending: "Pending",
+    inprogress: "In Progress",
+    onhold: "On Hold",
+    completed: "Delivered",
+    cancelled: "Cancelled",
+  }[c];
 }
 
 // ── Generic Person Picker (with Other text input) ──────────────────────────
@@ -112,7 +126,7 @@ function HoldPopup({ onConfirm, onCancel }) {
     <div className="ip-popup-overlay">
       <div className="ip-popup">
         <div className="ip-popup-head">
-          <span>⏸ Hold Check</span>
+          <span>⏸ Hold Delivery</span>
           <button className="ip-popup-close" onClick={onCancel}>✕</button>
         </div>
         <p className="ip-popup-sub">Select a reason and who is putting this on hold</p>
@@ -158,87 +172,108 @@ function HoldPopup({ onConfirm, onCancel }) {
   );
 }
 
-// ── Popup: Check Done (Yes/No wrong material) ────────────────────────────────
+// ── Popup: Cancel Reason + Cancelled By ─────────────────────────────────────
 
-function CheckDonePopup({ onConfirm, onCancel }) {
-  const [checkedBy, setCheckedBy] = useState("");
-  const [hasWrong, setHasWrong]   = useState(null); // "YES" | "NO" | null
-  const [sku, setSku]             = useState("");
-  const [qty, setQty]             = useState("");
+function CancelPopup({ onConfirm, onCancel }) {
+  const [reason, setReason]   = useState("");
+  const [otherReason, setOtherReason] = useState("");
+  const [cancelledBy, setCancelledBy] = useState("");
 
-  const needsDetails = hasWrong === "YES";
-  const canConfirm =
-    !!checkedBy &&
-    hasWrong !== null &&
-    (!needsDetails || (sku.trim().length > 0 && qty.trim().length > 0));
-
-  const handleConfirm = () => {
-    onConfirm(checkedBy, hasWrong, needsDetails ? sku.trim() : "", needsDetails ? qty.trim() : "");
-  };
+  const isOtherReason = reason === "Other";
+  const finalReason   = isOtherReason ? otherReason.trim() : reason;
+  const canConfirm    = !!finalReason && !!cancelledBy;
 
   return (
     <div className="ip-popup-overlay">
       <div className="ip-popup">
         <div className="ip-popup-head">
-          <span>✅ Check Done</span>
+          <span>✕ Cancel Delivery</span>
           <button className="ip-popup-close" onClick={onCancel}>✕</button>
         </div>
-        <p className="ip-popup-sub">Confirm who checked this and if there's a material issue</p>
+        <p className="ip-popup-sub">Select a reason and who is cancelling this delivery</p>
 
-        <span className="ip-popup-label">Checked By</span>
+        <span className="ip-popup-label">Cancel Reason</span>
+        <div className="ip-popup-options" style={{ marginBottom: 16 }}>
+          {CANCEL_REASONS.map(r => (
+            <button
+              key={r}
+              className={`ip-popup-option ${reason === r ? "selected" : ""}`}
+              onClick={() => setReason(r)}
+            >
+              {r === "Other" ? "✏️ " : "✕ "}{r}
+            </button>
+          ))}
+          {isOtherReason && (
+            <input
+              className="ip-popup-input"
+              type="text"
+              placeholder="Type reason..."
+              value={otherReason}
+              onChange={e => setOtherReason(e.target.value)}
+              autoFocus
+            />
+          )}
+        </div>
+
+        <span className="ip-popup-label">Cancelled By</span>
+        <PersonPicker value={cancelledBy} onChange={setCancelledBy} />
+
+        <div className="ip-popup-foot">
+          <button className="ip-btn ip-btn-outline" onClick={onCancel}>Back</button>
+          <button
+            className="ip-btn ip-btn-cancel-confirm"
+            disabled={!canConfirm}
+            onClick={() => onConfirm(finalReason, cancelledBy)}
+          >
+            ✕ Confirm Cancel
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Popup: Delivery Done (Delivered By) ──────────────────────────────────────
+
+function DeliveryDonePopup({ onConfirm, onCancel }) {
+  const [deliveredBy, setDeliveredBy] = useState("");
+  const [vehicleNo, setVehicleNo]     = useState("");
+
+  const canConfirm = !!deliveredBy && vehicleNo.trim().length > 0;
+
+  return (
+    <div className="ip-popup-overlay">
+      <div className="ip-popup">
+        <div className="ip-popup-head">
+          <span>🚚 Delivery Done</span>
+          <button className="ip-popup-close" onClick={onCancel}>✕</button>
+        </div>
+        <p className="ip-popup-sub">Select who delivered this document</p>
+
+        <span className="ip-popup-label">Delivered By</span>
         <div style={{ marginBottom: 16 }}>
-          <PersonPicker value={checkedBy} onChange={setCheckedBy} />
+          <PersonPicker value={deliveredBy} onChange={setDeliveredBy} />
         </div>
 
-        <span className="ip-popup-label">Wrong material collected?</span>
-        <div className="ip-yesno-row" style={{ marginBottom: needsDetails ? 16 : 0 }}>
-          <button
-            className={`ip-yesno-btn yes ${hasWrong === "YES" ? "selected" : ""}`}
-            onClick={() => setHasWrong("YES")}
-          >
-            ⚠️ Yes
-          </button>
-          <button
-            className={`ip-yesno-btn no ${hasWrong === "NO" ? "selected" : ""}`}
-            onClick={() => { setHasWrong("NO"); setSku(""); setQty(""); }}
-          >
-            ✅ No
-          </button>
+        <div className="ip-popup-field">
+          <span className="ip-popup-label">Vehicle Number</span>
+          <input
+            className="ip-popup-text-input"
+            type="text"
+            placeholder="Enter vehicle number..."
+            value={vehicleNo}
+            onChange={e => setVehicleNo(e.target.value)}
+          />
         </div>
-
-        {needsDetails && (
-          <>
-            <div className="ip-popup-field" style={{ marginTop: 16 }}>
-              <span className="ip-popup-label">SKU / Description</span>
-              <input
-                className="ip-popup-text-input"
-                type="text"
-                placeholder="Enter SKU or description..."
-                value={sku}
-                onChange={e => setSku(e.target.value)}
-              />
-            </div>
-            <div className="ip-popup-field">
-              <span className="ip-popup-label">Quantity</span>
-              <input
-                className="ip-popup-text-input"
-                type="text"
-                placeholder="Enter quantity..."
-                value={qty}
-                onChange={e => setQty(e.target.value)}
-              />
-            </div>
-          </>
-        )}
 
         <div className="ip-popup-foot">
           <button className="ip-btn ip-btn-outline" onClick={onCancel}>Cancel</button>
           <button
             className="ip-btn ip-btn-done"
             disabled={!canConfirm}
-            onClick={handleConfirm}
+            onClick={() => onConfirm(deliveredBy, vehicleNo.trim())}
           >
-            ✅ Check Done
+            ✅ Delivery Done
           </button>
         </div>
       </div>
@@ -248,14 +283,10 @@ function CheckDonePopup({ onConfirm, onCancel }) {
 
 // ── Single Document Card ─────────────────────────────────────────────────────
 
-function DocumentCard({ doc, onStart, onHold, onEnd }) {
-  const sc        = statusClass(doc.checkStatus);
-  const jColor    = jobTypeColor(doc.jobType);
-  const isPending = sc === "pending";
-  const isStarted = sc === "inprogress";
-  const isOnHold  = sc === "onhold";
-  const isDone    = sc === "completed";
-  const hasWrong  = (doc.hasWrongMaterial || "").toUpperCase() === "YES";
+function DocumentCard({ doc, onDelivered, onHold, onCancelled }) {
+  const sc          = statusClass(doc.deliveryStatus);
+  const jColor      = jobTypeColor(doc.jobType);
+  const isFinal     = sc === "completed" || sc === "cancelled"; // locked once delivered or cancelled
 
   return (
     <div className={`ip-card status-${sc}`}>
@@ -269,7 +300,7 @@ function DocumentCard({ doc, onStart, onHold, onEnd }) {
             {doc.jobType || "—"}
           </div>
         </div>
-        <span className={`ip-badge ${sc}`}>{statusLabel(doc.checkStatus)}</span>
+        <span className={`ip-badge ${sc}`}>{statusLabel(doc.deliveryStatus)}</span>
       </div>
 
       {/* ── Body ── */}
@@ -286,9 +317,21 @@ function DocumentCard({ doc, onStart, onHold, onEnd }) {
           <span className="ip-detail-label">Reservation No</span>
           <span className="ip-detail-value">{doc.reservationNo || "—"}</span>
         </div>
-        <div className="ip-detail-row">
-          <span className="ip-detail-label">Entered By</span>
-          <span className="ip-detail-value">{doc.enteredBy || "—"}</span>
+
+        {/* Trail: Print By / Picked By / Checked By */}
+        <div className="ip-trail-box">
+          <div className="ip-trail-row">
+            <span>🖨️ Print By</span>
+            <span>{doc.printedBy || "—"}</span>
+          </div>
+          <div className="ip-trail-row">
+            <span>📦 Picked By</span>
+            <span>{doc.pickedBy || "—"}</span>
+          </div>
+          <div className="ip-trail-row">
+            <span>✅ Checked By</span>
+            <span>{doc.checkedBy || "—"}</span>
+          </div>
         </div>
 
         <div className="ip-times">
@@ -303,77 +346,78 @@ function DocumentCard({ doc, onStart, onHold, onEnd }) {
         </div>
 
         {/* Hold info banner */}
-        {(isOnHold || doc.checkHoldReason) && (
+        {(sc === "onhold" || doc.deliveryHoldReason) && (
           <div className="ip-hold-box">
             <div className="ip-hold-row">
               <span>⏸ Hold Reason</span>
-              <span>{doc.checkHoldReason || "—"}</span>
+              <span>{doc.deliveryHoldReason || "—"}</span>
             </div>
             <div className="ip-hold-row">
               <span>Held By</span>
-              <span>👤 {doc.checkHeldBy || "—"}</span>
+              <span>👤 {doc.deliveryHeldBy || "—"}</span>
             </div>
             <div className="ip-hold-row">
               <span>Held At</span>
-              <span>{formatDateTime(doc.checkHoldTime)}</span>
+              <span>{formatDateTime(doc.deliveryHoldTime)}</span>
             </div>
           </div>
         )}
 
-        {/* Check Done summary */}
-        {isDone && (
-          <>
-            {hasWrong ? (
-              <div className="ip-wrong-material-box">
-                <div className="ip-wrong-material-row">
-                  <span>⚠️ Wrong Material</span>
-                  <span>{doc.wrongMaterialSku || "—"}</span>
-                </div>
-                <div className="ip-wrong-material-row">
-                  <span>Quantity</span>
-                  <span>{doc.wrongMaterialQty || "—"}</span>
-                </div>
-              </div>
-            ) : (
-              <div className="ip-no-issue-box">✅ No material issues</div>
-            )}
-
-            <div className="ip-print-done-box">
-              <div className="ip-print-done-row">
-                <span>Checked By</span>
-                <span>👤 {doc.checkedBy || "—"}</span>
-              </div>
-              <div className="ip-print-done-row">
-                <span>Duration</span>
-                <span>⏱ {formatDuration(doc.checkDurationSeconds)}</span>
-              </div>
+        {/* Cancelled info banner */}
+        {sc === "cancelled" && (
+          <div className="ip-cancel-box">
+            <div className="ip-cancel-row">
+              <span>✕ Cancel Reason</span>
+              <span>{doc.deliveryCancelReason || "—"}</span>
             </div>
-          </>
+            <div className="ip-cancel-row">
+              <span>Cancelled By</span>
+              <span>👤 {doc.deliveryCancelledBy || "—"}</span>
+            </div>
+            <div className="ip-cancel-row">
+              <span>Cancelled At</span>
+              <span>{formatDateTime(doc.deliveryCancelTime)}</span>
+            </div>
+          </div>
+        )}
+
+        {/* Delivery Done summary */}
+        {sc === "completed" && (
+          <div className="ip-print-done-box">
+            <div className="ip-print-done-row">
+              <span>Delivered By</span>
+              <span>👤 {doc.deliveredBy || "—"}</span>
+            </div>
+            <div className="ip-print-done-row">
+              <span>Vehicle No</span>
+              <span>🚐 {doc.deliveryVehicleNo || "—"}</span>
+            </div>
+          </div>
         )}
       </div>
 
       {/* ── Footer Buttons ── */}
       <div className="ip-card-foot">
         <button
-          className="ip-btn ip-btn-start"
-          disabled={!(isPending || isOnHold)}
-          onClick={() => onStart(doc.id)}
+          className="ip-btn ip-btn-end"
+          disabled={isFinal}
+          onClick={() => onDelivered(doc.id)}
         >
-          {isOnHold ? "▶ Resume" : "▶ Start"}
+          ✅ Delivered
         </button>
         <button
           className="ip-btn ip-btn-hold"
-          disabled={!isStarted}
+          disabled={isFinal}
           onClick={() => onHold(doc.id)}
         >
           ⏸ Hold
         </button>
         <button
-          className="ip-btn ip-btn-end"
-          disabled={!(isStarted || isOnHold)}
-          onClick={() => onEnd(doc.id)}
+          className="ip-btn ip-btn-cancel"
+          disabled={isFinal}
+          onClick={() => onCancelled(doc.id)}
         >
-          ■ End
+          ✕ Cancelled
         </button>
       </div>
     </div>
@@ -406,22 +450,20 @@ function SkeletonCard() {
 
 // ── Main Component ───────────────────────────────────────────────────────────
 
-export default function IssueCheckForm() {
+export default function IssueDeliveryForm() {
   const [documents,    setDocuments]    = useState([]);
   const [loading,      setLoading]      = useState(true);
   const [error,        setError]        = useState(null);
   const [search,       setSearch]       = useState("");
   const [filterType,   setFilterType]   = useState("ALL");
   const [filterStatus, setFilterStatus] = useState("ALL");
-  const [fromDate,     setFromDate]     = useState("");
-  const [toDate,       setToDate]       = useState("");
   const [lastUpdated,  setLastUpdated]  = useState(null);
   const [refreshing,   setRefreshing]   = useState(false);
 
-  const [activePopup,  setActivePopup]  = useState(null); // "hold" | "end" | null
+  const [activePopup,  setActivePopup]  = useState(null); // "hold" | "delivered" | "cancel" | null
   const [activeId,     setActiveId]     = useState(null);
 
-  // ── Fetch ──
+  // ── Fetch — only Check Done documents come back from this endpoint ──
   const fetchDocuments = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
     else setRefreshing(true);
@@ -447,18 +489,9 @@ export default function IssueCheckForm() {
     return () => clearInterval(id);
   }, [fetchDocuments]);
 
-  // ── Start / Resume ──
-  const handleStart = async (id) => {
-    try {
-      await fetch(`${API_BASE}/${id}/start`, { method: "PUT" });
-      fetchDocuments(true);
-    } catch (err) {
-      alert("Start failed: " + err.message);
-    }
-  };
-
-  const handleHoldClick = (id) => { setActiveId(id); setActivePopup("hold"); };
-  const handleEndClick  = (id) => { setActiveId(id); setActivePopup("end"); };
+  const handleDeliveredClick = (id) => { setActiveId(id); setActivePopup("delivered"); };
+  const handleHoldClick      = (id) => { setActiveId(id); setActivePopup("hold"); };
+  const handleCancelClick    = (id) => { setActiveId(id); setActivePopup("cancel"); };
   const closePopup = () => { setActivePopup(null); setActiveId(null); };
 
   const handleHoldConfirm = async (holdReason, heldBy) => {
@@ -475,48 +508,57 @@ export default function IssueCheckForm() {
     }
   };
 
-  const handleCheckDoneConfirm = async (checkedBy, hasWrongMaterial, wrongMaterialSku, wrongMaterialQty) => {
+  const handleDeliveryDoneConfirm = async (deliveredBy, vehicleNo) => {
     closePopup();
     try {
       await fetch(`${API_BASE}/${activeId}/end`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ checkedBy, hasWrongMaterial, wrongMaterialSku, wrongMaterialQty }),
+        body: JSON.stringify({ deliveredBy, vehicleNo }),
       });
       fetchDocuments(true);
     } catch (err) {
-      alert("Check Done failed: " + err.message);
+      alert("Delivery Done failed: " + err.message);
+    }
+  };
+
+  const handleCancelConfirm = async (cancelReason, cancelledBy) => {
+    closePopup();
+    try {
+      await fetch(`${API_BASE}/${activeId}/cancel`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cancelReason, cancelledBy }),
+      });
+      fetchDocuments(true);
+    } catch (err) {
+      alert("Cancel failed: " + err.message);
     }
   };
 
   // ── Filters ──
   const jobTypes = ["ALL", ...new Set(documents.map(d => d.jobType).filter(Boolean))];
-  const statuses = ["ALL", ...new Set(documents.map(d => d.checkStatus).filter(Boolean))];
+  const statuses = ["ALL", ...new Set(documents.map(d => d.deliveryStatus).filter(Boolean))];
 
   const visible = documents.filter(doc => {
     const q = search.toLowerCase();
     const matchSearch = !q || [
       String(doc.id), doc.customerName, doc.jobwbs,
-      doc.reservationNo, doc.enteredBy, doc.jobType,
+      doc.reservationNo, doc.enteredBy, doc.jobType, doc.printDocumentNo,
     ].some(v => (v || "").toLowerCase().includes(q));
 
     const matchType   = filterType   === "ALL" || doc.jobType === filterType;
-    const matchStatus = filterStatus === "ALL" || doc.checkStatus === filterStatus;
+    const matchStatus = filterStatus === "ALL" || doc.deliveryStatus === filterStatus;
 
-    const docDate = doc.requestDate;
-    const matchFrom = !fromDate || (docDate && docDate >= fromDate);
-    const matchTo   = !toDate   || (docDate && docDate <= toDate);
-    const matchDate = matchFrom && matchTo;
-
-    return matchSearch && matchType && matchStatus && matchDate;
+    return matchSearch && matchType && matchStatus;
   });
 
   // Stats
   const total     = documents.length;
-  const pending   = documents.filter(d => statusClass(d.checkStatus) === "pending").length;
-  const inProg    = documents.filter(d => statusClass(d.checkStatus) === "inprogress").length;
-  const onHold    = documents.filter(d => statusClass(d.checkStatus) === "onhold").length;
-  const completed = documents.filter(d => statusClass(d.checkStatus) === "completed").length;
+  const pending   = documents.filter(d => statusClass(d.deliveryStatus) === "pending").length;
+  const onHold    = documents.filter(d => statusClass(d.deliveryStatus) === "onhold").length;
+  const completed = documents.filter(d => statusClass(d.deliveryStatus) === "completed").length;
+  const cancelled = documents.filter(d => statusClass(d.deliveryStatus) === "cancelled").length;
 
   return (
     <div className="ip-page">
@@ -524,16 +566,19 @@ export default function IssueCheckForm() {
       {activePopup === "hold" && (
         <HoldPopup onConfirm={handleHoldConfirm} onCancel={closePopup} />
       )}
-      {activePopup === "end" && (
-        <CheckDonePopup onConfirm={handleCheckDoneConfirm} onCancel={closePopup} />
+      {activePopup === "delivered" && (
+        <DeliveryDonePopup onConfirm={handleDeliveryDoneConfirm} onCancel={closePopup} />
+      )}
+      {activePopup === "cancel" && (
+        <CancelPopup onConfirm={handleCancelConfirm} onCancel={closePopup} />
       )}
 
       {/* ── Header ── */}
       <div className="ip-header">
         <div className="ip-header-left">
-          <h1>✅ Check Portal</h1>
+          <h1>🚚 Delivery Portal</h1>
           <p>
-            Document Cart View
+            Check Done documents only
             {lastUpdated && (
               <span style={{ marginLeft: 10, fontSize: "0.75rem", color: "#3b82f6" }}>
                 {refreshing ? "⟳ Refreshing..." : `Updated: ${lastUpdated.toLocaleTimeString()}`}
@@ -557,7 +602,7 @@ export default function IssueCheckForm() {
           <input
             className="ip-search"
             type="text"
-            placeholder="Search by ID, Customer, WBS, Reservation..."
+            placeholder="Search by ID, Customer, WBS, Reservation, Print Doc No..."
             value={search}
             onChange={e => setSearch(e.target.value)}
           />
@@ -568,21 +613,15 @@ export default function IssueCheckForm() {
         <select className="ip-filter-select" value={filterStatus} onChange={e => setFilterStatus(e.target.value)}>
           {statuses.map(s => <option key={s} value={s}>{s === "ALL" ? "All Status" : s}</option>)}
         </select>
-        {/* <DateRangeFilter
-          fromDate={fromDate}
-          toDate={toDate}
-          onChange={(f, t) => { setFromDate(f); setToDate(t); }}
-          onClear={() => { setFromDate(""); setToDate(""); }}
-        /> */}
       </div>
 
       {/* ── Stats ── */}
       <div className="ip-stats">
         <div className="ip-stat-chip blue">Total <strong>{total}</strong></div>
         <div className="ip-stat-chip"><strong style={{color:"#f59e0b"}}>{pending}</strong> Pending</div>
-        <div className="ip-stat-chip"><strong style={{color:"#3b82f6"}}>{inProg}</strong> In Progress</div>
         <div className="ip-stat-chip"><strong style={{color:"#fb923c"}}>{onHold}</strong> On Hold</div>
-        <div className="ip-stat-chip green">Check Done <strong>{completed}</strong></div>
+        <div className="ip-stat-chip green">Delivered <strong>{completed}</strong></div>
+        <div className="ip-stat-chip"><strong style={{color:"#ef4444"}}>{cancelled}</strong> Cancelled</div>
         <div className="ip-stat-chip">Showing <strong style={{color:"#a78bfa"}}>{visible.length}</strong> of {total}</div>
       </div>
 
@@ -608,16 +647,20 @@ export default function IssueCheckForm() {
         ) : visible.length === 0 ? (
           <div className="ip-empty">
             <div className="ip-empty-icon">📭</div>
-            <p>No documents found{search ? ` for "${search}"` : ""}.</p>
+            <p>
+              {documents.length === 0
+                ? "No Check Done documents yet. Complete checks first."
+                : `No documents found${search ? ` for "${search}"` : ""}.`}
+            </p>
           </div>
         ) : (
           visible.map(doc => (
             <DocumentCard
               key={doc.id}
               doc={doc}
-              onStart={handleStart}
+              onDelivered={handleDeliveredClick}
               onHold={handleHoldClick}
-              onEnd={handleEndClick}
+              onCancelled={handleCancelClick}
             />
           ))
         )}
