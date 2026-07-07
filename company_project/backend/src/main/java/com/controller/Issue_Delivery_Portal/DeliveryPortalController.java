@@ -95,4 +95,22 @@ public class DeliveryPortalController {
         deliveryPortalService.delete(id);
         return ResponseEntity.noContent().build();
     }
+
+    @PutMapping("/{id}/confirm-delivery")
+public ResponseEntity<Issue> confirmDelivery(@PathVariable Long id, @RequestBody Map<String, String> body) {
+    try {
+        return ResponseEntity.ok(deliveryPortalService.confirmDelivery(id, body.getOrDefault("confirmedBy", "")));
+    } catch (RuntimeException e) {
+        return ResponseEntity.notFound().build();
+    }
+}
+
+@PutMapping("/{id}/confirm-cancel")
+public ResponseEntity<Issue> confirmCancel(@PathVariable Long id, @RequestBody Map<String, String> body) {
+    try {
+        return ResponseEntity.ok(deliveryPortalService.confirmCancel(id, body.getOrDefault("confirmedBy", "")));
+    } catch (RuntimeException e) {
+        return ResponseEntity.notFound().build();
+    }
+}
 }

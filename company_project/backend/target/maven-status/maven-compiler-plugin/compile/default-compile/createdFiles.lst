@@ -4,7 +4,5 @@ com\config\CorsConfig.class
 com\utils\ExcelHelper$1.class
 com\WarehouseApplication.class
 com\entity\Document.class
-com\repository\IssueRepository.class
-com\entity\Issue.class
 com\utils\ExcelHelper.class
 com\controller\Documents_Portal\DocumentController.class

@@ -74,4 +74,6 @@ public class Document {
 
     @Column(name = "created_datetime")
     private LocalDateTime createdDatetime;
+
+    
 }

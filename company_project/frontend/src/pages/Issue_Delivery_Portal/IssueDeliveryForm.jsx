@@ -35,12 +35,32 @@ function formatDateTime(dt) {
   });
 }
 
-function formatDuration(seconds) {
-  if (seconds === null || seconds === undefined) return "—";
-  const h = Math.floor(seconds / 3600);
-  const m = Math.floor((seconds % 3600) / 60);
-  const s = seconds % 60;
-  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+const OVERDUE_DAYS = 30;
+
+// NOTE: assumes the backend sends a print timestamp as `printedDate` (or
+// `printDate`). If your Issue entity uses a different field name, change
+// PRINT_DATE_FIELDS below to match — the first present field wins.
+const PRINT_DATE_FIELDS = ["printedDate", "printDate", "printDateTime"];
+
+function getPrintDateTime(doc) {
+  for (const f of PRINT_DATE_FIELDS) {
+    if (doc[f]) return doc[f];
+  }
+  // fallback: combine requestDate + requestTime if no explicit print timestamp exists
+  if (doc.requestDate) {
+    return `${doc.requestDate}T${doc.requestTime || "00:00:00"}`;
+  }
+  return null;
+}
+
+function daysPending(doc) {
+  const raw = getPrintDateTime(doc);
+  if (!raw) return null;
+  const printed = new Date(raw);
+  if (isNaN(printed.getTime())) return null;
+  const now = new Date();
+  const diffMs = now.getTime() - printed.getTime();
+  return Math.max(0, Math.floor(diffMs / (1000 * 60 * 60 * 24)));
 }
 
 function jobTypeColor(jt) {
@@ -281,41 +301,35 @@ function DeliveryDonePopup({ onConfirm, onCancel }) {
   );
 }
 
-// ── Single Document Card ─────────────────────────────────────────────────────
+// ── Popup: View full document details ───────────────────────────────────────
 
-function DocumentCard({ doc, onDelivered, onHold, onCancelled }) {
-  const sc          = statusClass(doc.deliveryStatus);
-  const jColor      = jobTypeColor(doc.jobType);
-  const isFinal     = sc === "completed" || sc === "cancelled"; // locked once delivered or cancelled
+function ViewPopup({ doc, onClose }) {
+  const sc = statusClass(doc.deliveryStatus);
 
   return (
-    <div className={`ip-card status-${sc}`}>
-      {/* ── Head ── */}
-      <div className="ip-card-head">
-        <div>
-          <div className="ip-doc-no">
-            {doc.printDocumentNo ? doc.printDocumentNo : `Doc #${doc.id}`}
-          </div>
-          <div style={{ color: jColor, fontWeight: 700, fontSize: "0.78rem", marginTop: 2 }}>
-            {doc.jobType || "—"}
-          </div>
+    <div className="ip-popup-overlay" onClick={onClose}>
+      <div className="ip-popup ip-view-popup" onClick={e => e.stopPropagation()}>
+        <div className="ip-popup-head">
+          <span>📄 {doc.printDocumentNo ? doc.printDocumentNo : `Doc #${doc.id}`}</span>
+          <button className="ip-popup-close" onClick={onClose}>✕</button>
         </div>
-        <span className={`ip-badge ${sc}`}>{statusLabel(doc.deliveryStatus)}</span>
-      </div>
+        <p className="ip-popup-sub">Full document details</p>
 
-      {/* ── Body ── */}
-      <div className="ip-card-body">
-        <div className="ip-detail-row">
-          <span className="ip-detail-label">Customer</span>
-          <span className="ip-detail-value">{doc.customerName || "—"}</span>
-        </div>
-        <div className="ip-detail-row">
-          <span className="ip-detail-label">Job WBS</span>
-          <span className="ip-detail-value">{doc.jobwbs || "—"}</span>
-        </div>
-        <div className="ip-detail-row">
-          <span className="ip-detail-label">Reservation No</span>
-          <span className="ip-detail-value">{doc.reservationNo || "—"}</span>
+        <div className="ip-view-grid">
+          <div className="ip-detail-row">
+            <span className="ip-detail-label">Job Type</span>
+            <span className="ip-detail-value" style={{ color: jobTypeColor(doc.jobType), fontWeight: 700 }}>
+              {doc.jobType || "—"}
+            </span>
+          </div>
+          <div className="ip-detail-row">
+            <span className="ip-detail-label">Reservation No</span>
+            <span className="ip-detail-value">{doc.reservationNo || "—"}</span>
+          </div>
+          <div className="ip-detail-row">
+            <span className="ip-detail-label">Entered By</span>
+            <span className="ip-detail-value">{doc.enteredBy || "—"}</span>
+          </div>
         </div>
 
         {/* Trail: Print By / Picked By / Checked By */}
@@ -331,17 +345,6 @@ function DocumentCard({ doc, onDelivered, onHold, onCancelled }) {
           <div className="ip-trail-row">
             <span>✅ Checked By</span>
             <span>{doc.checkedBy || "—"}</span>
-          </div>
-        </div>
-
-        <div className="ip-times">
-          <div className="ip-time-row">
-            <span>Request Date</span>
-            <span>{formatDate(doc.requestDate)}</span>
-          </div>
-          <div className="ip-time-row">
-            <span>Request Time</span>
-            <span>{formatTime(doc.requestTime)}</span>
           </div>
         </div>
 
@@ -363,8 +366,8 @@ function DocumentCard({ doc, onDelivered, onHold, onCancelled }) {
           </div>
         )}
 
-        {/* Cancelled info banner */}
-        {sc === "cancelled" && (
+        {/* Cancelled info banner — stays visible as history even if status later changes */}
+        {doc.deliveryCancelReason && (
           <div className="ip-cancel-box">
             <div className="ip-cancel-row">
               <span>✕ Cancel Reason</span>
@@ -381,8 +384,8 @@ function DocumentCard({ doc, onDelivered, onHold, onCancelled }) {
           </div>
         )}
 
-        {/* Delivery Done summary */}
-        {sc === "completed" && (
+        {/* Delivery Done summary — stays visible as history even if status later changes */}
+        {doc.deliveredBy && (
           <div className="ip-print-done-box">
             <div className="ip-print-done-row">
               <span>Delivered By</span>
@@ -394,57 +397,86 @@ function DocumentCard({ doc, onDelivered, onHold, onCancelled }) {
             </div>
           </div>
         )}
-      </div>
 
-      {/* ── Footer Buttons ── */}
-      <div className="ip-card-foot">
-        <button
-          className="ip-btn ip-btn-end"
-          disabled={isFinal}
-          onClick={() => onDelivered(doc.id)}
-        >
-          ✅ Delivered
-        </button>
-        <button
-          className="ip-btn ip-btn-hold"
-          disabled={isFinal}
-          onClick={() => onHold(doc.id)}
-        >
-          ⏸ Hold
-        </button>
-        <button
-          className="ip-btn ip-btn-cancel"
-          disabled={isFinal}
-          onClick={() => onCancelled(doc.id)}
-        >
-          ✕ Cancelled
-        </button>
+        <div className="ip-popup-foot">
+          <button className="ip-btn ip-btn-outline" onClick={onClose}>Close</button>
+        </div>
       </div>
     </div>
   );
 }
 
-// ── Skeleton Card ────────────────────────────────────────────────────────────
+// ── Table Row ─────────────────────────────────────────────────────────────
 
-function SkeletonCard() {
+function DocumentRow({ doc, onView, onDelivered, onHold, onCancelled }) {
+  const sc      = statusClass(doc.deliveryStatus);
+  const isFinal = sc === "completed"; // only locked once delivered — hold & cancel stay editable
+  const pending = daysPending(doc);
+  const isOverdue = pending !== null && pending > OVERDUE_DAYS && sc !== "completed";
+
   return (
-    <div className="ip-card status-pending">
-      <div className="ip-card-head">
-        <div>
-          <div className="ip-skeleton" style={{ width: 100, height: 15, marginBottom: 6 }} />
-          <div className="ip-skeleton" style={{ width: 70, height: 11 }} />
+    <tr className={`ip-row status-${sc} ${isOverdue ? "overdue" : ""}`}>
+      <td className="ip-td-id">{doc.id}</td>
+      <td>{doc.jobwbs || "—"}</td>
+      <td className="ip-td-docno">{doc.printDocumentNo ? doc.printDocumentNo : `Doc #${doc.id}`}</td>
+      <td>{doc.customerName || "—"}</td>
+      <td className="ip-td-datetime">
+        {formatDate(doc.requestDate)} <span className="ip-td-time">{formatTime(doc.requestTime)}</span>
+      </td>
+      <td>
+        {pending === null ? "—" : (
+          <span className={`ip-pending-badge ${isOverdue ? "overdue" : ""}`}>
+            {isOverdue && "⚠ "}{pending} {pending === 1 ? "day" : "days"}
+          </span>
+        )}
+      </td>
+      <td><span className={`ip-badge ${sc}`}>{statusLabel(doc.deliveryStatus)}</span></td>
+      <td>
+        <button className="ip-btn-view" onClick={() => onView(doc)}>👁 View</button>
+      </td>
+      <td>
+        <div className="ip-row-actions">
+          <button
+            className={`ip-mini-btn ip-mini-end ${sc === "completed" ? "active" : ""}`}
+            disabled={isFinal}
+            title="Delivered"
+            onClick={() => onDelivered(doc.id)}
+          >
+            ✅
+          </button>
+          <button
+            className={`ip-mini-btn ip-mini-hold ${sc === "onhold" ? "active" : ""}`}
+            disabled={isFinal}
+            title="Hold"
+            onClick={() => onHold(doc.id)}
+          >
+            ⏸
+          </button>
+          <button
+            className={`ip-mini-btn ip-mini-cancel ${sc === "cancelled" ? "active" : ""}`}
+            disabled={isFinal}
+            title="Cancelled"
+            onClick={() => onCancelled(doc.id)}
+          >
+            ✕
+          </button>
         </div>
-        <div className="ip-skeleton" style={{ width: 72, height: 22, borderRadius: 12 }} />
-      </div>
-      <div className="ip-card-body">
-        {[1,2,3,4].map(i => (
-          <div key={i} className="ip-detail-row">
-            <div className="ip-skeleton" style={{ width: 90, height: 11 }} />
-            <div className="ip-skeleton" style={{ width: 130, height: 11 }} />
-          </div>
-        ))}
-      </div>
-    </div>
+      </td>
+    </tr>
+  );
+}
+
+// ── Skeleton Row ─────────────────────────────────────────────────────────────
+
+function SkeletonRow() {
+  return (
+    <tr className="ip-row">
+      {Array.from({ length: 9 }).map((_, i) => (
+        <td key={i}>
+          <div className="ip-skeleton" style={{ width: "80%", height: 12 }} />
+        </td>
+      ))}
+    </tr>
   );
 }
 
@@ -462,6 +494,7 @@ export default function IssueDeliveryForm() {
 
   const [activePopup,  setActivePopup]  = useState(null); // "hold" | "delivered" | "cancel" | null
   const [activeId,     setActiveId]     = useState(null);
+  const [viewDoc,       setViewDoc]     = useState(null);
 
   // ── Fetch — only Check Done documents come back from this endpoint ──
   const fetchDocuments = useCallback(async (silent = false) => {
@@ -493,6 +526,13 @@ export default function IssueDeliveryForm() {
   const handleHoldClick      = (id) => { setActiveId(id); setActivePopup("hold"); };
   const handleCancelClick    = (id) => { setActiveId(id); setActivePopup("cancel"); };
   const closePopup = () => { setActivePopup(null); setActiveId(null); };
+
+  // keep the view popup's data in sync after a refresh
+  useEffect(() => {
+    if (!viewDoc) return;
+    const fresh = documents.find(d => d.id === viewDoc.id);
+    if (fresh) setViewDoc(fresh);
+  }, [documents]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleHoldConfirm = async (holdReason, heldBy) => {
     closePopup();
@@ -560,6 +600,12 @@ export default function IssueDeliveryForm() {
   const completed = documents.filter(d => statusClass(d.deliveryStatus) === "completed").length;
   const cancelled = documents.filter(d => statusClass(d.deliveryStatus) === "cancelled").length;
 
+  const overdueDocs  = documents.filter(d => {
+    const p = daysPending(d);
+    return p !== null && p > OVERDUE_DAYS && statusClass(d.deliveryStatus) !== "completed";
+  });
+  const overdueCount = overdueDocs.length;
+
   return (
     <div className="ip-page">
 
@@ -571,6 +617,9 @@ export default function IssueDeliveryForm() {
       )}
       {activePopup === "cancel" && (
         <CancelPopup onConfirm={handleCancelConfirm} onCancel={closePopup} />
+      )}
+      {viewDoc && (
+        <ViewPopup doc={viewDoc} onClose={() => setViewDoc(null)} />
       )}
 
       {/* ── Header ── */}
@@ -594,6 +643,22 @@ export default function IssueDeliveryForm() {
           ↻ Refresh
         </button>
       </div>
+
+      {/* ── Overdue notification ── */}
+      {overdueCount > 0 && (
+        <div className="ip-overdue-banner">
+          <span className="ip-overdue-banner-icon">⚠</span>
+          <span>
+            <strong>{overdueCount}</strong> {overdueCount === 1 ? "document has" : "documents have"} been pending delivery for more than {OVERDUE_DAYS} days
+          </span>
+          <button
+            className="ip-overdue-banner-action"
+            onClick={() => { setFilterStatus("ALL"); setSearch(""); }}
+          >
+            View all
+          </button>
+        </div>
+      )}
 
       {/* ── Toolbar ── */}
       <div className="ip-toolbar">
@@ -640,30 +705,52 @@ export default function IssueDeliveryForm() {
         </div>
       )}
 
-      {/* ── Grid ── */}
-      <div className="ip-grid">
-        {loading ? (
-          [1,2,3,4,5,6].map(i => <SkeletonCard key={i} />)
-        ) : visible.length === 0 ? (
-          <div className="ip-empty">
-            <div className="ip-empty-icon">📭</div>
-            <p>
-              {documents.length === 0
-                ? "No Check Done documents yet. Complete checks first."
-                : `No documents found${search ? ` for "${search}"` : ""}.`}
-            </p>
-          </div>
-        ) : (
-          visible.map(doc => (
-            <DocumentCard
-              key={doc.id}
-              doc={doc}
-              onDelivered={handleDeliveredClick}
-              onHold={handleHoldClick}
-              onCancelled={handleCancelClick}
-            />
-          ))
-        )}
+      {/* ── Table ── */}
+      <div className="ip-table-wrap">
+        <table className="ip-table">
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>WBS</th>
+              <th>Doc No</th>
+              <th>Customer</th>
+              <th>Req Date/Time</th>
+              <th>Pending</th>
+              <th>Status</th>
+              <th>View</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {loading ? (
+              Array.from({ length: 6 }).map((_, i) => <SkeletonRow key={i} />)
+            ) : visible.length === 0 ? (
+              <tr>
+                <td colSpan={9}>
+                  <div className="ip-empty">
+                    <div className="ip-empty-icon">📭</div>
+                    <p>
+                      {documents.length === 0
+                        ? "No Check Done documents yet. Complete checks first."
+                        : `No documents found${search ? ` for "${search}"` : ""}.`}
+                    </p>
+                  </div>
+                </td>
+              </tr>
+            ) : (
+              visible.map(doc => (
+                <DocumentRow
+                  key={doc.id}
+                  doc={doc}
+                  onView={setViewDoc}
+                  onDelivered={handleDeliveredClick}
+                  onHold={handleHoldClick}
+                  onCancelled={handleCancelClick}
+                />
+              ))
+            )}
+          </tbody>
+        </table>
       </div>
     </div>
   );

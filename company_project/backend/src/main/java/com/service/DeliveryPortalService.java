@@ -116,4 +116,20 @@ public class DeliveryPortalService {
     public void delete(Long id) {
         issueRepository.deleteById(id);
     }
+    
+    public Issue confirmDelivery(Long id, String confirmedBy) {
+        Issue doc = getById(id);
+        doc.setDeliveryConfirmed(true);
+        doc.setDeliveryConfirmedBy(confirmedBy);
+        doc.setDeliveryConfirmTime(LocalDateTime.now());
+        return issueRepository.save(doc);
+}
+
+public Issue confirmCancel(Long id, String confirmedBy) {
+    Issue doc = getById(id);
+    doc.setCancelConfirmed(true);
+    doc.setCancelConfirmedBy(confirmedBy);
+    doc.setCancelConfirmTime(LocalDateTime.now());
+    return issueRepository.save(doc);
+}
 }
