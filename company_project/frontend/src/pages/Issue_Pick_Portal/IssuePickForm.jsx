@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import "./IssuePick.css";
 
 const API_BASE = "http://localhost:8080/api/pick-portal";
@@ -33,6 +33,43 @@ function formatDuration(seconds) {
   const m = Math.floor((seconds % 3600) / 60);
   const s = seconds % 60;
   return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+}
+
+// Groups documents by their request date and numbers each group starting
+// from 1, then combines that with the date to build a unique Request ID
+// like 20260816/0001. Resets automatically whenever the date changes.
+// (Same logic as the Print Portal, so IDs read consistently across portals.)
+function computeRequestIds(documents) {
+  const dateKeyOf = (doc) => {
+    if (doc.requestDate)     return String(doc.requestDate).substring(0, 10);
+    if (doc.createdDatetime) return String(doc.createdDatetime).substring(0, 10);
+    return null;
+  };
+
+  const groups = {};
+  documents.forEach(doc => {
+    const key = dateKeyOf(doc) || "unknown";
+    if (!groups[key]) groups[key] = [];
+    groups[key].push(doc);
+  });
+
+  const idMap = {};
+  Object.entries(groups).forEach(([key, group]) => {
+    const compactDate = key === "unknown" ? "00000000" : key.replace(/-/g, "");
+    group
+      .slice()
+      .sort((a, b) => {
+        if (a.createdDatetime && b.createdDatetime) {
+          return new Date(a.createdDatetime) - new Date(b.createdDatetime);
+        }
+        return a.id - b.id;
+      })
+      .forEach((doc, idx) => {
+        idMap[doc.id] = `${compactDate}/${String(idx + 1).padStart(4, "0")}`;
+      });
+  });
+
+  return idMap;
 }
 
 function jobTypeColor(jt) {
@@ -192,9 +229,129 @@ function PickedByPopup({ onConfirm, onCancel }) {
   );
 }
 
+// ── Popup: Emergency Pick Done (re-pick after Check reported an error) ──────
+
+function EmergencyPickDonePopup({ onConfirm, onCancel }) {
+  const [resolvedBy, setResolvedBy] = useState("");
+
+  return (
+    <div className="ip-popup-overlay">
+      <div className="ip-popup">
+        <div className="ip-popup-head">
+          <span>🚨 Emergency Pick Done</span>
+          <button className="ip-popup-close" onClick={onCancel}>✕</button>
+        </div>
+        <p className="ip-popup-sub">Select who re-picked the correct material</p>
+
+        <PersonPicker value={resolvedBy} onChange={setResolvedBy} />
+
+        <div className="ip-popup-foot" style={{ marginTop: 18 }}>
+          <button className="ip-btn ip-btn-outline" onClick={onCancel}>Cancel</button>
+          <button
+            className="ip-btn ip-btn-done"
+            disabled={!resolvedBy}
+            onClick={() => onConfirm(resolvedBy)}
+          >
+            🚨 Confirm Emergency Pick Done
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Popup: View Full Details ─────────────────────────────────────────────────
+
+function ViewDetailsPopup({ doc, requestId, onClose }) {
+  if (!doc) return null;
+
+  const row = (label, value) => (
+    <div className="ip-hold-row" key={label}>
+      <span>{label}</span>
+      <span>{value ?? "—"}</span>
+    </div>
+  );
+
+  return (
+    <div className="ip-popup-overlay">
+      <div className="ip-popup">
+        <div className="ip-popup-head">
+          <span>📋 Full Details — {requestId || "—"}</span>
+          <button className="ip-popup-close" onClick={onClose}>✕</button>
+        </div>
+        <p className="ip-popup-sub">Complete history for this document</p>
+
+        <div style={{ marginBottom: 6, fontSize: "0.78rem", color: "#7c8db0", fontWeight: 600 }}>
+          Document Info
+        </div>
+        <div className="ip-hold-box" style={{ marginBottom: 14 }}>
+          {row("Job WBS", doc.jobwbs)}
+          {row("Reservation No", doc.reservationNo)}
+          {row("Entered By", doc.enteredBy)}
+          {row("Job Type", doc.jobType)}
+          {row("Request Date", formatDate(doc.requestDate))}
+          {row("Request Time", formatTime(doc.requestTime))}
+        </div>
+
+        <div style={{ marginBottom: 6, fontSize: "0.78rem", color: "#7c8db0", fontWeight: 600 }}>
+          Start / Hold
+        </div>
+        <div className="ip-hold-box" style={{ marginBottom: 14 }}>
+          {row("Start Time", formatDateTime(doc.startTime))}
+          {row("Hold Reason", doc.holdReason)}
+          {row("Held By", doc.heldBy && `👤 ${doc.heldBy}`)}
+          {row("Held At", formatDateTime(doc.holdTime))}
+        </div>
+
+        <div style={{ marginBottom: 6, fontSize: "0.78rem", color: "#7c8db0", fontWeight: 600 }}>
+          Pick Done
+        </div>
+        <div className="ip-hold-box" style={{ marginBottom: 14 }}>
+          {row("Picked By", doc.pickedBy && `👤 ${doc.pickedBy}`)}
+          {row("Total Duration", `⏱ ${formatDuration(doc.durationSeconds)}`)}
+        </div>
+
+        <div style={{ marginBottom: 6, fontSize: "0.78rem", color: "#7c8db0", fontWeight: 600 }}>
+          Print Portal
+        </div>
+        <div className="ip-hold-box" style={{ marginBottom: 14 }}>
+          {row("Handed Over By", doc.printHandedOverBy && `👤 ${doc.printHandedOverBy}`)}
+          {row("Document Number", doc.printDocumentNo)}
+          {row("Vehicle Number", doc.vehicleNo)}
+          {row("Print Hold Reason", doc.printHoldReason)}
+          {row("Print Held By", doc.printHeldBy && `👤 ${doc.printHeldBy}`)}
+          {row("Print Held At", formatDateTime(doc.printHoldTime))}
+          {row("Printed By", doc.printedBy && `👤 ${doc.printedBy}`)}
+          {row("Print Duration", `⏱ ${formatDuration(doc.printDurationSeconds)}`)}
+        </div>
+
+        {(doc.hasWrongMaterial || "").toUpperCase() === "YES" && !doc.emergencyPickResolved && (
+          <>
+            <div style={{ marginBottom: 6, fontSize: "0.78rem", color: "#ef4444", fontWeight: 700 }}>
+              🚨 Check Portal — Wrong Material Reported
+            </div>
+            <div
+              className="ip-hold-box"
+              style={{ marginBottom: 14, border: "1px solid #ef4444", background: "rgba(239,68,68,0.08)" }}
+            >
+              {row("Checked By", doc.checkedBy && `👤 ${doc.checkedBy}`)}
+              {row("Wrong SKU / Description", doc.wrongMaterialSku)}
+              {row("Quantity", doc.wrongMaterialQty)}
+            </div>
+          </>
+        )}
+
+        <div className="ip-popup-foot">
+          <button className="ip-btn ip-btn-outline" onClick={onClose}>Close</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Single Document Card ─────────────────────────────────────────────────────
 
-function DocumentCard({ doc, onStart, onHold, onEnd }) {
+function DocumentCard({ doc, requestId, onStart, onHold, onEnd, onView, onEmergencyDone }) {
   const sc        = statusClass(doc.status);
   const jColor    = jobTypeColor(doc.jobType);
   const isPending  = sc === "pending";
@@ -202,13 +359,47 @@ function DocumentCard({ doc, onStart, onHold, onEnd }) {
   const isOnHold   = sc === "onhold";
   const isDone     = sc === "completed";
 
+  // Check Portal flags this document if a wrong-material issue was found
+  // during checking — surface it urgently back here on the Pick card,
+  // until it's been resolved with an Emergency Pick Done.
+  const hasCheckError =
+    (doc.hasWrongMaterial || "").toUpperCase() === "YES" && !doc.emergencyPickResolved;
+
+  const cardClassName = `ip-card status-${sc}${hasCheckError ? " ip-card-emergency" : ""}`;
+  const cardStyle = hasCheckError
+    ? {
+        border: "2px solid #ef4444",
+        boxShadow: "0 0 0 1px rgba(239,68,68,0.35), 0 0 16px rgba(239,68,68,0.25)",
+        background: "rgba(239,68,68,0.06)",
+      }
+    : undefined;
+
   return (
-    <div className={`ip-card status-${sc}`}>
+    <div className={cardClassName} style={cardStyle}>
+      {hasCheckError && (
+        <div
+          style={{
+            background: "#ef4444",
+            color: "#fff",
+            fontWeight: 700,
+            fontSize: "0.78rem",
+            padding: "6px 12px",
+            borderRadius: 6,
+            marginBottom: 10,
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+          }}
+        >
+          🚨 EMERGENCY PICK ERROR — Wrong Material Found at Check
+        </div>
+      )}
       {/* ── Head ── */}
       <div className="ip-card-head">
         <div>
-          <div className="ip-doc-no">
-            {doc.printDocumentNo ? doc.printDocumentNo : `Doc #${doc.id}`}
+          <div className="ip-doc-no">{requestId || "—"}</div>
+          <div className="ip-doc-number-sub">
+            Doc No: {doc.printDocumentNo ? doc.printDocumentNo : "Not entered"}
           </div>
           <div style={{ color: jColor, fontWeight: 700, fontSize: "0.78rem", marginTop: 2 }}>
             {doc.jobType || "—"}
@@ -219,10 +410,6 @@ function DocumentCard({ doc, onStart, onHold, onEnd }) {
 
       {/* ── Body ── */}
       <div className="ip-card-body">
-        <div className="ip-detail-row">
-          <span className="ip-detail-label">Customer</span>
-          <span className="ip-detail-value">{doc.customerName || "—"}</span>
-        </div>
         <div className="ip-detail-row">
           <span className="ip-detail-label">Job WBS</span>
           <span className="ip-detail-value">{doc.jobwbs || "—"}</span>
@@ -282,7 +469,7 @@ function DocumentCard({ doc, onStart, onHold, onEnd }) {
         )}
       </div>
 
-      {/* ── Footer Buttons ── */}
+      {/* ── Footer Buttons: Start | Hold | End | View ── */}
       <div className="ip-card-foot">
         <button
           className="ip-btn ip-btn-start"
@@ -305,6 +492,21 @@ function DocumentCard({ doc, onStart, onHold, onEnd }) {
         >
           ■ End
         </button>
+        <button
+          className="ip-btn ip-btn-outline"
+          onClick={() => onView(doc.id)}
+        >
+          👁 View
+        </button>
+        {hasCheckError && (
+          <button
+            className="ip-btn"
+            style={{ background: "#ef4444", color: "#fff", fontWeight: 700 }}
+            onClick={() => onEmergencyDone(doc.id)}
+          >
+            🚨 Emergency Pick Done
+          </button>
+        )}
       </div>
     </div>
   );
@@ -347,7 +549,7 @@ export default function IssuPrinFormt() {
   const [refreshing,   setRefreshing]   = useState(false);
 
   // Popup state
-  const [activePopup,  setActivePopup]  = useState(null); // "hold" | "end" | null
+  const [activePopup,  setActivePopup]  = useState(null); // "hold" | "end" | "view" | "emergency" | null
   const [activeId,     setActiveId]     = useState(null);
 
   // ── Fetch ──
@@ -359,7 +561,13 @@ export default function IssuPrinFormt() {
       const res  = await fetch(API_BASE);
       if (!res.ok) throw new Error(`Server error: ${res.status}`);
       const data = await res.json();
-      setDocuments(data);
+      // Only show documents that have already been given a Print Document Number
+      // in the Print Portal — undocumented ones stay hidden from Pick Portal.
+      const withPrintDocNo = data.filter(
+        d => d.printDocumentNo && String(d.printDocumentNo).trim() !== ""
+      );
+
+      setDocuments(withPrintDocNo);
       setLastUpdated(new Date());
     } catch (err) {
       setError(err.message);
@@ -389,6 +597,8 @@ export default function IssuPrinFormt() {
   // ── Open popups ──
   const handleHoldClick = (id) => { setActiveId(id); setActivePopup("hold"); };
   const handleEndClick  = (id) => { setActiveId(id); setActivePopup("end"); };
+  const handleViewClick = (id) => { setActiveId(id); setActivePopup("view"); };
+  const handleEmergencyClick = (id) => { setActiveId(id); setActivePopup("emergency"); };
   const closePopup = () => { setActivePopup(null); setActiveId(null); };
 
   // ── Confirm Hold ──
@@ -421,6 +631,31 @@ export default function IssuPrinFormt() {
     }
   };
 
+  // ── Confirm Emergency Pick Done (re-pick after Check reported wrong material) ──
+  const handleEmergencyConfirm = async (resolvedBy) => {
+    closePopup();
+    try {
+      await fetch(`${API_BASE}/${activeId}/emergency-resolve`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ resolvedBy }),
+      });
+      fetchDocuments(true);
+    } catch (err) {
+      alert("Emergency Pick Done failed: " + err.message);
+    }
+  };
+
+  // Request ID: date + daily sequence, e.g. 20260816/0001 — same scheme as Print Portal
+  const requestIdMap = useMemo(() => computeRequestIds(documents), [documents]);
+
+  // Picking errors reported by Check Portal that are still unresolved —
+  // shown as a persistent notification bar at the top, same style as the
+  // Check Portal's own error bar.
+  const activeCheckErrorDocs = documents.filter(d =>
+    (d.hasWrongMaterial || "").toUpperCase() === "YES" && !d.emergencyPickResolved
+  );
+
   // ── Filters ──
   const jobTypes = ["ALL", ...new Set(documents.map(d => d.jobType).filter(Boolean))];
   const statuses = ["ALL", ...new Set(documents.map(d => d.status).filter(Boolean))];
@@ -428,7 +663,7 @@ export default function IssuPrinFormt() {
   const visible = documents.filter(doc => {
     const q = search.toLowerCase();
     const matchSearch = !q || [
-      String(doc.id), doc.customerName, doc.jobwbs,
+      String(doc.id), doc.jobwbs,
       doc.reservationNo, doc.enteredBy, doc.jobType,
     ].some(v => (v || "").toLowerCase().includes(q));
 
@@ -445,6 +680,9 @@ export default function IssuPrinFormt() {
   const onHold    = documents.filter(d => statusClass(d.status) === "onhold").length;
   const completed = documents.filter(d => statusClass(d.status) === "completed").length;
 
+  // The doc currently open in the View popup
+  const viewingDoc = documents.find(d => d.id === activeId) || null;
+
   return (
     <div className="ip-page">
 
@@ -454,6 +692,16 @@ export default function IssuPrinFormt() {
       )}
       {activePopup === "end" && (
         <PickedByPopup onConfirm={handleEndConfirm} onCancel={closePopup} />
+      )}
+      {activePopup === "view" && (
+        <ViewDetailsPopup
+          doc={viewingDoc}
+          requestId={activeId ? requestIdMap[activeId] : null}
+          onClose={closePopup}
+        />
+      )}
+      {activePopup === "emergency" && (
+        <EmergencyPickDonePopup onConfirm={handleEmergencyConfirm} onCancel={closePopup} />
       )}
 
       {/* ── Header ── */}
@@ -478,6 +726,43 @@ export default function IssuPrinFormt() {
         </button>
       </div>
 
+      {/* ── Active Picking Error Notification Bar ── */}
+      {activeCheckErrorDocs.length > 0 && (
+        <div
+          style={{
+            background: "rgba(239,68,68,0.15)",
+            border: "1px solid #ef4444",
+            borderRadius: 8,
+            padding: "12px 16px",
+            marginBottom: 18,
+            display: "flex",
+            flexDirection: "column",
+            gap: 8,
+          }}
+        >
+          <div style={{ color: "#ef4444", fontWeight: 700, fontSize: "0.9rem", display: "flex", alignItems: "center", gap: 8 }}>
+            🚨 {activeCheckErrorDocs.length} Picking Error{activeCheckErrorDocs.length > 1 ? "s" : ""} Reported by Check Portal — needs Emergency Pick
+          </div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+            {activeCheckErrorDocs.map(d => (
+              <span
+                key={d.id}
+                style={{
+                  background: "#ef4444",
+                  color: "#fff",
+                  fontWeight: 600,
+                  fontSize: "0.78rem",
+                  padding: "4px 10px",
+                  borderRadius: 6,
+                }}
+              >
+                {requestIdMap[d.id] || "—"} · Doc No: {d.printDocumentNo || "—"}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* ── Toolbar ── */}
       <div className="ip-toolbar">
         <div className="ip-search-wrap">
@@ -485,7 +770,7 @@ export default function IssuPrinFormt() {
           <input
             className="ip-search"
             type="text"
-            placeholder="Search by ID, Customer, WBS, Reservation..."
+            placeholder="Search by ID, WBS, Reservation, Entered By..."
             value={search}
             onChange={e => setSearch(e.target.value)}
           />
@@ -537,9 +822,12 @@ export default function IssuPrinFormt() {
             <DocumentCard
               key={doc.id}
               doc={doc}
+              requestId={requestIdMap[doc.id]}
               onStart={handleStart}
               onHold={handleHoldClick}
               onEnd={handleEndClick}
+              onView={handleViewClick}
+              onEmergencyDone={handleEmergencyClick}
             />
           ))
         )}

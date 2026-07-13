@@ -17,7 +17,6 @@ public class CheckPortalController {
     @Autowired
     private CheckPortalService checkPortalService;
 
-    // ── GET all documents (cart view) ──────────────────────────────────
     @GetMapping
     public ResponseEntity<List<Issue>> getAll() {
         return ResponseEntity.ok(checkPortalService.getAllDocuments());
@@ -42,7 +41,6 @@ public class CheckPortalController {
         return ResponseEntity.ok(checkPortalService.getByCheckStatus(status));
     }
 
-    // ── PUT Start / Resume ───────────────────────────────────────────────
     @PutMapping("/{id}/start")
     public ResponseEntity<Issue> start(@PathVariable Long id) {
         try {
@@ -52,38 +50,37 @@ public class CheckPortalController {
         }
     }
 
-    // ── PUT Hold ───────────────────────────────────────────────────────
+    // ── PUT Hold ── body: { holdReason, heldBy, hasWrongMaterial: "YES"/"NO", wrongMaterialSku, wrongMaterialQty }
     @PutMapping("/{id}/hold")
     public ResponseEntity<Issue> hold(
             @PathVariable Long id,
             @RequestBody Map<String, String> body) {
 
-        String holdReason = body.getOrDefault("holdReason", "");
-        String heldBy     = body.getOrDefault("heldBy", "");
-
-        try {
-            return ResponseEntity.ok(checkPortalService.holdCheck(id, holdReason, heldBy));
-        } catch (RuntimeException e) {
-            return ResponseEntity.notFound().build();
-        }
-    }
-
-    // ── PUT End (Check Done) ─────────────────────────────────────────────
-    // body: { checkedBy, hasWrongMaterial: "YES"/"NO", wrongMaterialSku, wrongMaterialQty }
-    @PutMapping("/{id}/end")
-    public ResponseEntity<Issue> end(
-            @PathVariable Long id,
-            @RequestBody Map<String, String> body) {
-
-        String checkedBy        = body.getOrDefault("checkedBy", "");
-        String hasWrongMaterial = body.getOrDefault("hasWrongMaterial", "NO");
+        String holdReason       = body.getOrDefault("holdReason", "");
+        String heldBy           = body.getOrDefault("heldBy", "");
+        String hasWrongMaterial = body.get("hasWrongMaterial");
         String wrongMaterialSku = body.getOrDefault("wrongMaterialSku", "");
         String wrongMaterialQty = body.getOrDefault("wrongMaterialQty", "");
 
         try {
             return ResponseEntity.ok(
-                checkPortalService.endCheck(id, checkedBy, hasWrongMaterial, wrongMaterialSku, wrongMaterialQty)
+                checkPortalService.holdCheck(id, holdReason, heldBy, hasWrongMaterial, wrongMaterialSku, wrongMaterialQty)
             );
+        } catch (RuntimeException e) {
+            return ResponseEntity.notFound().build();
+        }
+    }
+
+    // ── PUT End (Check Done) ── body: { checkedBy }
+    @PutMapping("/{id}/end")
+    public ResponseEntity<Issue> end(
+            @PathVariable Long id,
+            @RequestBody Map<String, String> body) {
+
+        String checkedBy = body.getOrDefault("checkedBy", "");
+
+        try {
+            return ResponseEntity.ok(checkPortalService.endCheck(id, checkedBy));
         } catch (RuntimeException e) {
             return ResponseEntity.notFound().build();
         }

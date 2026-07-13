@@ -1,22 +1,39 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import "./ConfirmPortal.css";
 
-// Reuses the same data source as the Delivery Portal — every Check-Done
-// document already carries its live deliveryStatus, so we just group
-// client-side into three pools instead of hitting three endpoints.
-const API_BASE = "http://localhost:8080/api/delivery-portal";
+const DELIVERY_API = "http://localhost:8080/api/delivery-portal";
+const CONFIRM_API = "http://localhost:8080/api/issue-confirm";
 const AUTO_REFRESH = 10000;
 
-const PEOPLE_OPTIONS = ["Shanuka", "Chameera", "Randunu"];
-
 // ── Helpers ─────────────────────────────────────────────────────────────────
+
+function formatDate(d) { return d || "—"; }
+function formatTime(t) { return t ? String(t).substring(0, 5) : "—"; }
 
 function formatDateTime(dt) {
   if (!dt) return "—";
   const d = new Date(dt);
+  if (isNaN(d.getTime())) return "—";
   return d.toLocaleString("en-GB", {
-    day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit",
+    day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit",
   });
+}
+
+function yn(v) {
+  if (v === true || v === "YES" || v === "Yes" || v === "yes") return "Yes";
+  if (v === false || v === "NO" || v === "No" || v === "no") return "No";
+  return v || "—";
+}
+
+function jobTypeColor(jt) {
+  const map = {
+    balance:      "#a78bfa",
+    domestic:     "#34d399",
+    cost_center:  "#f59e0b",
+    commercial:   "#3b82f6",
+    sales_order:  "#f472b6",
+  };
+  return map[(jt || "").toLowerCase().replace(/\s+/g, "_")] || "#7c8db0";
 }
 
 function statusClass(s) {
@@ -28,62 +45,105 @@ function statusClass(s) {
   return "pending";
 }
 
-// ── Confirm popup (choose who is confirming) ────────────────────────────────
+function statusLabel(sc) {
+  if (sc === "completed") return "Delivered";
+  if (sc === "onhold")    return "Hold";
+  if (sc === "cancelled") return "Cancelled";
+  return sc;
+}
 
-function ConfirmPopup({ title, subtitle, accentClass, onConfirm, onCancel }) {
-  const [person, setPerson]     = useState("");
-  const [showOther, setShowOther] = useState(false);
-  const [otherVal, setOtherVal]   = useState("");
+// Once a document has a fileNumber, its badge/status is shown as "Filed"
+// regardless of the underlying delivered/hold/cancelled status.
+function displayStatus(doc) {
+  if (doc.fileNumber) return { label: "Filed", cls: "filed" };
+  const sc = statusClass(doc.deliveryStatus);
+  return { label: statusLabel(sc), cls: sc };
+}
 
-  const finalPerson = showOther ? otherVal.trim() : person;
-  const canConfirm  = !!finalPerson;
+function computeRequestIds(documents) {
+  const dateKeyOf = (doc) => {
+    if (doc.requestDate)     return String(doc.requestDate).substring(0, 10);
+    if (doc.createdDatetime) return String(doc.createdDatetime).substring(0, 10);
+    return null;
+  };
+
+  const groups = {};
+  documents.forEach(doc => {
+    const key = dateKeyOf(doc) || "unknown";
+    if (!groups[key]) groups[key] = [];
+    groups[key].push(doc);
+  });
+
+  const idMap = {};
+  Object.entries(groups).forEach(([key, group]) => {
+    const compactDate = key === "unknown" ? "00000000" : key.replace(/-/g, "");
+    group
+      .slice()
+      .sort((a, b) => {
+        if (a.createdDatetime && b.createdDatetime) {
+          return new Date(a.createdDatetime) - new Date(b.createdDatetime);
+        }
+        return a.id - b.id;
+      })
+      .forEach((doc, idx) => {
+        idMap[doc.id] = `${compactDate}/${String(idx + 1).padStart(4, "0")}`;
+      });
+  });
+
+  return idMap;
+}
+
+function eventInfo(doc) {
+  const sc = statusClass(doc.deliveryStatus);
+  if (sc === "completed") {
+    return { dateTime: doc.deliveryEndTime, by: doc.deliveredBy, reason: null };
+  }
+  if (sc === "onhold") {
+    return { dateTime: doc.deliveryHoldTime, by: doc.deliveryHeldBy, reason: doc.deliveryHoldReason };
+  }
+  if (sc === "cancelled") {
+    return { dateTime: doc.deliveryCancelTime, by: doc.deliveryCancelledBy, reason: doc.deliveryCancelReason };
+  }
+  return { dateTime: null, by: null, reason: null };
+}
+
+// ── Add to File popup ───────────────────────────────────────────────────────
+
+function AddFilePopup({ doc, reqId, onConfirm, onCancel }) {
+  const [fileNumber, setFileNumber] = useState("");
+  const canConfirm = fileNumber.trim().length > 0;
 
   return (
-    <div className="cp-popup-overlay">
-      <div className="cp-popup">
-        <div className="cp-popup-head">
-          <span>{title}</span>
-          <button className="cp-popup-close" onClick={onCancel}>✕</button>
+    <div className="icf-popup-overlay">
+      <div className="icf-popup">
+        <div className="icf-popup-head">
+          <span>📁 Add to File</span>
+          <button className="icf-popup-close" onClick={onCancel}>✕</button>
         </div>
-        <p className="cp-popup-sub">{subtitle}</p>
+        <p className="icf-popup-sub">
+          {doc.printDocumentNo || `Doc #${doc.id}`} (Req ID: {reqId || "—"}) සඳහා file number එක ඇතුළත් කරන්න
+        </p>
 
-        <span className="cp-popup-label">Confirmed By</span>
-        <div className="cp-popup-options">
-          {PEOPLE_OPTIONS.map(name => (
-            <button
-              key={name}
-              className={`cp-popup-option ${person === name && !showOther ? "selected" : ""}`}
-              onClick={() => { setShowOther(false); setPerson(name); }}
-            >
-              👤 {name}
-            </button>
-          ))}
-          <button
-            className={`cp-popup-option ${showOther ? "selected" : ""}`}
-            onClick={() => setShowOther(true)}
-          >
-            ✏️ Other
-          </button>
-          {showOther && (
-            <input
-              className="cp-popup-input"
-              type="text"
-              placeholder="Type name..."
-              value={otherVal}
-              onChange={e => setOtherVal(e.target.value)}
-              autoFocus
-            />
-          )}
+        <div className="icf-popup-field">
+          <span className="icf-popup-label">File Number</span>
+          <input
+            className="icf-popup-text-input"
+            type="text"
+            placeholder="Enter file number..."
+            value={fileNumber}
+            onChange={e => setFileNumber(e.target.value)}
+            autoFocus
+          />
         </div>
 
-        <div className="cp-popup-foot">
-          <button className="cp-btn cp-btn-outline" onClick={onCancel}>Cancel</button>
+        <div className="icf-popup-foot">
+          <button className="icf-btn icf-btn-outline" onClick={onCancel}>Cancel</button>
           <button
-            className={`cp-btn cp-btn-confirm ${accentClass}`}
+            className="icf-btn-done"
             disabled={!canConfirm}
-            onClick={() => onConfirm(finalPerson)}
+            onClick={() => onConfirm(fileNumber.trim())}
           >
-            ✔ Confirm
+            📁 Confirm
           </button>
         </div>
       </div>
@@ -91,153 +151,194 @@ function ConfirmPopup({ title, subtitle, accentClass, onConfirm, onCancel }) {
   );
 }
 
-// ── Delivered pool table ─────────────────────────────────────────────────────
+// ── View Drawer helpers (same pattern as Delivery Portal) ─────────────────
 
-function DeliveredTable({ docs, onConfirmClick }) {
-  if (docs.length === 0) {
-    return <div className="cp-empty">No delivered documents right now.</div>;
-  }
+function DetailRow({ label, value }) {
   return (
-    <div className="cp-table-wrap">
-      <table className="cp-table">
-        <thead>
-          <tr>
-            <th>ID</th>
-            <th>Doc No</th>
-            <th>Customer</th>
-            <th>Delivered By</th>
-            <th>Vehicle No</th>
-            <th>Delivered At</th>
-            <th>Confirm</th>
-          </tr>
-        </thead>
-        <tbody>
-          {docs.map(doc => (
-            <tr key={doc.id} className="cp-row">
-              <td className="cp-td-id">{doc.id}</td>
-              <td className="cp-td-docno">{doc.printDocumentNo || `Doc #${doc.id}`}</td>
-              <td>{doc.customerName || "—"}</td>
-              <td>👤 {doc.deliveredBy || "—"}</td>
-              <td>🚐 {doc.deliveryVehicleNo || "—"}</td>
-              <td className="cp-td-datetime">{formatDateTime(doc.deliveryEndTime)}</td>
-              <td>
-                {doc.deliveryConfirmed ? (
-                  <span className="cp-badge confirmed">✔ Confirmed</span>
-                ) : (
-                  <button className="cp-btn-confirm-mini delivered" onClick={() => onConfirmClick(doc)}>
-                    Confirm
-                  </button>
-                )}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+    <div className="icf-detail-row">
+      <span className="icf-detail-label">{label}</span>
+      <span className="icf-detail-value">{value === null || value === undefined || value === "" ? "—" : value}</span>
     </div>
   );
 }
 
-// ── Hold pool table (live view only — no confirm needed) ────────────────────
-
-function HoldTable({ docs }) {
-  if (docs.length === 0) {
-    return <div className="cp-empty">No documents on hold right now.</div>;
-  }
+function Section({ icon, title, children, accent }) {
   return (
-    <div className="cp-table-wrap">
-      <table className="cp-table">
-        <thead>
-          <tr>
-            <th>ID</th>
-            <th>Doc No</th>
-            <th>Customer</th>
-            <th>Hold Reason</th>
-            <th>Held By</th>
-            <th>Held At</th>
-          </tr>
-        </thead>
-        <tbody>
-          {docs.map(doc => (
-            <tr key={doc.id} className="cp-row">
-              <td className="cp-td-id">{doc.id}</td>
-              <td className="cp-td-docno">{doc.printDocumentNo || `Doc #${doc.id}`}</td>
-              <td>{doc.customerName || "—"}</td>
-              <td>{doc.deliveryHoldReason || "—"}</td>
-              <td>👤 {doc.deliveryHeldBy || "—"}</td>
-              <td className="cp-td-datetime">{formatDateTime(doc.deliveryHoldTime)}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+    <div className={`icf-view-section ${accent ? `accent-${accent}` : ""}`}>
+      <div className="icf-view-section-head">{icon} {title}</div>
+      <div className="icf-view-section-body">{children}</div>
     </div>
   );
 }
 
-// ── Cancelled pool table ──────────────────────────────────────────────────────
+// ── Side Drawer: full document trail (mirrors Delivery Portal's ViewDrawer,
+// plus a File Details section at the end for this portal) ─────────────────
 
-function CancelledTable({ docs, onConfirmClick }) {
-  if (docs.length === 0) {
-    return <div className="cp-empty">No cancelled documents right now.</div>;
-  }
+function ViewDrawer({ doc, reqId, onClose }) {
+  const ds = displayStatus(doc);
+
   return (
-    <div className="cp-table-wrap">
-      <table className="cp-table">
-        <thead>
-          <tr>
-            <th>ID</th>
-            <th>Doc No</th>
-            <th>Customer</th>
-            <th>Cancel Reason</th>
-            <th>Cancelled By</th>
-            <th>Cancelled At</th>
-            <th>Confirm</th>
-          </tr>
-        </thead>
-        <tbody>
-          {docs.map(doc => (
-            <tr key={doc.id} className="cp-row">
-              <td className="cp-td-id">{doc.id}</td>
-              <td className="cp-td-docno">{doc.printDocumentNo || `Doc #${doc.id}`}</td>
-              <td>{doc.customerName || "—"}</td>
-              <td>{doc.deliveryCancelReason || "—"}</td>
-              <td>👤 {doc.deliveryCancelledBy || "—"}</td>
-              <td className="cp-td-datetime">{formatDateTime(doc.deliveryCancelTime)}</td>
-              <td>
-                {doc.cancelConfirmed ? (
-                  <span className="cp-badge cancelled">✔ Confirmed</span>
-                ) : (
-                  <button className="cp-btn-confirm-mini cancelled" onClick={() => onConfirmClick(doc)}>
-                    Confirm
-                  </button>
-                )}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+    <div className="icf-drawer-overlay" onClick={onClose}>
+      <div className="icf-drawer" onClick={e => e.stopPropagation()}>
+        <div className="icf-drawer-head">
+          <div>
+            <span className="icf-drawer-title">📄 {doc.printDocumentNo ? doc.printDocumentNo : `Doc #${doc.id}`}</span>
+            <span className={`icf-badge ${ds.cls}`} style={{ marginLeft: 10 }}>{ds.label}</span>
+          </div>
+          <button className="icf-popup-close" onClick={onClose}>✕</button>
+        </div>
+
+        <div className="icf-drawer-body">
+
+          {/* Request info */}
+          <Section icon="📝" title="Request Details">
+            <DetailRow label="Req ID" value={doc.reqId || reqId} />
+            <DetailRow label="Customer" value={doc.customerName} />
+            <DetailRow label="Job Type" value={
+              <span style={{ color: jobTypeColor(doc.jobType), fontWeight: 700 }}>{doc.jobType || "—"}</span>
+            } />
+            <DetailRow label="Job / WBS" value={doc.jobwbs} />
+            <DetailRow label="Reservation No" value={doc.reservationNo} />
+            <DetailRow label="Request Date" value={formatDate(doc.requestDate)} />
+            <DetailRow label="Request Time" value={formatTime(doc.requestTime)} />
+            <DetailRow label="Requested By" value={doc.requestedBy} />
+            <DetailRow label="Request Vehicle No" value={doc.vehicleNo ? `🚐 ${doc.vehicleNo}` : "—"} />
+            <DetailRow label="Entered By" value={doc.enteredBy} />
+            <DetailRow label="Entered Date/Time" value={formatDateTime(doc.createdDatetime)} />
+          </Section>
+
+          {/* Print trail */}
+          <Section icon="🖨️" title="Print Details" accent="print">
+            <DetailRow label="Print Status" value={doc.printStatus} />
+            <DetailRow label="Print Document No" value={doc.printDocumentNo} />
+            <DetailRow label="Printed By" value={doc.printedBy} />
+            <DetailRow label="Print Start Time" value={formatDateTime(doc.printStartTime)} />
+            <DetailRow label="Print End Time" value={formatDateTime(doc.printEndTime)} />
+            <DetailRow label="Print Handover Time" value={formatDateTime(doc.printHandoverTime)} />
+            <DetailRow label="Print Handed Over By" value={doc.PrintHandedOverBy} />
+            {(doc.printHoldReason || doc.printHeldBy) && (
+              <>
+                <DetailRow label="Print Hold Reason" value={doc.printHoldReason} />
+                <DetailRow label="Print Held By" value={doc.printHeldBy} />
+                <DetailRow label="Print Hold Time" value={formatDateTime(doc.printHoldTime)} />
+                <DetailRow label="Print Resume Time" value={formatDateTime(doc.printResumeTime)} />
+              </>
+            )}
+          </Section>
+
+          {/* Picking trail */}
+          <Section icon="📦" title="Picking Details" accent="pick">
+            <DetailRow label="Picked By" value={doc.pickedBy} />
+            <DetailRow label="Pick Start Time" value={formatDateTime(doc.startTime)} />
+            <DetailRow label="Pick End Time" value={formatDateTime(doc.endTime)} />
+            {(doc.holdReason || doc.heldBy) && (
+              <>
+                <DetailRow label="Pick Hold Reason" value={doc.holdReason} />
+                <DetailRow label="Pick Held By" value={doc.heldBy} />
+                <DetailRow label="Pick Hold Time" value={formatDateTime(doc.holdTime)} />
+                <DetailRow label="Pick Resume Time" value={formatDateTime(doc.resumeTime)} />
+              </>
+            )}
+            {doc.emergencyPickResolved !== undefined && doc.emergencyPickResolved !== null && (
+              <>
+                <DetailRow label="Emergency Pick Resolved" value={yn(doc.emergencyPickResolved)} />
+                <DetailRow label="Resolved By" value={doc.emergencyPickResolvedBy} />
+                <DetailRow label="Resolved Time" value={formatDateTime(doc.emergencyResolvedTime)} />
+              </>
+            )}
+          </Section>
+
+          {/* Check trail (incl. picking error) */}
+          <Section icon="✅" title="Check Details" accent="check">
+            <DetailRow label="Checked By" value={doc.checkedBy} />
+            <DetailRow label="Check Start Time" value={formatDateTime(doc.checkStartTime)} />
+            <DetailRow label="Check End Time" value={formatDateTime(doc.checkEndTime)} />
+            {(doc.checkHoldReason || doc.checkHeldBy) && (
+              <>
+                <DetailRow label="Check Hold Reason" value={doc.checkHoldReason} />
+                <DetailRow label="Check Held By" value={doc.checkHeldBy} />
+                <DetailRow label="Check Hold Time" value={formatDateTime(doc.checkHoldTime)} />
+                <DetailRow label="Check Resume Time" value={formatDateTime(doc.checkResumeTime)} />
+              </>
+            )}
+            <div className="icf-view-subhead">⚠ Picking Error</div>
+            <DetailRow label="Wrong Material" value={yn(doc.hasWrongMaterial)} />
+            {(doc.hasWrongMaterial === "YES" || doc.hasWrongMaterial === true) && (
+              <>
+                <DetailRow label="Wrong Material SKU" value={doc.wrongMaterialSku} />
+                <DetailRow label="Wrong Material Qty" value={doc.wrongMaterialQty} />
+              </>
+            )}
+          </Section>
+
+          {/* Delivery trail */}
+          <Section icon="🚚" title="Delivery Details" accent="delivery">
+            <DetailRow label="Delivery Status" value={statusLabel(statusClass(doc.deliveryStatus))} />
+            <DetailRow label="Delivery Start Time" value={formatDateTime(doc.deliveryStartTime)} />
+            <DetailRow label="Delivery End Time" value={formatDateTime(doc.deliveryEndTime)} />
+            <DetailRow label="Delivered By" value={doc.deliveredBy} />
+            <DetailRow label="Delivery Vehicle No" value={doc.deliveryVehicleNo ? `🚐 ${doc.deliveryVehicleNo}` : "—"} />
+            <DetailRow label="Delivery Confirmed" value={yn(doc.deliveryConfirmed)} />
+            <DetailRow label="Delivery Confirmed By" value={doc.deliveryConfirmedBy} />
+            <DetailRow label="Delivery Confirm Time" value={formatDateTime(doc.deliveryConfirmTime)} />
+          </Section>
+
+          {/* Hold info */}
+          {(statusClass(doc.deliveryStatus) === "onhold" || doc.deliveryHoldReason) && (
+            <Section icon="⏸" title="Delivery Hold" accent="hold">
+              <DetailRow label="Hold Reason" value={doc.deliveryHoldReason} />
+              <DetailRow label="Held By" value={doc.deliveryHeldBy} />
+              <DetailRow label="Held At" value={formatDateTime(doc.deliveryHoldTime)} />
+              <DetailRow label="Resume Time" value={formatDateTime(doc.deliveryResumeTime)} />
+            </Section>
+          )}
+
+          {/* Cancel info */}
+          {doc.deliveryCancelReason && (
+            <Section icon="✕" title="Delivery Cancelled" accent="cancel">
+              <DetailRow label="Cancel Reason" value={doc.deliveryCancelReason} />
+              <DetailRow label="Cancelled By" value={doc.deliveryCancelledBy} />
+              <DetailRow label="Cancelled At" value={formatDateTime(doc.deliveryCancelTime)} />
+              <DetailRow label="Cancel Confirmed" value={yn(doc.cancelConfirmed)} />
+              <DetailRow label="Cancel Confirmed By" value={doc.cancelConfirmedBy} />
+              <DetailRow label="Cancel Confirm Time" value={formatDateTime(doc.cancelConfirmTime)} />
+            </Section>
+          )}
+
+          {/* File info — specific to Confirm Portal */}
+          <Section icon="📁" title="File Details" accent="file">
+            <DetailRow label="Req ID" value={doc.reqId || reqId} />
+            <DetailRow label="File Number" value={doc.fileNumber ? `📁 ${doc.fileNumber}` : "Not yet added to file"} />
+          </Section>
+
+        </div>
+
+        <div className="icf-popup-foot">
+          <button className="icf-btn icf-btn-outline" onClick={onClose}>Close</button>
+        </div>
+      </div>
     </div>
   );
 }
 
-// ── Main Component ───────────────────────────────────────────────────────────
+// ── Main ─────────────────────────────────────────────────────────────────────
 
-export default function ConfirmPortal() {
+export default function IssueConfirm() {
   const [documents,   setDocuments]   = useState([]);
   const [loading,     setLoading]     = useState(true);
   const [error,       setError]       = useState(null);
   const [lastUpdated, setLastUpdated] = useState(null);
   const [refreshing,  setRefreshing]  = useState(false);
-
-  // "delivered" | "cancelled" | null — which confirm popup is open
-  const [confirmMode, setConfirmMode] = useState(null);
-  const [confirmDoc,  setConfirmDoc]  = useState(null);
+  const [filterStatus, setFilterStatus] = useState("ALL"); // ALL | completed | onhold | cancelled
+  const [savingId,    setSavingId]    = useState(null);
+  const [viewDoc,     setViewDoc]     = useState(null);
+  const [fileDoc,     setFileDoc]     = useState(null); // doc currently being filed via popup
 
   const fetchDocuments = useCallback(async (silent = false) => {
-    if (!silent) setLoading(true);
-    else setRefreshing(true);
+    if (!silent) setLoading(true); else setRefreshing(true);
     setError(null);
     try {
-      const res  = await fetch(API_BASE);
+      const res = await fetch(DELIVERY_API);
       if (!res.ok) throw new Error(`Server error: ${res.status}`);
       const data = await res.json();
       setDocuments(data);
@@ -251,114 +352,191 @@ export default function ConfirmPortal() {
   }, []);
 
   useEffect(() => { fetchDocuments(false); }, [fetchDocuments]);
-
   useEffect(() => {
     const id = setInterval(() => fetchDocuments(true), AUTO_REFRESH);
     return () => clearInterval(id);
   }, [fetchDocuments]);
 
-  const openConfirm = (doc, mode) => { setConfirmDoc(doc); setConfirmMode(mode); };
-  const closeConfirm = () => { setConfirmDoc(null); setConfirmMode(null); };
+  const reqIdMap = useMemo(() => computeRequestIds(documents), [documents]);
 
-  const handleConfirm = async (confirmedBy) => {
-    const doc  = confirmDoc;
-    const mode = confirmMode;
-    closeConfirm();
-    if (!doc || !mode) return;
+  // Only the 3 finalised pools belong on this portal
+  const relevant = documents.filter(d => ["completed", "onhold", "cancelled"].includes(statusClass(d.deliveryStatus)));
 
-    const endpoint = mode === "delivered" ? "confirm-delivery" : "confirm-cancel";
+  const visible = filterStatus === "ALL"
+    ? relevant
+    : relevant.filter(d => statusClass(d.deliveryStatus) === filterStatus);
+
+  const counts = {
+    completed: relevant.filter(d => statusClass(d.deliveryStatus) === "completed").length,
+    onhold:    relevant.filter(d => statusClass(d.deliveryStatus) === "onhold").length,
+    cancelled: relevant.filter(d => statusClass(d.deliveryStatus) === "cancelled").length,
+  };
+
+  // keep the view drawer's data in sync after a refresh
+  useEffect(() => {
+    if (!viewDoc) return;
+    const fresh = documents.find(d => d.id === viewDoc.id);
+    if (fresh) setViewDoc(fresh);
+  }, [documents]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleAddToFileClick = (doc) => setFileDoc(doc);
+  const closeFilePopup       = () => setFileDoc(null);
+
+  const handleAddToFileConfirm = async (fileNumber) => {
+    const doc = fileDoc;
+    if (!doc) return;
+    closeFilePopup();
+    setSavingId(doc.id);
     try {
-      await fetch(`${API_BASE}/${doc.id}/${endpoint}`, {
+      const res = await fetch(`${CONFIRM_API}/${doc.id}/add-to-file`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ confirmedBy }),
+        body: JSON.stringify({ reqId: reqIdMap[doc.id], fileNumber }),
       });
-      fetchDocuments(true);
+      if (res.status === 409) {
+        await fetchDocuments(true);
+        return;
+      }
+      if (!res.ok) throw new Error(`Server error: ${res.status}`);
+      const updated = await res.json();
+      setDocuments(prev => prev.map(d => d.id === updated.id ? updated : d));
     } catch (err) {
-      alert("Confirm failed: " + err.message);
+      alert("Add to File failed: " + err.message);
+    } finally {
+      setSavingId(null);
     }
   };
 
-  const deliveredDocs = documents.filter(d => statusClass(d.deliveryStatus) === "completed");
-  const onHoldDocs    = documents.filter(d => statusClass(d.deliveryStatus) === "onhold");
-  const cancelledDocs = documents.filter(d => statusClass(d.deliveryStatus) === "cancelled");
-
   return (
-    <div className="cp-page">
+    <div className="icf-page">
 
-      {confirmMode === "delivered" && (
-        <ConfirmPopup
-          title="✅ Confirm Delivery"
-          subtitle="Confirm that this document was received / delivered correctly."
-          accentClass="delivered"
-          onConfirm={handleConfirm}
-          onCancel={closeConfirm}
-        />
-      )}
-      {confirmMode === "cancelled" && (
-        <ConfirmPopup
-          title="✕ Confirm Cancellation"
-          subtitle="Confirm that this cancellation has been reviewed."
-          accentClass="cancelled"
-          onConfirm={handleConfirm}
-          onCancel={closeConfirm}
+      {viewDoc && (
+        <ViewDrawer
+          doc={viewDoc}
+          reqId={reqIdMap[viewDoc.id]}
+          onClose={() => setViewDoc(null)}
         />
       )}
 
-      {/* ── Header ── */}
-      <div className="cp-header">
-        <div className="cp-header-left">
-          <h1>✔ Confirm Portal</h1>
-          <p>
-            Review delivered, on-hold and cancelled documents
+      {fileDoc && (
+        <AddFilePopup
+          doc={fileDoc}
+          reqId={reqIdMap[fileDoc.id]}
+          onConfirm={handleAddToFileConfirm}
+          onCancel={closeFilePopup}
+        />
+      )}
+
+      {/* Header */}
+      <div className="icf-header">
+        <div className="icf-header-left">
+          <h1>✔ Issue Confirm</h1>
+          <p>Delivered, on-hold and cancelled documents in one place
             {lastUpdated && (
-              <span className="cp-updated">
+              <span className="icf-updated">
                 {refreshing ? "⟳ Refreshing..." : `Updated: ${lastUpdated.toLocaleTimeString()}`}
               </span>
             )}
           </p>
         </div>
-        <button className="cp-btn cp-btn-outline" onClick={() => fetchDocuments(false)}>
-          ↻ Refresh
-        </button>
+        <button className="icf-btn icf-btn-outline" onClick={() => fetchDocuments(false)}>↻ Refresh</button>
+      </div>
+
+      {/* Toolbar — the 3-way status filter */}
+      <div className="icf-toolbar">
+        <select
+          className="icf-filter-select"
+          value={filterStatus}
+          onChange={e => setFilterStatus(e.target.value)}
+        >
+          <option value="ALL">All Status</option>
+          <option value="completed">Delivered</option>
+          <option value="onhold">Hold</option>
+          <option value="cancelled">Cancelled</option>
+        </select>
+
+        <div className="icf-stats">
+          <div className="icf-stat-chip completed">Delivered <strong>{counts.completed}</strong></div>
+          <div className="icf-stat-chip onhold">Hold <strong>{counts.onhold}</strong></div>
+          <div className="icf-stat-chip cancelled">Cancelled <strong>{counts.cancelled}</strong></div>
+        </div>
       </div>
 
       {error && (
-        <div className="cp-error">
-          ⚠ {error} —{" "}
-          <button onClick={() => fetchDocuments(false)}>retry</button>
+        <div className="icf-error">
+          ⚠ {error} — <button onClick={() => fetchDocuments(false)}>retry</button>
         </div>
       )}
 
-      {/* ── Delivered pool ── */}
-      <section className="cp-section">
-        <div className="cp-section-head">
-          <h2>✅ Delivered <span className="cp-count">{deliveredDocs.length}</span></h2>
-        </div>
-        {loading ? <div className="cp-empty">Loading...</div> : (
-          <DeliveredTable docs={deliveredDocs} onConfirmClick={(doc) => openConfirm(doc, "delivered")} />
-        )}
-      </section>
+      {/* Unified table */}
+      <div className="icf-table-wrap">
+        <table className="icf-table">
+          <thead>
+            <tr>
+              <th>Status</th>
+              <th>Req ID</th>
+              <th>Doc No</th>
+              <th>Requested By</th>
+              <th>Delivery Vehicle</th>
+              <th>Delivered By</th>
+              <th>Cancelled By</th>
+              <th>Hold By / Reason</th>
+              <th>Date / Time</th>
+              <th>Job Type</th>
+              <th>View</th>
+              <th>File No.</th>
+            </tr>
+          </thead>
+          <tbody>
+            {loading ? (
+              <tr><td colSpan={12} className="icf-empty-cell">Loading...</td></tr>
+            ) : visible.length === 0 ? (
+              <tr><td colSpan={12} className="icf-empty-cell">No documents found.</td></tr>
+            ) : (
+              visible.map(doc => {
+                const sc = statusClass(doc.deliveryStatus);
+                const info = eventInfo(doc);
+                const ds = displayStatus(doc);
 
-      {/* ── Hold pool ── */}
-      <section className="cp-section">
-        <div className="cp-section-head">
-          <h2>⏸ On Hold <span className="cp-count onhold">{onHoldDocs.length}</span></h2>
-        </div>
-        {loading ? <div className="cp-empty">Loading...</div> : (
-          <HoldTable docs={onHoldDocs} />
-        )}
-      </section>
-
-      {/* ── Cancelled pool ── */}
-      <section className="cp-section">
-        <div className="cp-section-head">
-          <h2>✕ Cancelled <span className="cp-count cancelled">{cancelledDocs.length}</span></h2>
-        </div>
-        {loading ? <div className="cp-empty">Loading...</div> : (
-          <CancelledTable docs={cancelledDocs} onConfirmClick={(doc) => openConfirm(doc, "cancelled")} />
-        )}
-      </section>
+                return (
+                  <tr key={doc.id} className="icf-row">
+                    <td><span className={`icf-badge ${ds.cls}`}>{ds.label}</span></td>
+                    <td className="icf-td-reqid">{doc.reqId || reqIdMap[doc.id] || "—"}</td>
+                    <td className="icf-td-docno">{doc.printDocumentNo || `Doc #${doc.id}`}</td>
+                    <td>{doc.requestedBy || "—"}</td>
+                    <td>🚐 {doc.deliveryVehicleNo || "—"}</td>
+                    <td>{sc === "completed" ? `👤 ${info.by || "—"}` : "—"}</td>
+                    <td>{sc === "cancelled" ? `👤 ${info.by || "—"}` : "—"}</td>
+                    <td>
+                      {sc === "onhold"
+                        ? <>👤 {info.by || "—"}<br /><span className="icf-reason">{info.reason || "—"}</span></>
+                        : "—"}
+                    </td>
+                    <td className="icf-td-datetime">{formatDateTime(info.dateTime)}</td>
+                    <td>{doc.jobType || "—"}</td>
+                    <td>
+                      <button className="icf-btn-view" onClick={() => setViewDoc(doc)}>👁 View</button>
+                    </td>
+                    <td>
+                      {doc.fileNumber ? (
+                        <span className="icf-filenum">📁 {doc.fileNumber}</span>
+                      ) : (
+                        <button
+                          className="icf-btn-addfile"
+                          disabled={savingId === doc.id}
+                          onClick={() => handleAddToFileClick(doc)}
+                        >
+                          {savingId === doc.id ? "Saving..." : "＋ Add to File"}
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })
+            )}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }

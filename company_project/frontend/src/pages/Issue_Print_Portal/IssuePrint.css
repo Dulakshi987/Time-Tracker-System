@@ -156,11 +156,6 @@
   width: 100%;
 }
 
-.ip-card.status-pending::before    { background: var(--ip-amber); }
-.ip-card.status-inprogress::before { background: var(--ip-accent); }
-.ip-card.status-onhold::before     { background: var(--ip-orange); }
-.ip-card.status-completed::before  { background: var(--ip-green); }
-
 .ip-card-head {
   padding: 16px 18px 12px;
   display: flex;
@@ -177,6 +172,14 @@
   letter-spacing: 0.02em;
 }
 
+/* NEW: entered Document Number shown just below the Request ID */
+.ip-doc-number-sub {
+  font-size: 0.74rem;
+  color: var(--ip-muted);
+  margin-top: 2px;
+  font-weight: 500;
+}
+
 .ip-badge {
   font-size: 0.7rem;
   font-weight: 600;
@@ -187,11 +190,6 @@
   white-space: nowrap;
   flex-shrink: 0;
 }
-
-.ip-badge.pending    { background: rgba(245,158,11,0.15); color: var(--ip-amber); }
-.ip-badge.inprogress { background: var(--ip-accent-soft); color: var(--ip-accent); }
-.ip-badge.onhold     { background: rgba(251,146,60,0.15); color: var(--ip-orange); }
-.ip-badge.completed  { background: rgba(34,197,94,0.15);  color: var(--ip-green); }
 
 .ip-card-body {
   padding: 14px 18px;
@@ -284,10 +282,15 @@
 .ip-print-done-row span:last-child  { color: var(--ip-text); font-weight: 600; }
 
 .ip-card-foot {
-  padding: 12px 18px;
+  padding: 12px 14px;
   border-top: 1px solid var(--ip-border);
   display: flex;
-  gap: 8px;
+  gap: 6px;
+}
+
+.ip-card-foot .ip-btn {
+  font-size: 0.72rem;
+  padding: 7px 2px;
 }
 
 .ip-btn {
@@ -304,16 +307,6 @@
 
 .ip-btn:active { transform: scale(0.97); }
 .ip-btn:disabled { opacity: 0.35; cursor: not-allowed; }
-
-.ip-btn-start  { background: var(--ip-accent); color: #fff; }
-.ip-btn-start:hover:not(:disabled)  { opacity: 0.88; }
-
-.ip-btn-hold   { background: var(--ip-orange); color: #1a0f00; }
-.ip-btn-hold:hover:not(:disabled)   { opacity: 0.88; }
-.ip-btn-hold:disabled { background: #4b3a26; color: var(--ip-muted); }
-
-.ip-btn-end    { background: var(--ip-green); color: #fff; }
-.ip-btn-end:hover:not(:disabled)    { opacity: 0.88; }
 
 .ip-btn-outline {
   background: transparent;
@@ -518,3 +511,141 @@
   .ip-grid { grid-template-columns: 1fr; }
   .ip-header { flex-direction: column; align-items: flex-start; }
 }
+
+/* ─── Date Range Filter ────────────────────────────────────────────── */
+.ip-date-filter {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--ip-surface);
+  border: 1px solid var(--ip-border);
+  border-radius: var(--ip-radius);
+  padding: 6px 10px;
+}
+
+.ip-date-filter-icon {
+  font-size: 0.85rem;
+  flex-shrink: 0;
+}
+
+.ip-date-input {
+  background: transparent;
+  border: none;
+  color: var(--ip-text);
+  font-size: 0.8rem;
+  font-family: inherit;
+  outline: none;
+  cursor: pointer;
+  padding: 3px 2px;
+  color-scheme: dark;
+}
+
+.ip-date-input::-webkit-calendar-picker-indicator {
+  filter: invert(0.6);
+  cursor: pointer;
+}
+
+.ip-date-sep {
+  color: var(--ip-muted);
+  font-size: 0.75rem;
+}
+
+.ip-date-clear {
+  background: rgba(239, 68, 68, 0.15);
+  border: none;
+  color: var(--ip-red);
+  border-radius: 5px;
+  width: 20px;
+  height: 20px;
+  font-size: 0.7rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: opacity 0.15s;
+}
+
+.ip-date-clear:hover { opacity: 0.8; }
+
+@media (max-width: 640px) {
+  .ip-date-filter { flex-wrap: wrap; }
+}
+
+/* ─── Handover status ──────────────────────────────────────────────── */
+.ip-card.status-pending::before    { background: #f59e0b; }  /* amber = Pending Handover */
+.ip-card.status-inprogress::before { background: #3b82f6; }  /* blue  = Handed Over  */
+.ip-card.status-onhold::before     { background: #fb923c; }  /* orange = On Hold     */
+.ip-card.status-completed::before  { background: #22c55e; }  /* green = Print Done   */
+
+.ip-badge.pending    { background: rgba(245,158,11,0.15); color: #f59e0b; }
+.ip-badge.inprogress { background: rgba(59,130,246,0.15); color: #3b82f6; }
+.ip-badge.onhold     { background: rgba(251,146,60,0.15); color: #fb923c; }
+.ip-badge.completed  { background: rgba(34,197,94,0.15);  color: #22c55e; }
+
+/* ─── Handover box ─────────────────────────────────────────────────── */
+.ip-handover-box {
+  margin-top: 6px;
+  background: rgba(59, 130, 246, 0.08);
+  border: 1px solid rgba(59, 130, 246, 0.3);
+  border-radius: 8px;
+  padding: 8px 14px;
+}
+
+.ip-handover-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.8rem;
+}
+.ip-handover-row span:first-child { color: #3b82f6; font-weight: 600; }
+.ip-handover-row span:last-child  { color: #e2e8f0; font-weight: 600; }
+
+/* ─── Colored buttons ──────────────────────────────────────────────── */
+/* Handover/Resume = Blue */
+.ip-btn-start {
+  background: #3b82f6;
+  color: #fff;
+}
+.ip-btn-start:hover:not(:disabled) { opacity: 0.88; }
+.ip-btn-start:disabled { background: #1e3a5f; color: #4a6fa5; cursor: not-allowed; opacity:1; }
+
+/* Hold = Orange */
+.ip-btn-hold {
+  background: #fb923c;
+  color: #1a0f00;
+}
+.ip-btn-hold:hover:not(:disabled) { opacity: 0.88; }
+.ip-btn-hold:disabled { background: #4b3a26; color: #7c5a3a; cursor: not-allowed; opacity:1; }
+
+/* Print Done = Green */
+.ip-btn-end {
+  background: #22c55e;
+  color: #fff;
+}
+.ip-btn-end:hover:not(:disabled) { opacity: 0.88; }
+.ip-btn-end:disabled { background: #1a3d2a; color: #3a6a4a; cursor: not-allowed; opacity:1; }
+
+/* Handover action button on the card (1st of 4 buttons) — indigo, distinct from Start */
+.ip-btn-handover-action {
+  background: #8b5cf6;
+  color: #fff;
+}
+.ip-btn-handover-action:hover:not(:disabled) { opacity: 0.88; }
+.ip-btn-handover-action:disabled { background: #362a52; color: #6b5a8f; cursor: not-allowed; opacity: 1; }
+
+/* Handover confirm button */
+.ip-btn-handover {
+  flex: 1;
+  padding: 10px 0;
+  background: #3b82f6;
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  font-size: 0.875rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: opacity 0.15s;
+  font-family: inherit;
+}
+.ip-btn-handover:hover:not(:disabled) { opacity: 0.88; }
+.ip-btn-handover:disabled { opacity: 0.4; cursor: not-allowed; }

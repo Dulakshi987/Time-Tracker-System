@@ -9,6 +9,9 @@ import org.springframework.web.bind.annotation.*;
 import java.util.List;
 import java.util.Map;
 
+// ⚠ This controller + its service did not exist at all before.
+// /api/delivery-portal was 404ing — Delivery Portal page and Issue Confirm
+// Portal (which reads from the same endpoint) could never load real data.
 @RestController
 @RequestMapping("/api/delivery-portal")
 @CrossOrigin(origins = "http://localhost:5173")
@@ -17,7 +20,6 @@ public class DeliveryPortalController {
     @Autowired
     private DeliveryPortalService deliveryPortalService;
 
-    // ── GET all documents (only Check Done items) ───────────────────────
     @GetMapping
     public ResponseEntity<List<Issue>> getAll() {
         return ResponseEntity.ok(deliveryPortalService.getAllDocuments());
@@ -38,53 +40,60 @@ public class DeliveryPortalController {
     }
 
     @GetMapping("/status/{status}")
-    public ResponseEntity<List<Issue>> getByDeliveryStatus(@PathVariable String status) {
+    public ResponseEntity<List<Issue>> getByStatus(@PathVariable String status) {
         return ResponseEntity.ok(deliveryPortalService.getByDeliveryStatus(status));
     }
 
-    // ── PUT Hold ───────────────────────────────────────────────────────
+    // body: { holdReason, heldBy }
     @PutMapping("/{id}/hold")
-    public ResponseEntity<Issue> hold(
-            @PathVariable Long id,
-            @RequestBody Map<String, String> body) {
-
-        String holdReason = body.getOrDefault("holdReason", "");
-        String heldBy     = body.getOrDefault("heldBy", "");
-
+    public ResponseEntity<Issue> hold(@PathVariable Long id, @RequestBody Map<String, String> body) {
         try {
-            return ResponseEntity.ok(deliveryPortalService.holdDelivery(id, holdReason, heldBy));
+            return ResponseEntity.ok(deliveryPortalService.holdDelivery(
+                    id, body.getOrDefault("holdReason", ""), body.getOrDefault("heldBy", "")));
         } catch (RuntimeException e) {
             return ResponseEntity.notFound().build();
         }
     }
 
-    // ── PUT End (Delivery Done) ──────────────────────────────────────────
+    // body: { deliveredBy, vehicleNo }
     @PutMapping("/{id}/end")
-    public ResponseEntity<Issue> end(
-            @PathVariable Long id,
-            @RequestBody Map<String, String> body) {
-
-        String deliveredBy = body.getOrDefault("deliveredBy", "");
-        String vehicleNo   = body.getOrDefault("vehicleNo", "");
-
+    public ResponseEntity<Issue> end(@PathVariable Long id, @RequestBody Map<String, String> body) {
         try {
-            return ResponseEntity.ok(deliveryPortalService.endDelivery(id, deliveredBy, vehicleNo));
+            return ResponseEntity.ok(deliveryPortalService.endDelivery(
+                    id, body.getOrDefault("deliveredBy", ""), body.getOrDefault("vehicleNo", "")));
         } catch (RuntimeException e) {
             return ResponseEntity.notFound().build();
         }
     }
 
-    // ── PUT Cancel ─────────────────────────────────────────────────────
+    // body: { cancelReason, cancelledBy }
     @PutMapping("/{id}/cancel")
-    public ResponseEntity<Issue> cancel(
-            @PathVariable Long id,
-            @RequestBody Map<String, String> body) {
-
-        String cancelReason = body.getOrDefault("cancelReason", "");
-        String cancelledBy  = body.getOrDefault("cancelledBy", "");
-
+    public ResponseEntity<Issue> cancel(@PathVariable Long id, @RequestBody Map<String, String> body) {
         try {
-            return ResponseEntity.ok(deliveryPortalService.cancelDelivery(id, cancelReason, cancelledBy));
+            return ResponseEntity.ok(deliveryPortalService.cancelDelivery(
+                    id, body.getOrDefault("cancelReason", ""), body.getOrDefault("cancelledBy", "")));
+        } catch (RuntimeException e) {
+            return ResponseEntity.notFound().build();
+        }
+    }
+
+    // body: { vehicleNo } — the *request* vehicle number
+    @PutMapping("/{id}/vehicle")
+    public ResponseEntity<Issue> updateVehicle(@PathVariable Long id, @RequestBody Map<String, String> body) {
+        try {
+            return ResponseEntity.ok(deliveryPortalService.updateVehicleNo(
+                    id, body.getOrDefault("vehicleNo", "")));
+        } catch (RuntimeException e) {
+            return ResponseEntity.notFound().build();
+        }
+    }
+
+    // body: { deliveryVehicleNo } — the *delivery-time* vehicle number
+    @PutMapping("/{id}/delivery-vehicle")
+    public ResponseEntity<Issue> updateDeliveryVehicle(@PathVariable Long id, @RequestBody Map<String, String> body) {
+        try {
+            return ResponseEntity.ok(deliveryPortalService.updateDeliveryVehicleNo(
+                    id, body.getOrDefault("deliveryVehicleNo", "")));
         } catch (RuntimeException e) {
             return ResponseEntity.notFound().build();
         }
@@ -95,22 +104,4 @@ public class DeliveryPortalController {
         deliveryPortalService.delete(id);
         return ResponseEntity.noContent().build();
     }
-
-    @PutMapping("/{id}/confirm-delivery")
-public ResponseEntity<Issue> confirmDelivery(@PathVariable Long id, @RequestBody Map<String, String> body) {
-    try {
-        return ResponseEntity.ok(deliveryPortalService.confirmDelivery(id, body.getOrDefault("confirmedBy", "")));
-    } catch (RuntimeException e) {
-        return ResponseEntity.notFound().build();
-    }
-}
-
-@PutMapping("/{id}/confirm-cancel")
-public ResponseEntity<Issue> confirmCancel(@PathVariable Long id, @RequestBody Map<String, String> body) {
-    try {
-        return ResponseEntity.ok(deliveryPortalService.confirmCancel(id, body.getOrDefault("confirmedBy", "")));
-    } catch (RuntimeException e) {
-        return ResponseEntity.notFound().build();
-    }
-}
 }

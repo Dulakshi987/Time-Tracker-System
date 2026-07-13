@@ -17,7 +17,6 @@ public class IssuePrintController {
     @Autowired
     private IssuePrintService issuePrintService;
 
-    // ── GET all documents (cart view) ──────────────────────────────────
     @GetMapping
     public ResponseEntity<List<Issue>> getAll() {
         return ResponseEntity.ok(issuePrintService.getAllDocuments());
@@ -25,11 +24,8 @@ public class IssuePrintController {
 
     @GetMapping("/{id}")
     public ResponseEntity<Issue> getById(@PathVariable Long id) {
-        try {
-            return ResponseEntity.ok(issuePrintService.getById(id));
-        } catch (RuntimeException e) {
-            return ResponseEntity.notFound().build();
-        }
+        try { return ResponseEntity.ok(issuePrintService.getById(id)); }
+        catch (RuntimeException e) { return ResponseEntity.notFound().build(); }
     }
 
     @GetMapping("/type/{jobType}")
@@ -42,47 +38,49 @@ public class IssuePrintController {
         return ResponseEntity.ok(issuePrintService.getByPrintStatus(status));
     }
 
-    // ── PUT Start / Resume ───────────────────────────────────────────────
-    @PutMapping("/{id}/start")
-    public ResponseEntity<Issue> start(@PathVariable Long id) {
+    // Step 1: Handover — records who handed the document over
+    @PutMapping("/{id}/handover")
+    public ResponseEntity<Issue> handover(
+            @PathVariable Long id,
+            @RequestBody Map<String, String> body) {
         try {
-            return ResponseEntity.ok(issuePrintService.startPrint(id));
-        } catch (RuntimeException e) {
-            return ResponseEntity.notFound().build();
-        }
+            return ResponseEntity.ok(issuePrintService.handoverPrint(
+                id, body.getOrDefault("handedOverBy", "")
+            ));
+        } catch (RuntimeException e) { return ResponseEntity.notFound().build(); }
     }
 
-    // ── PUT Hold ───────────────────────────────────────────────────────
+    // Step 2: Start / Resume — no body needed, name was captured at Handover
+    @PutMapping("/{id}/start")
+    public ResponseEntity<Issue> start(@PathVariable Long id) {
+        try { return ResponseEntity.ok(issuePrintService.startPrint(id)); }
+        catch (RuntimeException e) { return ResponseEntity.notFound().build(); }
+    }
+
     @PutMapping("/{id}/hold")
     public ResponseEntity<Issue> hold(
             @PathVariable Long id,
             @RequestBody Map<String, String> body) {
-
-        String holdReason = body.getOrDefault("holdReason", "");
-        String heldBy     = body.getOrDefault("heldBy", "");
-
         try {
-            return ResponseEntity.ok(issuePrintService.holdPrint(id, holdReason, heldBy));
-        } catch (RuntimeException e) {
-            return ResponseEntity.notFound().build();
-        }
+            return ResponseEntity.ok(issuePrintService.holdPrint(
+                id,
+                body.getOrDefault("holdReason", ""),
+                body.getOrDefault("heldBy", "")
+            ));
+        } catch (RuntimeException e) { return ResponseEntity.notFound().build(); }
     }
 
-    // ── PUT End (Print Done) ─────────────────────────────────────────────
-    // body: { printDocumentNo, printedBy }
     @PutMapping("/{id}/end")
     public ResponseEntity<Issue> end(
             @PathVariable Long id,
             @RequestBody Map<String, String> body) {
-
-        String printDocumentNo = body.getOrDefault("printDocumentNo", "");
-        String printedBy       = body.getOrDefault("printedBy", "");
-
         try {
-            return ResponseEntity.ok(issuePrintService.endPrint(id, printDocumentNo, printedBy));
-        } catch (RuntimeException e) {
-            return ResponseEntity.notFound().build();
-        }
+            return ResponseEntity.ok(issuePrintService.endPrint(
+                id,
+                body.getOrDefault("printDocumentNo", ""),
+                body.getOrDefault("printedBy", "")
+            ));
+        } catch (RuntimeException e) { return ResponseEntity.notFound().build(); }
     }
 
     @DeleteMapping("/{id}")
@@ -90,4 +88,4 @@ public class IssuePrintController {
         issuePrintService.delete(id);
         return ResponseEntity.noContent().build();
     }
-} 
+}

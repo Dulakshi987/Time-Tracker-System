@@ -15,7 +15,6 @@ public class IssuePrintService {
     @Autowired
     private IssueRepository issueRepository;
 
-    // ── Get all documents (cart view) ──────────────────────────────────
     public List<Issue> getAllDocuments() {
         return issueRepository.findAll();
     }
@@ -33,48 +32,56 @@ public class IssuePrintService {
         return issueRepository.findByPrintStatus(printStatus);
     }
 
-    // ── Start / Resume print ─────────────────────────────────────────────
-    // PENDING -> IN_PROGRESS : set printStartTime
-    // ON_HOLD -> IN_PROGRESS : accumulate hold time
+    // ── Step 1: Handover ── PENDING -> HANDED_OVER ──────────────────────
+    // Records who handed the document over. Work has not started yet.
+    public Issue handoverPrint(Long id, String handedOverBy) {
+        Issue doc = getById(id);
+        doc.setPrintHandedOverBy(handedOverBy);
+        doc.setPrintHandoverTime(LocalDateTime.now());
+        doc.setPrintStatus("HANDED_OVER");
+        doc.setPrintTotalHoldSeconds(0L);
+        return issueRepository.save(doc);
+    }
+
+    // ── Step 2: Start / Resume ── HANDED_OVER -> IN_PROGRESS, ───────────
+    // ── or ON_HOLD -> IN_PROGRESS (resume) ───────────────────────────────
     public Issue startPrint(Long id) {
         Issue doc = getById(id);
 
         if ("ON_HOLD".equals(doc.getPrintStatus())) {
+            // Resume from hold
             LocalDateTime now = LocalDateTime.now();
             doc.setPrintResumeTime(now);
-
             if (doc.getPrintHoldTime() != null) {
-                long holdSeconds = Duration.between(doc.getPrintHoldTime(), now).getSeconds();
+                long holdSec = Duration.between(doc.getPrintHoldTime(), now).getSeconds();
                 long existing = doc.getPrintTotalHoldSeconds() != null ? doc.getPrintTotalHoldSeconds() : 0L;
-                doc.setPrintTotalHoldSeconds(existing + holdSeconds);
+                doc.setPrintTotalHoldSeconds(existing + holdSec);
             }
         } else {
+            // First start, right after handover
             doc.setPrintStartTime(LocalDateTime.now());
-            doc.setPrintTotalHoldSeconds(0L);
+            if (doc.getPrintTotalHoldSeconds() == null) {
+                doc.setPrintTotalHoldSeconds(0L);
+            }
         }
 
         doc.setPrintStatus("IN_PROGRESS");
         return issueRepository.save(doc);
     }
 
-    // ── Hold print ────────────────────────────────────────────────────────
+    // ── Hold ── IN_PROGRESS -> ON_HOLD ───────────────────────────────────
     public Issue holdPrint(Long id, String holdReason, String heldBy) {
         Issue doc = getById(id);
-
         doc.setPrintStatus("ON_HOLD");
         doc.setPrintHoldTime(LocalDateTime.now());
         doc.setPrintHoldReason(holdReason);
         doc.setPrintHeldBy(heldBy);
-
         return issueRepository.save(doc);
     }
 
-    // ── End print (Print Done) ───────────────────────────────────────────
-    // Needs: printDocumentNo, printedBy
-    // Calculates: printDurationSeconds = totalElapsed - totalHoldSeconds
+    // ── End ── IN_PROGRESS / ON_HOLD -> COMPLETED ────────────────────────
     public Issue endPrint(Long id, String printDocumentNo, String printedBy) {
         Issue doc = getById(id);
-
         LocalDateTime endTime = LocalDateTime.now();
         doc.setPrintStatus("COMPLETED");
         doc.setPrintEndTime(endTime);
@@ -82,10 +89,9 @@ public class IssuePrintService {
         doc.setPrintedBy(printedBy);
 
         if (doc.getPrintStartTime() != null) {
-            long totalElapsed = Duration.between(doc.getPrintStartTime(), endTime).getSeconds();
-            long holdTime     = doc.getPrintTotalHoldSeconds() != null ? doc.getPrintTotalHoldSeconds() : 0L;
-            long workingTime  = totalElapsed - holdTime;
-            doc.setPrintDurationSeconds(Math.max(workingTime, 0));
+            long total    = Duration.between(doc.getPrintStartTime(), endTime).getSeconds();
+            long holdTime = doc.getPrintTotalHoldSeconds() != null ? doc.getPrintTotalHoldSeconds() : 0L;
+            doc.setPrintDurationSeconds(Math.max(total - holdTime, 0));
         }
 
         return issueRepository.save(doc);

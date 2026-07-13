@@ -15,7 +15,6 @@ public class IssuePickService {
     @Autowired
     private IssueRepository issueRepository;
 
-    // ── Get all documents (cart view) ──────────────────────────────────
     public List<Issue> getAllDocuments() {
         return issueRepository.findAll();
     }
@@ -33,14 +32,10 @@ public class IssuePickService {
         return issueRepository.findByStatus(status);
     }
 
-    // ── Start / Resume print ─────────────────────────────────────────────
-    // PENDING -> IN_PROGRESS : set startTime
-    // ON_HOLD -> IN_PROGRESS : add elapsed hold time to totalHoldSeconds, clear holdTime
     public Issue startPrint(Long id) {
         Issue doc = getById(id);
 
         if ("ON_HOLD".equals(doc.getStatus())) {
-            // Resuming from hold — accumulate the hold duration
             LocalDateTime now = LocalDateTime.now();
             doc.setResumeTime(now);
 
@@ -50,7 +45,6 @@ public class IssuePickService {
                 doc.setTotalHoldSeconds(existing + holdSeconds);
             }
         } else {
-            // First start
             doc.setStartTime(LocalDateTime.now());
             doc.setTotalHoldSeconds(0L);
         }
@@ -59,8 +53,6 @@ public class IssuePickService {
         return issueRepository.save(doc);
     }
 
-    // ── Hold print ────────────────────────────────────────────────────────
-    // IN_PROGRESS -> ON_HOLD : record holdTime, holdReason, heldBy
     public Issue holdPrint(Long id, String holdReason, String heldBy) {
         Issue doc = getById(id);
 
@@ -72,8 +64,6 @@ public class IssuePickService {
         return issueRepository.save(doc);
     }
 
-    // ── End print ─────────────────────────────────────────────────────────
-    // -> COMPLETED : durationSeconds = (endTime - startTime) - totalHoldSeconds
     public Issue endPrint(Long id, String pickedBy) {
         Issue doc = getById(id);
 
@@ -88,6 +78,17 @@ public class IssuePickService {
             long workingTime  = totalElapsed - holdTime;
             doc.setDurationSeconds(Math.max(workingTime, 0));
         }
+
+        return issueRepository.save(doc);
+    }
+
+    // ── Emergency Pick Done (resolves a wrong-material flag raised by Check) ──
+    public Issue emergencyResolve(Long id, String resolvedBy) {
+        Issue doc = getById(id);
+
+        doc.setEmergencyPickResolved(true);
+        doc.setEmergencyPickResolvedBy(resolvedBy);
+        doc.setEmergencyResolvedTime(LocalDateTime.now());
 
         return issueRepository.save(doc);
     }

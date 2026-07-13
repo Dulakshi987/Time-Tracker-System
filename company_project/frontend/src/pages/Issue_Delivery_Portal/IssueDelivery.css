@@ -834,3 +834,141 @@
 
 .ip-btn-cancel-confirm:hover:not(:disabled) { opacity: 0.88; }
 .ip-btn-cancel-confirm:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* ══════════════════════════════════════════════════════════════════
+   BELOW: NEW STYLES for Delivery Portal — Requested By / Vehicle No
+   column, Delivery Vehicle No column, inline edit button, and the
+   side-drawer full-trail View panel (replaces the old centered
+   .ip-view-popup card for this screen).
+   ══════════════════════════════════════════════════════════════════ */
+
+/* ── Requested By / Vehicle No + Delivery Vehicle No columns ── */
+.ip-td-requested {
+  font-size: 0.82rem;
+}
+.ip-td-vehicle {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: #9aa5c0;
+  margin-top: 2px;
+  font-size: 0.78rem;
+}
+.ip-inline-edit-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 0.78rem;
+  padding: 0 2px;
+  opacity: 0.75;
+}
+.ip-inline-edit-btn:hover {
+  opacity: 1;
+}
+
+/* ── Side Drawer (replaces the old centered ViewPopup) ── */
+.ip-drawer-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(10, 12, 24, 0.55);
+  display: flex;
+  justify-content: flex-end;
+  z-index: 1000;
+  animation: ip-fade-in 0.15s ease;
+}
+
+.ip-drawer {
+  width: min(480px, 100%);
+  height: 100%;
+  background: #12162a;
+  border-left: 1px solid #262c4a;
+  display: flex;
+  flex-direction: column;
+  box-shadow: -12px 0 40px rgba(0,0,0,0.35);
+  animation: ip-slide-in 0.22s ease;
+}
+
+@keyframes ip-slide-in {
+  from { transform: translateX(100%); }
+  to   { transform: translateX(0); }
+}
+@keyframes ip-fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+.ip-drawer-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 18px 20px;
+  border-bottom: 1px solid #262c4a;
+  flex-shrink: 0;
+}
+.ip-drawer-title {
+  font-weight: 700;
+  font-size: 1rem;
+  color: #f1f3fb;
+}
+
+.ip-drawer-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px 20px 24px;
+}
+
+/* ── Sections inside the drawer ── */
+.ip-view-section {
+  background: #161b33;
+  border: 1px solid #262c4a;
+  border-radius: 10px;
+  padding: 14px 16px;
+  margin-bottom: 14px;
+  border-left: 3px solid #3b4266;
+}
+.ip-view-section.accent-print    { border-left-color: #3b82f6; }
+.ip-view-section.accent-pick     { border-left-color: #34d399; }
+.ip-view-section.accent-check    { border-left-color: #a78bfa; }
+.ip-view-section.accent-delivery { border-left-color: #f59e0b; }
+.ip-view-section.accent-hold     { border-left-color: #fb923c; }
+.ip-view-section.accent-cancel   { border-left-color: #ef4444; }
+
+.ip-view-section-head {
+  font-weight: 700;
+  font-size: 0.88rem;
+  color: #e4e7f5;
+  margin-bottom: 10px;
+}
+
+/* scoped so it does NOT clash with the .ip-detail-row used by the older
+   card-based popup (.ip-card-body .ip-detail-row) elsewhere in the app */
+.ip-view-section-body .ip-detail-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 5px 0;
+  border-bottom: 1px dashed #232848;
+  font-size: 0.82rem;
+}
+.ip-view-section-body .ip-detail-row:last-child {
+  border-bottom: none;
+}
+.ip-view-section-body .ip-detail-label {
+  color: #8891b3;
+  flex-shrink: 0;
+  min-width: 0;
+}
+.ip-view-section-body .ip-detail-value {
+  color: #e4e7f5;
+  text-align: right;
+  font-weight: 600;
+}
+
+.ip-view-subhead {
+  margin: 10px 0 4px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: #fbbf24;
+  border-top: 1px dashed #232848;
+  padding-top: 8px;
+}

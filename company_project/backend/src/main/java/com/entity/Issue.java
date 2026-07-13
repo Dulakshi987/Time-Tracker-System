@@ -207,6 +207,17 @@ public class Issue {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
+     // ── NEW: who requested this document (shown under Request Date/Time) ──
+    @Column(name = "requested_by")
+    private String requestedBy;
+ 
+    // ── NEW: vehicle number for the request (shown under Requested By) ──
+    @Column(name = "vehicle_no")
+    private String vehicleNo;
+
+     @Column(name = "print_handover_time")
+    private LocalDateTime printHandoverTime;
+
     @Column(name = "customer_name")
     private String customerName;
 
@@ -336,7 +347,18 @@ public class Issue {
  
     @Column(name = "wrong_material_qty")
     private String wrongMaterialQty;   
-    
+   
+    // ── Emergency Pick fields (Check ↔ Pick coordination, NEW) ─────────
+    @Column(name = "emergency_pick_resolved")
+    private Boolean emergencyPickResolved;
+
+    @Column(name = "emergency_pick_resolved_by")
+    private String emergencyPickResolvedBy;
+
+    @Column(name = "emergency_resolved_time")
+    private LocalDateTime emergencyResolvedTime;
+
+    // ── Delivery Portal fields ────────────────────────────────────────
     // ── Delivery Portal fields ────────────────────────────────────────
     @Column(name = "delivery_status")
     private String deliveryStatus;               // PENDING / IN_PROGRESS / ON_HOLD / COMPLETED / CANCELLED
@@ -356,6 +378,9 @@ public class Issue {
     @Column(name = "delivery_hold_reason")
     private String deliveryHoldReason;
  
+    @Column(name = "print_handed_over_by")
+    private String PrintHandedOverBy;
+
     @Column(name = "delivery_held_by")
     private String deliveryHeldBy;
  
@@ -399,4 +424,11 @@ public class Issue {
 
     @Column(name = "cancel_confirm_time")
     private LocalDateTime cancelConfirmTime;
+    
+      // ── Issue Confirm "Add to File" fields (NEW) ───────────────────────
+    @Column(name = "req_id")
+    private String reqId;             // Req ID stamped in at file time, e.g. 20260816/0001
+ 
+    @Column(name = "file_number")
+    private String fileNumber; 
 }

@@ -16,62 +16,40 @@ public class DeliveryPortalService {
     @Autowired
     private IssueRepository issueRepository;
 
-    // ── Get only documents where Check Portal is COMPLETED ─────────────
+    // Only Check-Done documents belong on the Delivery Portal.
     public List<Issue> getAllDocuments() {
-        return issueRepository.findAll()
-                .stream()
-                .filter(doc -> "COMPLETED".equalsIgnoreCase(doc.getCheckStatus()))
+        return issueRepository.findAll().stream()
+                .filter(doc -> "COMPLETED".equalsIgnoreCase(doc.getCheckStatus())
+                        || (doc.getCheckStatus() != null && doc.getCheckStatus().toLowerCase().contains("complete")))
                 .collect(Collectors.toList());
     }
 
     public Issue getById(Long id) {
-        Issue doc = issueRepository.findById(id)
+        return issueRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("Document not found with id: " + id));
-        if (!"COMPLETED".equalsIgnoreCase(doc.getCheckStatus())) {
-            throw new RuntimeException("Document is not Check Done yet, cannot access Delivery Portal");
-        }
-        return doc;
     }
 
     public List<Issue> getByJobType(String jobType) {
-        return issueRepository.findByJobType(jobType)
-                .stream()
-                .filter(doc -> "COMPLETED".equalsIgnoreCase(doc.getCheckStatus()))
-                .collect(Collectors.toList());
+        return issueRepository.findByJobType(jobType);
     }
 
-    public List<Issue> getByDeliveryStatus(String deliveryStatus) {
-        return issueRepository.findByDeliveryStatus(deliveryStatus)
-                .stream()
-                .filter(doc -> "COMPLETED".equalsIgnoreCase(doc.getCheckStatus()))
-                .collect(Collectors.toList());
+    public List<Issue> getByDeliveryStatus(String status) {
+        return issueRepository.findByDeliveryStatus(status);
     }
 
-    // ── Start / Resume delivery ──────────────────────────────────────────
-    public Issue startDelivery(Long id) {
-        Issue doc = getById(id);
-
-        if ("ON_HOLD".equals(doc.getDeliveryStatus())) {
-            LocalDateTime now = LocalDateTime.now();
-            doc.setDeliveryResumeTime(now);
-
-            if (doc.getDeliveryHoldTime() != null) {
-                long holdSeconds = Duration.between(doc.getDeliveryHoldTime(), now).getSeconds();
-                long existing = doc.getDeliveryTotalHoldSeconds() != null ? doc.getDeliveryTotalHoldSeconds() : 0L;
-                doc.setDeliveryTotalHoldSeconds(existing + holdSeconds);
-            }
-        } else {
-            doc.setDeliveryStartTime(LocalDateTime.now());
-            doc.setDeliveryTotalHoldSeconds(0L);
-        }
-
-        doc.setDeliveryStatus("IN_PROGRESS");
-        return issueRepository.save(doc);
-    }
-
-    // ── Hold delivery ──────────────────────────────────────────────────────
+    // body: { holdReason, heldBy }
     public Issue holdDelivery(Long id, String holdReason, String heldBy) {
         Issue doc = getById(id);
+
+        // Accumulate any prior hold period before starting a new one, same
+        // pattern as Pick/Check (Delivery has no explicit Resume button —
+        // the next action, whatever it is, effectively resumes).
+        if (doc.getDeliveryHoldTime() != null && "ON_HOLD".equalsIgnoreCase(doc.getDeliveryStatus())) {
+            LocalDateTime now = LocalDateTime.now();
+            long holdSeconds = Duration.between(doc.getDeliveryHoldTime(), now).getSeconds();
+            long existing = doc.getDeliveryTotalHoldSeconds() != null ? doc.getDeliveryTotalHoldSeconds() : 0L;
+            doc.setDeliveryTotalHoldSeconds(existing + holdSeconds);
+        }
 
         doc.setDeliveryStatus("ON_HOLD");
         doc.setDeliveryHoldTime(LocalDateTime.now());
@@ -81,27 +59,36 @@ public class DeliveryPortalService {
         return issueRepository.save(doc);
     }
 
-    // ── End delivery (Delivery Done) ─────────────────────────────────────
+    // body: { deliveredBy, vehicleNo } — vehicleNo maps to deliveryVehicleNo
     public Issue endDelivery(Long id, String deliveredBy, String vehicleNo) {
         Issue doc = getById(id);
 
         LocalDateTime endTime = LocalDateTime.now();
+
+        // Close out any open hold period before finalising.
+        if ("ON_HOLD".equalsIgnoreCase(doc.getDeliveryStatus()) && doc.getDeliveryHoldTime() != null) {
+            doc.setDeliveryResumeTime(endTime);
+            long holdSeconds = Duration.between(doc.getDeliveryHoldTime(), endTime).getSeconds();
+            long existing = doc.getDeliveryTotalHoldSeconds() != null ? doc.getDeliveryTotalHoldSeconds() : 0L;
+            doc.setDeliveryTotalHoldSeconds(existing + holdSeconds);
+        }
+
         doc.setDeliveryStatus("COMPLETED");
         doc.setDeliveryEndTime(endTime);
         doc.setDeliveredBy(deliveredBy);
         doc.setDeliveryVehicleNo(vehicleNo);
 
-        if (doc.getDeliveryStartTime() != null) {
-            long totalElapsed = Duration.between(doc.getDeliveryStartTime(), endTime).getSeconds();
+        LocalDateTime start = doc.getDeliveryStartTime() != null ? doc.getDeliveryStartTime() : doc.getCheckEndTime();
+        if (start != null) {
+            long totalElapsed = Duration.between(start, endTime).getSeconds();
             long holdTime     = doc.getDeliveryTotalHoldSeconds() != null ? doc.getDeliveryTotalHoldSeconds() : 0L;
-            long workingTime  = totalElapsed - holdTime;
-            doc.setDeliveryDurationSeconds(Math.max(workingTime, 0));
+            doc.setDeliveryDurationSeconds(Math.max(totalElapsed - holdTime, 0));
         }
 
         return issueRepository.save(doc);
     }
 
-    // ── Cancel delivery ───────────────────────────────────────────────────
+    // body: { cancelReason, cancelledBy }
     public Issue cancelDelivery(Long id, String cancelReason, String cancelledBy) {
         Issue doc = getById(id);
 
@@ -113,23 +100,21 @@ public class DeliveryPortalService {
         return issueRepository.save(doc);
     }
 
+    // Request-time vehicle number (doc.vehicleNo)
+    public Issue updateVehicleNo(Long id, String vehicleNo) {
+        Issue doc = getById(id);
+        doc.setVehicleNo(vehicleNo);
+        return issueRepository.save(doc);
+    }
+
+    // Delivery-time vehicle number (doc.deliveryVehicleNo)
+    public Issue updateDeliveryVehicleNo(Long id, String deliveryVehicleNo) {
+        Issue doc = getById(id);
+        doc.setDeliveryVehicleNo(deliveryVehicleNo);
+        return issueRepository.save(doc);
+    }
+
     public void delete(Long id) {
         issueRepository.deleteById(id);
     }
-    
-    public Issue confirmDelivery(Long id, String confirmedBy) {
-        Issue doc = getById(id);
-        doc.setDeliveryConfirmed(true);
-        doc.setDeliveryConfirmedBy(confirmedBy);
-        doc.setDeliveryConfirmTime(LocalDateTime.now());
-        return issueRepository.save(doc);
-}
-
-public Issue confirmCancel(Long id, String confirmedBy) {
-    Issue doc = getById(id);
-    doc.setCancelConfirmed(true);
-    doc.setCancelConfirmedBy(confirmedBy);
-    doc.setCancelConfirmTime(LocalDateTime.now());
-    return issueRepository.save(doc);
-}
 }

@@ -15,7 +15,6 @@ public class CheckPortalService {
     @Autowired
     private IssueRepository issueRepository;
 
-    // ── Get all documents (cart view) ──────────────────────────────────
     public List<Issue> getAllDocuments() {
         return issueRepository.findAll();
     }
@@ -29,11 +28,10 @@ public class CheckPortalService {
         return issueRepository.findByJobType(jobType);
     }
 
-    public List<Issue> getByCheckStatus(String checkStatus) {
-        return issueRepository.findByCheckStatus(checkStatus);
+    public List<Issue> getByCheckStatus(String status) {
+        return issueRepository.findByCheckStatus(status);
     }
 
-    // ── Start / Resume check ─────────────────────────────────────────────
     public Issue startCheck(Long id) {
         Issue doc = getById(id);
 
@@ -55,8 +53,10 @@ public class CheckPortalService {
         return issueRepository.save(doc);
     }
 
-    // ── Hold check ────────────────────────────────────────────────────────
-    public Issue holdCheck(Long id, String holdReason, String heldBy) {
+    // hasWrongMaterial is reported at Hold time (per the frontend's HoldPopup),
+    // not at End — so the picking-error flag is stamped here.
+    public Issue holdCheck(Long id, String holdReason, String heldBy,
+                            String hasWrongMaterial, String wrongMaterialSku, String wrongMaterialQty) {
         Issue doc = getById(id);
 
         doc.setCheckStatus("ON_HOLD");
@@ -64,35 +64,42 @@ public class CheckPortalService {
         doc.setCheckHoldReason(holdReason);
         doc.setCheckHeldBy(heldBy);
 
+        if (hasWrongMaterial != null) {
+            doc.setHasWrongMaterial(hasWrongMaterial);
+            if ("YES".equalsIgnoreCase(hasWrongMaterial)) {
+                doc.setWrongMaterialSku(wrongMaterialSku);
+                doc.setWrongMaterialQty(wrongMaterialQty);
+                // A fresh error report always needs a new Emergency Pick —
+                // clear any stale resolution from a previous cycle.
+                doc.setEmergencyPickResolved(false);
+                doc.setEmergencyPickResolvedBy(null);
+                doc.setEmergencyResolvedTime(null);
+            }
+        }
+
         return issueRepository.save(doc);
     }
 
-    // ── End check (Check Done) ───────────────────────────────────────────
-    // hasWrongMaterial: "YES" or "NO"
-    // If YES -> wrongMaterialSku + wrongMaterialQty required
-    public Issue endCheck(Long id, String checkedBy, String hasWrongMaterial,
-                           String wrongMaterialSku, String wrongMaterialQty) {
+    public Issue endCheck(Long id, String checkedBy) {
         Issue doc = getById(id);
 
         LocalDateTime endTime = LocalDateTime.now();
         doc.setCheckStatus("COMPLETED");
         doc.setCheckEndTime(endTime);
         doc.setCheckedBy(checkedBy);
-        doc.setHasWrongMaterial(hasWrongMaterial);
-
-        if ("YES".equalsIgnoreCase(hasWrongMaterial)) {
-            doc.setWrongMaterialSku(wrongMaterialSku);
-            doc.setWrongMaterialQty(wrongMaterialQty);
-        } else {
-            doc.setWrongMaterialSku(null);
-            doc.setWrongMaterialQty(null);
-        }
 
         if (doc.getCheckStartTime() != null) {
             long totalElapsed = Duration.between(doc.getCheckStartTime(), endTime).getSeconds();
             long holdTime     = doc.getCheckTotalHoldSeconds() != null ? doc.getCheckTotalHoldSeconds() : 0L;
-            long workingTime  = totalElapsed - holdTime;
-            doc.setCheckDurationSeconds(Math.max(workingTime, 0));
+            doc.setCheckDurationSeconds(Math.max(totalElapsed - holdTime, 0));
+        }
+
+        // ── Handoff to Delivery Portal ──
+        // Delivery Portal filters on checkStatus == COMPLETED, but it also
+        // needs a starting point in time to measure its own duration from.
+        if (doc.getDeliveryStatus() == null || doc.getDeliveryStatus().isEmpty()) {
+            doc.setDeliveryStatus("PENDING");
+            doc.setDeliveryStartTime(endTime);
         }
 
         return issueRepository.save(doc);

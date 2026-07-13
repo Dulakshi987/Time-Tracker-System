@@ -11,13 +11,11 @@ public interface DocumentRepository extends JpaRepository<Document, Long> {
 
     List<Document> findByJobType(String jobType);
 
-@Query("""
-SELECT d FROM Document d
-WHERE (:fromDate IS NULL OR d.requestDate >= :fromDate)
-AND (:toDate IS NULL OR d.requestDate <= :toDate)
-""")
-List<Document> findByDateRange(
-        @Param("fromDate") String fromDate,
-        @Param("toDate") String toDate
-);
+    @Query("SELECT d FROM Document d "
+         + "WHERE (:fromDate IS NULL OR d.requestDate >= :fromDate) "
+         + "AND (:toDate IS NULL OR d.requestDate <= :toDate)")
+    List<Document> findByDateRange(
+            @Param("fromDate") String fromDate,
+            @Param("toDate") String toDate
+    );
 }
