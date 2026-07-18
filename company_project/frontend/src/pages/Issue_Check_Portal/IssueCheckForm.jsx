@@ -9,10 +9,19 @@ const PEOPLE_OPTIONS = ["Kavishaka", "Anushi", "Chaminda"];
 
 const HOLD_REASONS = [
   "Printer not available",
-  "Material shortage",
-  "Waiting for approval",
-  "Machine breakdown",
-  "Other",
+ 
+];
+
+// Reasons a Picking Error can be logged under.
+// Only "Material Shortage" and "Material Excess" represent an actual
+// picking error that needs SKU/Qty capture + triggers the Emergency Pick
+// workflow (red banner, hasWrongMaterial flag, etc). "Collected Different
+// Material" is logged for record-keeping but does NOT create a picking
+// error / does not require SKU+Qty or trigger the emergency pick flow.
+const PICKING_ERROR_REASONS = [
+  { key: "SHORTAGE", label: "Material Shortage", createsError: true },
+  { key: "EXCESS", label: "Material Excess", createsError: true },
+  { key: "DIFFERENT", label: "Collected Different Material", createsError: false },
 ];
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -140,26 +149,34 @@ function HoldPopup({ onConfirm, onCancel }) {
   const [reason, setReason]   = useState("");
   const [otherReason, setOtherReason] = useState("");
   const [heldBy, setHeldBy]   = useState("");
-  const [hasWrong, setHasWrong] = useState(null); // "YES" | "NO" | null
+  const [pickingErrorKey, setPickingErrorKey] = useState(null); // "SHORTAGE" | "EXCESS" | "DIFFERENT" | "NONE" | null
   const [sku, setSku]         = useState("");
   const [qty, setQty]         = useState("");
 
   const isOtherReason = reason === "Other";
   const finalReason   = isOtherReason ? otherReason.trim() : reason;
-  const needsDetails  = hasWrong === "YES";
+
+  const selectedErrorReason = PICKING_ERROR_REASONS.find(r => r.key === pickingErrorKey) || null;
+  // Only "Material Shortage" and "Material Excess" actually create a picking
+  // error (and therefore require SKU/Qty). "Collected Different Material" is
+  // recorded but does not create a picking error.
+  const needsDetails = !!selectedErrorReason && selectedErrorReason.createsError;
+
   const canConfirm =
     !!finalReason &&
     !!heldBy &&
-    hasWrong !== null &&
+    pickingErrorKey !== null &&
     (!needsDetails || (sku.trim().length > 0 && qty.trim().length > 0));
 
   const handleConfirm = () => {
+    const hasWrongMaterial = needsDetails ? "YES" : "NO";
     onConfirm(
       finalReason,
       heldBy,
-      hasWrong,
+      hasWrongMaterial,
       needsDetails ? sku.trim() : "",
-      needsDetails ? qty.trim() : ""
+      needsDetails ? qty.trim() : "",
+      pickingErrorKey === "NONE" ? "" : (selectedErrorReason ? selectedErrorReason.label : "")
     );
   };
 
@@ -173,18 +190,21 @@ function HoldPopup({ onConfirm, onCancel }) {
         <p className="ip-popup-sub">Select a reason, who is holding this, and whether there's a picking error</p>
 
         <span className="ip-popup-label">Picking Error?</span>
-        <div className="ip-yesno-row" style={{ marginBottom: needsDetails ? 16 : 16 }}>
+        <div className="ip-popup-options" style={{ marginBottom: needsDetails ? 16 : 16 }}>
+          {PICKING_ERROR_REASONS.map(r => (
+            <button
+              key={r.key}
+              className={`ip-popup-option ${pickingErrorKey === r.key ? "selected" : ""}`}
+              onClick={() => { setPickingErrorKey(r.key); if (!r.createsError) { setSku(""); setQty(""); } }}
+            >
+              {r.createsError ? "⚠️ " : "ℹ️ "}{r.label}
+            </button>
+          ))}
           <button
-            className={`ip-yesno-btn yes ${hasWrong === "YES" ? "selected" : ""}`}
-            onClick={() => setHasWrong("YES")}
+            className={`ip-popup-option ${pickingErrorKey === "NONE" ? "selected" : ""}`}
+            onClick={() => { setPickingErrorKey("NONE"); setSku(""); setQty(""); }}
           >
-            ⚠️ Yes
-          </button>
-          <button
-            className={`ip-yesno-btn no ${hasWrong === "NO" ? "selected" : ""}`}
-            onClick={() => { setHasWrong("NO"); setSku(""); setQty(""); }}
-          >
-            ✅ No
+            ✅ No Picking Error
           </button>
         </div>
 
@@ -332,6 +352,17 @@ function ViewDetailsPopup({ doc, onClose }) {
           {row("Pick Duration", `⏱ ${formatDuration(doc.pickDurationSeconds ?? doc.durationSeconds)}`)}
         </div>
 
+        {doc.pickingErrorReason && (doc.hasWrongMaterial || "").toUpperCase() !== "YES" && (
+          <>
+            <div style={{ marginBottom: 6, fontSize: "0.78rem", fontWeight: 700, color: "#7c8db0" }}>
+              ℹ️ Picking Note
+            </div>
+            <div className="ip-hold-box" style={{ marginBottom: 14 }}>
+              {row("Note", doc.pickingErrorReason)}
+            </div>
+          </>
+        )}
+
         {(doc.hasWrongMaterial || "").toUpperCase() === "YES" && (
           <>
             <div
@@ -350,6 +381,7 @@ function ViewDetailsPopup({ doc, onClose }) {
                 background: doc.emergencyPickResolved ? "rgba(52,211,153,0.08)" : "rgba(239,68,68,0.08)",
               }}
             >
+              {row("Error Type", doc.pickingErrorReason)}
               {row("Wrong SKU / Description", doc.wrongMaterialSku)}
               {row("Quantity", doc.wrongMaterialQty)}
               {row("Re-picked By", doc.emergencyPickResolvedBy && `👤 ${doc.emergencyPickResolvedBy}`)}
@@ -418,7 +450,7 @@ function DocumentCard({ doc, requestId, onStart, onHold, onEnd, onView }) {
             gap: 6,
           }}
         >
-          🚨 PICKING ERROR — Emergency Pick Required
+          🚨 PICKING ERROR{doc.pickingErrorReason ? ` (${doc.pickingErrorReason})` : ""} — Emergency Pick Required
         </div>
       )}
       {hasResolvedError && (
@@ -512,7 +544,7 @@ function DocumentCard({ doc, requestId, onStart, onHold, onEnd, onView }) {
         {isFlagged && (
           <div className="ip-wrong-material-box">
             <div className="ip-wrong-material-row">
-              <span>{hasResolvedError ? "✅ Emergency Pick Done" : "⚠️ Wrong Material"}</span>
+              <span>{hasResolvedError ? "✅ Emergency Pick Done" : "⚠️ " + (doc.pickingErrorReason || "Wrong Material")}</span>
               <span>{doc.wrongMaterialSku || "—"}</span>
             </div>
             <div className="ip-wrong-material-row">
@@ -528,10 +560,20 @@ function DocumentCard({ doc, requestId, onStart, onHold, onEnd, onView }) {
           </div>
         )}
 
+        {/* Collected Different Material — logged, but not a picking error */}
+        {!isFlagged && doc.pickingErrorReason && (
+          <div className="ip-hold-box">
+            <div className="ip-hold-row">
+              <span>ℹ️ Picking Note</span>
+              <span>{doc.pickingErrorReason}</span>
+            </div>
+          </div>
+        )}
+
         {/* Check Done summary */}
         {isDone && (
           <>
-            {!isFlagged && (
+            {!isFlagged && !doc.pickingErrorReason && (
               <div className="ip-no-issue-box">✅ No material issues</div>
             )}
 
@@ -674,13 +716,13 @@ export default function IssueCheckForm() {
   const handleViewClick = (id) => { setActiveId(id); setActivePopup("view"); };
   const closePopup = () => { setActivePopup(null); setActiveId(null); };
 
-  const handleHoldConfirm = async (holdReason, heldBy, hasWrongMaterial, wrongMaterialSku, wrongMaterialQty) => {
+  const handleHoldConfirm = async (holdReason, heldBy, hasWrongMaterial, wrongMaterialSku, wrongMaterialQty, pickingErrorReason) => {
     closePopup();
     try {
       await fetch(`${API_BASE}/${activeId}/hold`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ holdReason, heldBy, hasWrongMaterial, wrongMaterialSku, wrongMaterialQty }),
+        body: JSON.stringify({ holdReason, heldBy, hasWrongMaterial, wrongMaterialSku, wrongMaterialQty, pickingErrorReason }),
       });
       fetchDocuments(true);
     } catch (err) {

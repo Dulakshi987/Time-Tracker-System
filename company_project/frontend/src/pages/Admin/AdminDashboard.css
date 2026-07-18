@@ -458,3 +458,129 @@
 .adm-xl-table th { position:sticky; top:0; background:#dbeeff; color:#1d4ed8; padding:8px 10px; text-align:left; z-index:1; }
 .adm-xl-table td { padding:6px 10px; border-top:1px solid #e8f1fc; color:#0f2b52; }
 .adm-xl-table tbody tr:nth-child(even) { background:#f8fbff; }
+
+/* ── Master Setup panel (10 buttons in one row) ──────────────────────── */
+
+.adm-setup-tabrow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  background: #ffffff;
+  border: 1px solid #d7e8fb;
+  border-radius: 12px;
+  padding: 10px;
+  margin-bottom: 18px;
+  box-shadow: 0 1px 4px rgba(59, 130, 246, 0.06);
+}
+
+.adm-setup-tab-btn {
+  background: #eaf3ff;
+  color: #1d4ed8;
+  border: none;
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-weight: 700;
+  font-size: 0.74rem;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s, color 0.15s;
+}
+
+.adm-setup-tab-btn:hover {
+  background: #d7e8fb;
+}
+
+.adm-setup-tab-btn.active {
+  background: linear-gradient(135deg, #60a5fa, #3b82f6);
+  color: #ffffff;
+  box-shadow: 0 2px 8px rgba(59, 130, 246, 0.35);
+}
+
+.adm-setup-panel-body {
+  background: #ffffff;
+  border: 1px solid #d7e8fb;
+  border-radius: 12px;
+  padding: 18px;
+  box-shadow: 0 1px 4px rgba(59, 130, 246, 0.06);
+}
+
+.adm-setup-title {
+  color: #0f2b52;
+  font-size: 0.95rem;
+  font-weight: 800;
+  margin-bottom: 14px;
+}
+
+.adm-setup-form-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 14px;
+  flex-wrap: wrap;
+}
+
+.adm-setup-form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.adm-setup-edit-btn,
+.adm-setup-del-btn {
+  border: none;
+  border-radius: 6px;
+  padding: 5px 10px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  cursor: pointer;
+  margin-right: 6px;
+}
+
+.adm-setup-edit-btn {
+  background: #eaf3ff;
+  color: #1d4ed8;
+}
+
+.adm-setup-del-btn {
+  background: #fff1f2;
+  color: #dc2626;
+}
+
+.adm-setup-forgot-btn {
+  background: none;
+  border: 1px solid #cfe3fb;
+  border-radius: 6px;
+  padding: 8px 14px;
+  color: #d97706;
+  font-weight: 700;
+  font-size: 0.78rem;
+  cursor: pointer;
+  margin-left: auto;
+}
+
+.adm-setup-forgot-box {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+  background: #fffbeb;
+  border: 1px dashed #fbbf24;
+  border-radius: 10px;
+  padding: 12px;
+  margin-bottom: 14px;
+}
+
+.adm-setup-forgot-msg {
+  color: #b45309;
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.adm-setup-checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.82rem;
+  color: #0f2b52;
+}

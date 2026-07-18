@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import "./IssuePick.css";
 
 const API_BASE = "http://localhost:8080/api/pick-portal";
@@ -83,17 +83,31 @@ function jobTypeColor(jt) {
   return map[(jt || "").toLowerCase().replace(/\s+/g, "_")] || "#7c8db0";
 }
 
+// ── Status helpers ────────────────────────────────────────────────────────────
+// Internal state machine (drives button enabling / accent colors):
+//   PENDING → [Handover] → HANDED_OVER → [Start] → IN_PROGRESS
+//   IN_PROGRESS → [Hold] → ON_HOLD → [Start = Resume] → IN_PROGRESS
+//   IN_PROGRESS / ON_HOLD → [End] → COMPLETED
+// (Handover step moved here from the Print Portal.)
+
 function statusClass(s) {
   const v = (s || "").toLowerCase();
   if (v.includes("hold"))     return "onhold";
   if (v.includes("progress")) return "inprogress";
   if (v.includes("complete") || v.includes("done")) return "completed";
+  if (v.includes("handed"))   return "handedover";
   return "pending";
 }
 
 function statusLabel(s) {
   const c = statusClass(s);
-  return { pending: "Pending", inprogress: "In Progress", onhold: "On Hold", completed: "Pick Done" }[c];
+  return {
+    pending: "Pending",
+    handedover: "Handovered",
+    inprogress: "In Progress",
+    onhold: "On Hold",
+    completed: "Pick Done",
+  }[c];
 }
 
 // ── Generic Person Picker (with Other text input) ──────────────────────────
@@ -129,6 +143,38 @@ function PersonPicker({ value, onChange }) {
           autoFocus
         />
       )}
+    </div>
+  );
+}
+
+// ── Popup: Handover (Step 1 — separate from Start) ────────────────────────────
+
+function HandoverPopup({ onConfirm, onCancel }) {
+  const [handedOverBy, setHandedOverBy] = useState("");
+
+  return (
+    <div className="ip-popup-overlay">
+      <div className="ip-popup">
+        <div className="ip-popup-head">
+          <span>🚀 Handover Document</span>
+          <button className="ip-popup-close" onClick={onCancel}>✕</button>
+        </div>
+        <p className="ip-popup-sub">Select who is handing over this document to pick</p>
+
+        <span className="ip-popup-label">Handed Over By</span>
+        <PersonPicker value={handedOverBy} onChange={setHandedOverBy} />
+
+        <div className="ip-popup-foot">
+          <button className="ip-btn ip-btn-outline" onClick={onCancel}>Cancel</button>
+          <button
+            className="ip-btn ip-btn-handover"
+            disabled={!handedOverBy}
+            onClick={() => onConfirm(handedOverBy)}
+          >
+            🚀 Confirm Handover
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -294,6 +340,13 @@ function ViewDetailsPopup({ doc, requestId, onClose }) {
         </div>
 
         <div style={{ marginBottom: 6, fontSize: "0.78rem", color: "#7c8db0", fontWeight: 600 }}>
+          Handover
+        </div>
+        <div className="ip-hold-box" style={{ marginBottom: 14 }}>
+          {row("Handed Over By", doc.handedOverBy && `👤 ${doc.handedOverBy}`)}
+        </div>
+
+        <div style={{ marginBottom: 6, fontSize: "0.78rem", color: "#7c8db0", fontWeight: 600 }}>
           Start / Hold
         </div>
         <div className="ip-hold-box" style={{ marginBottom: 14 }}>
@@ -315,7 +368,6 @@ function ViewDetailsPopup({ doc, requestId, onClose }) {
           Print Portal
         </div>
         <div className="ip-hold-box" style={{ marginBottom: 14 }}>
-          {row("Handed Over By", doc.printHandedOverBy && `👤 ${doc.printHandedOverBy}`)}
           {row("Document Number", doc.printDocumentNo)}
           {row("Vehicle Number", doc.vehicleNo)}
           {row("Print Hold Reason", doc.printHoldReason)}
@@ -349,15 +401,73 @@ function ViewDetailsPopup({ doc, requestId, onClose }) {
   );
 }
 
+// ── Popup: New Picking Error Alert (from Check Portal) ──────────────────────
+// Pops up once per new error (not on every poll) alongside the persistent
+// notification bar. Each item is clickable and jumps/scrolls to the matching
+// document card in the grid below.
+
+function PickingErrorAlertPopup({ docs, requestIdMap, onJump, onClose }) {
+  return (
+    <div className="ip-popup-overlay">
+      <div className="ip-popup">
+        <div className="ip-popup-head">
+          <span>🚨 New Picking Error{docs.length > 1 ? "s" : ""} Reported</span>
+          <button className="ip-popup-close" onClick={onClose}>✕</button>
+        </div>
+        <p className="ip-popup-sub">
+          Check Portal found {docs.length} issue{docs.length > 1 ? "s" : ""} — click one to jump to it
+        </p>
+
+        <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 16 }}>
+          {docs.map(d => (
+            <button
+              key={d.id}
+              onClick={() => onJump(d.id)}
+              style={{
+                textAlign: "left",
+                background: "rgba(239,68,68,0.1)",
+                border: "1px solid #ef4444",
+                borderRadius: 8,
+                padding: "10px 12px",
+                cursor: "pointer",
+                color: "#fff",
+              }}
+            >
+              <div style={{ fontWeight: 700, color: "#ef4444", marginBottom: 4 }}>
+                {requestIdMap[d.id] || "—"} · Doc No: {d.printDocumentNo || "—"}
+              </div>
+              <div style={{ fontSize: "0.8rem", color: "#fca5a5" }}>
+                {d.pickingErrorReason ? `${d.pickingErrorReason} · ` : ""}
+                {d.wrongMaterialSku ? `SKU: ${d.wrongMaterialSku}` : ""}
+                {d.wrongMaterialQty ? ` · Qty: ${d.wrongMaterialQty}` : ""}
+              </div>
+            </button>
+          ))}
+        </div>
+
+        <div className="ip-popup-foot">
+          <button className="ip-btn ip-btn-outline" onClick={onClose}>Close</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Single Document Card ─────────────────────────────────────────────────────
 
-function DocumentCard({ doc, requestId, onStart, onHold, onEnd, onView, onEmergencyDone }) {
+function DocumentCard({ doc, requestId, onHandover, onStart, onHold, onEnd, onView, onEmergencyDone, cardRef, jumpHighlighted }) {
   const sc        = statusClass(doc.status);
   const jColor    = jobTypeColor(doc.jobType);
-  const isPending  = sc === "pending";
-  const isStarted  = sc === "inprogress";
-  const isOnHold   = sc === "onhold";
-  const isDone     = sc === "completed";
+  const isPending    = sc === "pending";
+  const isHandedOver = sc === "handedover";   // handed over, not started yet
+  const isStarted    = sc === "inprogress";
+  const isOnHold      = sc === "onhold";
+  const isDone         = sc === "completed";
+
+  const canHandover = isPending;
+  const canStart     = isHandedOver || isOnHold;   // Start = also acts as Resume
+  const canHold       = isStarted;
+  const canEnd        = isStarted || isOnHold;
 
   // Check Portal flags this document if a wrong-material issue was found
   // during checking — surface it urgently back here on the Pick card,
@@ -374,8 +484,18 @@ function DocumentCard({ doc, requestId, onStart, onHold, onEnd, onView, onEmerge
       }
     : undefined;
 
+  // Extra pulsing ring shown briefly right after jumping here from the
+  // "New Picking Error" alert popup, so it's obvious which card it meant.
+  const jumpStyle = jumpHighlighted
+    ? {
+        outline: "3px solid #facc15",
+        outlineOffset: 2,
+        transition: "outline-color 0.3s ease",
+      }
+    : undefined;
+
   return (
-    <div className={cardClassName} style={cardStyle}>
+    <div ref={cardRef} className={cardClassName} style={{ ...cardStyle, ...jumpStyle }}>
       {hasCheckError && (
         <div
           style={{
@@ -434,6 +554,16 @@ function DocumentCard({ doc, requestId, onStart, onHold, onEnd, onView, onEmerge
           </div>
         </div>
 
+        {/* Handed Over info — shown from the moment Handover is confirmed */}
+        {!isPending && doc.handedOverBy && (
+          <div className="ip-handover-box">
+            <div className="ip-handover-row">
+              <span>🚀 Handed Over By</span>
+              <span>👤 {doc.handedOverBy}</span>
+            </div>
+          </div>
+        )}
+
         {/* Hold info banner */}
         {(isOnHold || doc.holdReason) && (
           <div className="ip-hold-box">
@@ -469,25 +599,32 @@ function DocumentCard({ doc, requestId, onStart, onHold, onEnd, onView, onEmerge
         )}
       </div>
 
-      {/* ── Footer Buttons: Start | Hold | End | View ── */}
+      {/* ── Footer Buttons: Handover | Start | Hold | End | View ── */}
       <div className="ip-card-foot">
         <button
+          className="ip-btn ip-btn-handover-action"
+          disabled={!canHandover}
+          onClick={() => onHandover(doc.id)}
+        >
+          🚀 Handover
+        </button>
+        <button
           className="ip-btn ip-btn-start"
-          disabled={!(isPending || isOnHold)}
+          disabled={!canStart}
           onClick={() => onStart(doc.id)}
         >
           {isOnHold ? "▶ Resume" : "▶ Start"}
         </button>
         <button
           className="ip-btn ip-btn-hold"
-          disabled={!isStarted}
+          disabled={!canHold}
           onClick={() => onHold(doc.id)}
         >
           ⏸ Hold
         </button>
         <button
           className="ip-btn ip-btn-end"
-          disabled={!(isStarted || isOnHold)}
+          disabled={!canEnd}
           onClick={() => onEnd(doc.id)}
         >
           ■ End
@@ -549,8 +686,25 @@ export default function IssuPrinFormt() {
   const [refreshing,   setRefreshing]   = useState(false);
 
   // Popup state
-  const [activePopup,  setActivePopup]  = useState(null); // "hold" | "end" | "view" | "emergency" | null
+  const [activePopup,  setActivePopup]  = useState(null); // "handover" | "hold" | "end" | "view" | "emergency" | null
   const [activeId,     setActiveId]     = useState(null);
+
+  // "New Picking Error" alert popup (separate from activePopup — auto-triggered
+  // when Check Portal reports a fresh error, on top of the notification bar).
+  const [errorAlertDocs, setErrorAlertDocs] = useState([]); // docs waiting to be acknowledged
+  const [seenErrorIds,   setSeenErrorIds]   = useState(() => new Set()); // ids already alerted for
+
+  // Card scroll/highlight — used by the alert popup's "jump to card" click
+  const cardRefs = useRef({});
+  const [jumpHighlightId, setJumpHighlightId] = useState(null);
+
+  const handleJumpToCard = (id) => {
+    setErrorAlertDocs([]); // close the alert popup
+    const el = cardRefs.current[id];
+    if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
+    setJumpHighlightId(id);
+    setTimeout(() => setJumpHighlightId(prev => (prev === id ? null : prev)), 2500);
+  };
 
   // ── Fetch ──
   const fetchDocuments = useCallback(async (silent = false) => {
@@ -584,6 +738,29 @@ export default function IssuPrinFormt() {
     return () => clearInterval(id);
   }, [fetchDocuments]);
 
+  // ── Open popups ──
+  const handleHandoverClick = (id) => { setActiveId(id); setActivePopup("handover"); };
+  const handleHoldClick     = (id) => { setActiveId(id); setActivePopup("hold"); };
+  const handleEndClick      = (id) => { setActiveId(id); setActivePopup("end"); };
+  const handleViewClick     = (id) => { setActiveId(id); setActivePopup("view"); };
+  const handleEmergencyClick = (id) => { setActiveId(id); setActivePopup("emergency"); };
+  const closePopup = () => { setActivePopup(null); setActiveId(null); };
+
+  // ── Confirm Handover ──
+  const handleHandoverConfirm = async (handedOverBy) => {
+    const id = activeId; closePopup();
+    try {
+      await fetch(`${API_BASE}/${id}/handover`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ handedOverBy }),
+      });
+      fetchDocuments(true);
+    } catch (err) {
+      alert("Handover failed: " + err.message);
+    }
+  };
+
   // ── Start / Resume ──
   const handleStart = async (id) => {
     try {
@@ -593,13 +770,6 @@ export default function IssuPrinFormt() {
       alert("Start failed: " + err.message);
     }
   };
-
-  // ── Open popups ──
-  const handleHoldClick = (id) => { setActiveId(id); setActivePopup("hold"); };
-  const handleEndClick  = (id) => { setActiveId(id); setActivePopup("end"); };
-  const handleViewClick = (id) => { setActiveId(id); setActivePopup("view"); };
-  const handleEmergencyClick = (id) => { setActiveId(id); setActivePopup("emergency"); };
-  const closePopup = () => { setActivePopup(null); setActiveId(null); };
 
   // ── Confirm Hold ──
   const handleHoldConfirm = async (holdReason, heldBy) => {
@@ -652,13 +822,41 @@ export default function IssuPrinFormt() {
   // Picking errors reported by Check Portal that are still unresolved —
   // shown as a persistent notification bar at the top, same style as the
   // Check Portal's own error bar.
-  const activeCheckErrorDocs = documents.filter(d =>
-    (d.hasWrongMaterial || "").toUpperCase() === "YES" && !d.emergencyPickResolved
+  const activeCheckErrorDocs = useMemo(
+    () => documents.filter(d =>
+      (d.hasWrongMaterial || "").toUpperCase() === "YES" && !d.emergencyPickResolved
+    ),
+    [documents]
   );
+
+  // Whenever a NEW picking error shows up (one we haven't alerted for yet),
+  // queue it into the popup. Runs once per new error, not on every 10s poll —
+  // and if a doc's error later gets resolved and then re-flagged, it can
+  // alert again since it drops out of "seen" once resolved.
+  useEffect(() => {
+    setSeenErrorIds(prevSeen => {
+      const newOnes = activeCheckErrorDocs.filter(d => !prevSeen.has(d.id));
+      if (newOnes.length > 0) {
+        setErrorAlertDocs(prevAlert => {
+          const existingIds = new Set(prevAlert.map(d => d.id));
+          return [...prevAlert, ...newOnes.filter(d => !existingIds.has(d.id))];
+        });
+      }
+      return new Set(activeCheckErrorDocs.map(d => d.id));
+    });
+  }, [activeCheckErrorDocs]);
 
   // ── Filters ──
   const jobTypes = ["ALL", ...new Set(documents.map(d => d.jobType).filter(Boolean))];
-  const statuses = ["ALL", ...new Set(documents.map(d => d.status).filter(Boolean))];
+
+  const STATUS_FILTERS = [
+    { value: "ALL",        label: "All Status" },
+    { value: "pending",    label: "Pending" },
+    { value: "handedover", label: "Handovered" },
+    { value: "inprogress", label: "In Progress" },
+    { value: "onhold",     label: "On Hold" },
+    { value: "completed",  label: "Pick Done" },
+  ];
 
   const visible = documents.filter(doc => {
     const q = search.toLowerCase();
@@ -668,17 +866,18 @@ export default function IssuPrinFormt() {
     ].some(v => (v || "").toLowerCase().includes(q));
 
     const matchType   = filterType   === "ALL" || doc.jobType === filterType;
-    const matchStatus = filterStatus === "ALL" || doc.status   === filterStatus;
+    const matchStatus = filterStatus === "ALL" || statusClass(doc.status) === filterStatus;
 
     return matchSearch && matchType && matchStatus;
   });
 
   // Stats
-  const total     = documents.length;
-  const pending   = documents.filter(d => statusClass(d.status) === "pending").length;
-  const inProg    = documents.filter(d => statusClass(d.status) === "inprogress").length;
-  const onHold    = documents.filter(d => statusClass(d.status) === "onhold").length;
-  const completed = documents.filter(d => statusClass(d.status) === "completed").length;
+  const total       = documents.length;
+  const pending     = documents.filter(d => statusClass(d.status) === "pending").length;
+  const handedOver  = documents.filter(d => statusClass(d.status) === "handedover").length;
+  const inProg      = documents.filter(d => statusClass(d.status) === "inprogress").length;
+  const onHold      = documents.filter(d => statusClass(d.status) === "onhold").length;
+  const completed   = documents.filter(d => statusClass(d.status) === "completed").length;
 
   // The doc currently open in the View popup
   const viewingDoc = documents.find(d => d.id === activeId) || null;
@@ -687,6 +886,9 @@ export default function IssuPrinFormt() {
     <div className="ip-page">
 
       {/* Popups */}
+      {activePopup === "handover" && (
+        <HandoverPopup onConfirm={handleHandoverConfirm} onCancel={closePopup} />
+      )}
       {activePopup === "hold" && (
         <HoldPopup onConfirm={handleHoldConfirm} onCancel={closePopup} />
       )}
@@ -702,6 +904,14 @@ export default function IssuPrinFormt() {
       )}
       {activePopup === "emergency" && (
         <EmergencyPickDonePopup onConfirm={handleEmergencyConfirm} onCancel={closePopup} />
+      )}
+      {errorAlertDocs.length > 0 && (
+        <PickingErrorAlertPopup
+          docs={errorAlertDocs}
+          requestIdMap={requestIdMap}
+          onJump={handleJumpToCard}
+          onClose={() => setErrorAlertDocs([])}
+        />
       )}
 
       {/* ── Header ── */}
@@ -779,7 +989,7 @@ export default function IssuPrinFormt() {
           {jobTypes.map(t => <option key={t} value={t}>{t === "ALL" ? "All Job Types" : t}</option>)}
         </select>
         <select className="ip-filter-select" value={filterStatus} onChange={e => setFilterStatus(e.target.value)}>
-          {statuses.map(s => <option key={s} value={s}>{s === "ALL" ? "All Status" : s}</option>)}
+          {STATUS_FILTERS.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
         </select>
       </div>
 
@@ -787,6 +997,7 @@ export default function IssuPrinFormt() {
       <div className="ip-stats">
         <div className="ip-stat-chip blue">Total <strong>{total}</strong></div>
         <div className="ip-stat-chip"><strong style={{color:"#f59e0b"}}>{pending}</strong> Pending</div>
+        <div className="ip-stat-chip"><strong style={{color:"#3b82f6"}}>{handedOver}</strong> Handovered</div>
         <div className="ip-stat-chip"><strong style={{color:"#3b82f6"}}>{inProg}</strong> In Progress</div>
         <div className="ip-stat-chip"><strong style={{color:"#fb923c"}}>{onHold}</strong> On Hold</div>
         <div className="ip-stat-chip green">Done <strong>{completed}</strong></div>
@@ -823,11 +1034,14 @@ export default function IssuPrinFormt() {
               key={doc.id}
               doc={doc}
               requestId={requestIdMap[doc.id]}
+              onHandover={handleHandoverClick}
               onStart={handleStart}
               onHold={handleHoldClick}
               onEnd={handleEndClick}
               onView={handleViewClick}
               onEmergencyDone={handleEmergencyClick}
+              cardRef={el => { cardRefs.current[doc.id] = el; }}
+              jumpHighlighted={jumpHighlightId === doc.id}
             />
           ))
         )}

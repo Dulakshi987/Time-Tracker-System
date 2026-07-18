@@ -8,9 +8,13 @@ import IssuPrint         from "../Issue_Pick_Portal/IssuePickForm";
 import IssueCheckForm    from "../Issue_Check_Portal/IssueCheckForm";
 import IssueDeliveryForm from "../Issue_Delivery_Portal/IssueDeliveryForm";
 import ConfirmPortal     from "../Confirm_Portal/ConfirmPortal";
+// NOTE: AdminConfigCenter (old "usersetup" page) removed — replaced by
+// MasterSetupPanel below, which now lives inside this same file and saves
+// everything straight to the database through AdminSetupController.
 
 // ── Config ───────────────────────────────────────────────────────────────
 const MASTER_API   = "http://localhost:8080/api/print-portal";
+const SETUP_API    = "http://localhost:8080/api/admin-setup";
 const AUTO_REFRESH = 1000;
 const CONFIG_KEY    = "admin_job_types_config";
 
@@ -36,9 +40,6 @@ function saveJobTypes(list) {
 
 function pad(n) { return String(n).padStart(2, "0"); }
 
-// FIX: previously this rounded down to whole minutes, so any duration under
-// 60 seconds (very common for Pick/Check jobs) always displayed as "0:00".
-// Now it always shows seconds, and adds hours when the duration is long enough.
 function secondsToHMS(totalSeconds) {
   if (!totalSeconds || totalSeconds <= 0) return "0:00";
   const s = Math.round(totalSeconds);
@@ -56,23 +57,6 @@ function toDateKey(d) {
   return `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}`;
 }
 
-// FIX: date-range filtering (Today / 7 Days / 30 Days / Year / Custom) must be
-// based on requestDate — not createdDatetime. createdDatetime is when the row
-// was first inserted into the system (often far earlier than the actual job
-// date), so using it made the range filters look "broken" / show nothing.
-// requestDate is checked first now, and createdDatetime is only a fallback
-// for the rare row that has no requestDate at all.
-// Uses whichever of requestDate / createdDatetime is MORE RECENT as the
-// document's "activity date" for Today/7D/30D/Year filtering.
-// Why: requestDate is entered manually and can be old/incorrect, while
-// createdDatetime is a real system timestamp. If we only trusted requestDate,
-// a document touched today but requested weeks ago would vanish from "Today" —
-// which is exactly what was happening. Taking the max of the two means a
-// document shows up in short-range filters if EITHER date is recent.
-// Dashboard-level date filtering (Today/7D/30D/Year/Custom) uses ONLY the
-// requestDate — i.e. the date the document was entered. Per-stage dates
-// (print/pick/check/delivery start & hold times) are filtered separately,
-// inside the Full Report panel below — see STAGE_DATE_FIELDS.
 function docDateKey(doc) {
   return toDateKey(doc.requestDate);
 }
@@ -110,7 +94,7 @@ function deliveryStatusClass(s) {
 function inRange(doc, range, fromDate, toDate) {
   const key = docDateKey(doc);
   if (range === "ALL") return true;
-  if (!key) return false; // no date on doc -> exclude from date-scoped views
+  if (!key) return false;
 
   const now = new Date();
   const todayKey = toDateKey(now);
@@ -238,7 +222,8 @@ function EfficiencyTable({ title, rows }) {
     </div>
   );
 }
-// ── Live duration engine (per-second, matches backend's start→hold / resume→end logic) ──
+
+// ── Live duration engine ──────────────────────────────────────────────────
 
 const STAGE_CONFIG = {
   print: {
@@ -263,9 +248,6 @@ const STAGE_CONFIG = {
   },
 };
 
-// Mirrors the backend: total = (elapsed since start) - (accumulated hold seconds).
-// While ON_HOLD, time is frozen at the point the hold started (doesn't keep ticking).
-// While IN_PROGRESS, it ticks live using `nowMs`.
 function liveDurationSeconds(doc, stage, nowMs) {
   const cfg = STAGE_CONFIG[stage];
   const status = (doc[cfg.statusField] || "").toLowerCase();
@@ -282,53 +264,8 @@ function liveDurationSeconds(doc, stage, nowMs) {
     const holdStart = doc[cfg.holdField] ? new Date(doc[cfg.holdField]).getTime() : nowMs;
     return Math.max((holdStart - start) / 1000 - totalHold, 0);
   }
-  // in progress / resumed
   return Math.max((nowMs - start) / 1000 - totalHold, 0);
 }
-
-function LiveJobsPanel({ documents, nowMs }) {
-  const stages = [
-    { key: "print", label: "🖨️ Print", statusField: "printStatus" },
-    { key: "pick", label: "📦 Pick", statusField: "status" },
-    { key: "check", label: "✅ Check", statusField: "checkStatus" },
-    { key: "delivery", label: "🚚 Delivery", statusField: "deliveryStatus" },
-  ];
-
-  return (
-    <div className="adm-eff-row">
-      {stages.map(s => {
-        const running = documents.filter(d => {
-          const v = (d[s.statusField] || "").toLowerCase();
-          return v.includes("progress") || v.includes("hold");
-        });
-        return (
-          <div key={s.key} className="adm-eff-card">
-            <div className="adm-eff-title">{s.label} — Live ({running.length})</div>
-            <table className="adm-eff-table">
-              <thead><tr><th>Doc</th><th>Status</th><th>Elapsed</th></tr></thead>
-              <tbody>
-                {running.length === 0 ? (
-                  <tr><td colSpan={3} className="adm-eff-empty">No active jobs</td></tr>
-                ) : running.map(d => {
-                  const secs = liveDurationSeconds(d, s.key, nowMs);
-                  const onHold = (d[s.statusField] || "").toLowerCase().includes("hold");
-                  return (
-                    <tr key={d.id}>
-                      <td>{d.printDocumentNo || d.id}</td>
-                      <td><StatusBadge status={d[s.statusField]} /></td>
-                      <td className={onHold ? "" : "adm-live-ticking"}>{secondsToHMS(secs)}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
 
 function StatusBadge({ status }) {
   const v = (status || "pending").toLowerCase();
@@ -341,8 +278,6 @@ function StatusBadge({ status }) {
   return <span className={`adm-badge ${cls}`}>{status || "Pending"}</span>;
 }
 
-
-// Hook: ticks once per second, returns current epoch ms
 function useTick(intervalMs = 1000) {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -351,19 +286,22 @@ function useTick(intervalMs = 1000) {
   }, [intervalMs]);
   return now;
 }
+
 // ── Sidebar ──────────────────────────────────────────────────────────────
+// "System Config" and "User & Division Setup" removed — replaced by the
+// single "Master Setup" entry, which contains all 10 buttons in one row.
 
 const NAV_ITEMS = [
-  { key: "dashboard", label: "Dashboard",       icon: "📊" },
-  { key: "print",     label: "Print Portal",    icon: "🖨️" },
-  { key: "pick",      label: "Picking Portal",  icon: "📦" },
-  { key: "check",     label: "Checking Portal", icon: "✅" },
-  { key: "delivery",  label: "Delivery Portal", icon: "🚚" },
-  { key: "document",  label: "Document Portal", icon: "📁" },
-  { key: "fullreport", label: "Full Report",    icon: "📊" },
-  { key: "config",    label: "System Config",   icon: "⚙️" },
-  { key: "notify",    label: "Notification",    icon: "🔔" },
-  { key: "report",    label: "Report",          icon: "🗂️" },
+  { key: "dashboard",   label: "Dashboard",       icon: "📊" },
+  { key: "print",       label: "Print Portal",    icon: "🖨️" },
+  { key: "pick",        label: "Picking Portal",  icon: "📦" },
+  { key: "check",       label: "Checking Portal", icon: "✅" },
+  { key: "delivery",    label: "Delivery Portal", icon: "🚚" },
+  { key: "document",    label: "Document Portal", icon: "📁" },
+  { key: "fullreport",  label: "Full Report",     icon: "📊" },
+  { key: "mastersetup", label: "Master Setup",    icon: "🧩" },
+  { key: "notify",      label: "Notification",    icon: "🔔" },
+  { key: "report",      label: "Report",          icon: "🗂️" },
 ];
 
 function Sidebar({ active, onSelect }) {
@@ -383,7 +321,7 @@ function Sidebar({ active, onSelect }) {
   );
 }
 
-// ── Filter bar (Today / 7 Days / 30 Days / Year / Custom + Operator) ─────
+// ── Filter bar ── (unchanged)
 
 const RANGE_OPTIONS = [
   { key: "TODAY", label: "Today" },
@@ -422,7 +360,434 @@ function FilterBar({ range, setRange, fromDate, setFromDate, toDate, setToDate, 
   );
 }
 
-// ── System Config panel ─────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════
+// ── MASTER SETUP PANEL — the 10 buttons in one row, all saving to the DB ──
+// ═══════════════════════════════════════════════════════════════════════
+
+// One shared fetch helper for every master-data endpoint.
+async function apiGet(path) {
+  const res = await fetch(`${SETUP_API}${path}`);
+  if (!res.ok) throw new Error(`GET ${path} failed: ${res.status}`);
+  return res.json();
+}
+async function apiPost(path, body) {
+  const res = await fetch(`${SETUP_API}${path}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error((await res.text()) || `POST ${path} failed`);
+  return res.json();
+}
+async function apiPut(path, body) {
+  const res = await fetch(`${SETUP_API}${path}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error((await res.text()) || `PUT ${path} failed`);
+  return res.json();
+}
+async function apiDelete(path) {
+  const res = await fetch(`${SETUP_API}${path}`, { method: "DELETE" });
+  if (!res.ok) throw new Error(`DELETE ${path} failed: ${res.status}`);
+}
+
+const SETUP_TABS = [
+  { key: "staff",    label: "1️⃣ Staff / User Character", icon: "🙋" },
+  { key: "users",    label: "2️⃣ User Accounts",          icon: "🔐" },
+  { key: "division", label: "Division",                   icon: "🏢" },
+  { key: "picker",   label: "Picker",                      icon: "📦" },
+  { key: "print",    label: "Document / Print",             icon: "🖨️" },
+  { key: "check",    label: "Check",                        icon: "✅" },
+  { key: "delivery", label: "Delivery",                     icon: "🚚" },
+  { key: "filed",    label: "Filed",                        icon: "🗂️" },
+  { key: "jobcat",   label: "Job Category",                 icon: "🏷️" },
+  { key: "fileno",   label: "Document File No",             icon: "🔢" },
+];
+
+// Configuration for the 5 identical "name master" panels (Picker, Print/
+// Document, Check, Delivery, Filed) — same UI, different endpoint/table,
+// exactly as requested ("me pick,print,check,delvery,filing forms same UI").
+const OPERATOR_PANEL_CONFIG = {
+  picker: {
+    path: "/pickers", nameField: "pickerName", nicField: "nic", nicNameField: "pickerNicName",
+    nameLabel: "Picker Name", nicNameLabel: "Picker NIC Name",
+  },
+  print: {
+    path: "/print-operators", nameField: "operatorName", nicField: "nic", nicNameField: "operatorNicName",
+    nameLabel: "Operator Name", nicNameLabel: "Operator NIC Name",
+  },
+  check: {
+    path: "/check-operators", nameField: "operatorName", nicField: "nic", nicNameField: "operatorNicName",
+    nameLabel: "Operator Name", nicNameLabel: "Operator NIC Name",
+  },
+  delivery: {
+    path: "/delivery-operators", nameField: "operatorName", nicField: "nic", nicNameField: "operatorNicName",
+    nameLabel: "Operator Name", nicNameLabel: "Operator NIC Name",
+  },
+  filed: {
+    path: "/file-operators", nameField: "operatorName", nicField: "nic", nicNameField: "operatorNicName",
+    nameLabel: "Operator Name", nicNameLabel: "Operator NIC Name",
+  },
+};
+
+function SetupTable({ rows, cols, onEdit, onDelete }) {
+  return (
+    <div className="adm-xl-table-wrap" style={{ marginTop: 14 }}>
+      <table className="adm-xl-table">
+        <thead>
+          <tr>
+            {cols.map(c => <th key={c.key}>{c.label}</th>)}
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.length === 0 ? (
+            <tr><td colSpan={cols.length + 1} className="adm-eff-empty">No records yet</td></tr>
+          ) : rows.map(r => (
+            <tr key={r.id}>
+              {cols.map(c => <td key={c.key}>{String(r[c.key] ?? "")}</td>)}
+              <td>
+                <button className="adm-setup-edit-btn" onClick={() => onEdit(r)}>Edit</button>
+                <button className="adm-setup-del-btn" onClick={() => onDelete(r.id)}>Delete</button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+// ── 1) Staff / User Character panel ──────────────────────────────────────
+function StaffPanel() {
+  const [rows, setRows] = useState([]);
+  const [name, setName] = useState("");
+  const [editId, setEditId] = useState(null);
+  const [err, setErr] = useState(null);
+
+  const load = useCallback(() => { apiGet("/staff").then(setRows).catch(e => setErr(e.message)); }, []);
+  useEffect(() => { load(); const id = setInterval(load, AUTO_REFRESH); return () => clearInterval(id); }, [load]);
+
+  const submit = async () => {
+    if (!name.trim()) return;
+    try {
+      const body = { name, createdBy: "admin" };
+      if (editId) await apiPut(`/staff/${editId}`, body); else await apiPost("/staff", body);
+      setName(""); setEditId(null); load();
+    } catch (e) { setErr(e.message); }
+  };
+
+  return (
+    <div>
+      <h3 className="adm-setup-title">🙋 Staff / User Character — create names used across document entering, printing, picking, checking, delivering & filing</h3>
+      {err && <div className="adm-error">⚠ {err}</div>}
+      <div className="adm-setup-form-row">
+        <input className="adm-config-input" placeholder="Full name" value={name} onChange={e => setName(e.target.value)} />
+        <button className="adm-config-add-btn" onClick={submit}>{editId ? "Update" : "+ Create"}</button>
+        {editId && <button className="adm-xl-clear-btn" onClick={() => { setEditId(null); setName(""); }}>Cancel</button>}
+      </div>
+      <SetupTable
+        rows={rows}
+        cols={[{ key: "id", label: "ID" }, { key: "name", label: "Name" }, { key: "createdBy", label: "Created By" }]}
+        onEdit={r => { setEditId(r.id); setName(r.name); }}
+        onDelete={id => apiDelete(`/staff/${id}`).then(load)}
+      />
+    </div>
+  );
+}
+
+// ── 2) User Accounts panel (dropdown of staff + login + hashed password + forgot password) ──
+function UserAccountsPanel() {
+  const [staffOptions, setStaffOptions] = useState([]);
+  const [rows, setRows] = useState([]);
+  const [form, setForm] = useState({ staffName: "", fullName: "", nic: "", username: "", password: "", confirmPassword: "" });
+  const [editId, setEditId] = useState(null);
+  const [err, setErr] = useState(null);
+  const [showForgot, setShowForgot] = useState(false);
+  const [forgot, setForgot] = useState({ username: "", nic: "", newPassword: "" });
+  const [forgotMsg, setForgotMsg] = useState(null);
+
+  const load = useCallback(() => {
+    apiGet("/staff").then(list => setStaffOptions(list.map(s => s.name)));
+    apiGet("/users").then(setRows).catch(e => setErr(e.message));
+  }, []);
+  useEffect(() => { load(); const id = setInterval(load, AUTO_REFRESH); return () => clearInterval(id); }, [load]);
+
+  const submit = async () => {
+    setErr(null);
+    try {
+      const body = { ...form, createdBy: "admin" };
+      if (editId) await apiPut(`/users/${editId}`, body); else await apiPost("/users", body);
+      setForm({ staffName: "", fullName: "", nic: "", username: "", password: "", confirmPassword: "" });
+      setEditId(null); load();
+    } catch (e) { setErr(e.message); }
+  };
+
+  const submitForgot = async () => {
+    setForgotMsg(null);
+    try {
+      await apiPost("/users/forgot-password", forgot);
+      setForgotMsg("Password reset successfully.");
+      setForgot({ username: "", nic: "", newPassword: "" });
+      load();
+    } catch (e) { setForgotMsg(e.message); }
+  };
+
+  return (
+    <div>
+      <h3 className="adm-setup-title">🔐 User Accounts — grants system / API login access (password stored hashed)</h3>
+      {err && <div className="adm-error">⚠ {err}</div>}
+
+      <div className="adm-setup-form-grid">
+        <select className="adm-operator-select" value={form.staffName} onChange={e => setForm({ ...form, staffName: e.target.value })}>
+          <option value="">Select staff / user character…</option>
+          {staffOptions.map(n => <option key={n} value={n}>{n}</option>)}
+        </select>
+        <input className="adm-config-input" placeholder="Full Name" value={form.fullName} onChange={e => setForm({ ...form, fullName: e.target.value })} />
+        <input className="adm-config-input" placeholder="NIC" value={form.nic} onChange={e => setForm({ ...form, nic: e.target.value })} />
+        <input className="adm-config-input" placeholder="Username" value={form.username} onChange={e => setForm({ ...form, username: e.target.value })} />
+        <input className="adm-config-input" type="password" placeholder="Password" value={form.password} onChange={e => setForm({ ...form, password: e.target.value })} />
+        <input className="adm-config-input" type="password" placeholder="Confirm Password" value={form.confirmPassword} onChange={e => setForm({ ...form, confirmPassword: e.target.value })} />
+      </div>
+      <div className="adm-setup-form-row">
+        <button className="adm-config-add-btn" onClick={submit}>{editId ? "Update Account" : "+ Create Account"}</button>
+        {editId && <button className="adm-xl-clear-btn" onClick={() => { setEditId(null); setForm({ staffName: "", fullName: "", nic: "", username: "", password: "", confirmPassword: "" }); }}>Cancel</button>}
+        <button className="adm-setup-forgot-btn" onClick={() => setShowForgot(s => !s)}>Forgot Password?</button>
+      </div>
+
+      {showForgot && (
+        <div className="adm-setup-forgot-box">
+          <input className="adm-config-input" placeholder="Username" value={forgot.username} onChange={e => setForgot({ ...forgot, username: e.target.value })} />
+          <input className="adm-config-input" placeholder="NIC (to verify identity)" value={forgot.nic} onChange={e => setForgot({ ...forgot, nic: e.target.value })} />
+          <input className="adm-config-input" type="password" placeholder="New Password" value={forgot.newPassword} onChange={e => setForgot({ ...forgot, newPassword: e.target.value })} />
+          <button className="adm-config-add-btn" onClick={submitForgot}>Reset Password</button>
+          {forgotMsg && <div className="adm-setup-forgot-msg">{forgotMsg}</div>}
+        </div>
+      )}
+
+      <SetupTable
+        rows={rows}
+        cols={[
+          { key: "id", label: "ID" }, { key: "staffName", label: "Staff Name" }, { key: "fullName", label: "Full Name" },
+          { key: "nic", label: "NIC" }, { key: "username", label: "Username" }, { key: "createdBy", label: "Created By" },
+        ]}
+        onEdit={r => { setEditId(r.id); setForm({ staffName: r.staffName || "", fullName: r.fullName || "", nic: r.nic || "", username: r.username || "", password: "", confirmPassword: "" }); }}
+        onDelete={id => apiDelete(`/users/${id}`).then(load)}
+      />
+    </div>
+  );
+}
+
+// ── Division panel ────────────────────────────────────────────────────────
+function DivisionPanel() {
+  const [rows, setRows] = useState([]);
+  const [form, setForm] = useState({ divisionName: "", divisionNo: "", divisionHead: "" });
+  const [editId, setEditId] = useState(null);
+  const [err, setErr] = useState(null);
+
+  const load = useCallback(() => { apiGet("/divisions").then(setRows).catch(e => setErr(e.message)); }, []);
+  useEffect(() => { load(); const id = setInterval(load, AUTO_REFRESH); return () => clearInterval(id); }, [load]);
+
+  const submit = async () => {
+    try {
+      const body = { ...form, enteredBy: "admin" };
+      if (editId) await apiPut(`/divisions/${editId}`, body); else await apiPost("/divisions", body);
+      setForm({ divisionName: "", divisionNo: "", divisionHead: "" }); setEditId(null); load();
+    } catch (e) { setErr(e.message); }
+  };
+
+  return (
+    <div>
+      <h3 className="adm-setup-title">🏢 Division</h3>
+      {err && <div className="adm-error">⚠ {err}</div>}
+      <div className="adm-setup-form-grid">
+        <input className="adm-config-input" placeholder="Division Name" value={form.divisionName} onChange={e => setForm({ ...form, divisionName: e.target.value })} />
+        <input className="adm-config-input" placeholder="Division No" value={form.divisionNo} onChange={e => setForm({ ...form, divisionNo: e.target.value })} />
+        <input className="adm-config-input" placeholder="Division Head" value={form.divisionHead} onChange={e => setForm({ ...form, divisionHead: e.target.value })} />
+      </div>
+      <div className="adm-setup-form-row">
+        <button className="adm-config-add-btn" onClick={submit}>{editId ? "Update" : "+ Create"}</button>
+        {editId && <button className="adm-xl-clear-btn" onClick={() => { setEditId(null); setForm({ divisionName: "", divisionNo: "", divisionHead: "" }); }}>Cancel</button>}
+      </div>
+      <SetupTable
+        rows={rows}
+        cols={[{ key: "id", label: "ID" }, { key: "divisionName", label: "Name" }, { key: "divisionNo", label: "No" }, { key: "divisionHead", label: "Head" }, { key: "enteredBy", label: "Entered By" }]}
+        onEdit={r => { setEditId(r.id); setForm({ divisionName: r.divisionName || "", divisionNo: r.divisionNo || "", divisionHead: r.divisionHead || "" }); }}
+        onDelete={id => apiDelete(`/divisions/${id}`).then(load)}
+      />
+    </div>
+  );
+}
+
+// ── Generic "operator" master panel — reused for Picker / Print / Check / Delivery / Filed ──
+function OperatorPanel({ tabKey }) {
+  const cfg = OPERATOR_PANEL_CONFIG[tabKey];
+  const [rows, setRows] = useState([]);
+  const [form, setForm] = useState({ name: "", nic: "", nicName: "" });
+  const [editId, setEditId] = useState(null);
+  const [err, setErr] = useState(null);
+
+  const load = useCallback(() => { apiGet(cfg.path).then(setRows).catch(e => setErr(e.message)); }, [cfg.path]);
+  useEffect(() => { load(); const id = setInterval(load, AUTO_REFRESH); return () => clearInterval(id); }, [load]);
+
+  const submit = async () => {
+    try {
+      const body = {
+        [cfg.nameField]: form.name, [cfg.nicField]: form.nic, [cfg.nicNameField]: form.nicName, createdBy: "admin",
+      };
+      if (editId) await apiPut(`${cfg.path}/${editId}`, body); else await apiPost(cfg.path, body);
+      setForm({ name: "", nic: "", nicName: "" }); setEditId(null); load();
+    } catch (e) { setErr(e.message); }
+  };
+
+  return (
+    <div>
+      <h3 className="adm-setup-title">{cfg.nameLabel} Setup</h3>
+      {err && <div className="adm-error">⚠ {err}</div>}
+      <div className="adm-setup-form-grid">
+        <input className="adm-config-input" placeholder={cfg.nameLabel} value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} />
+        <input className="adm-config-input" placeholder="NIC" value={form.nic} onChange={e => setForm({ ...form, nic: e.target.value })} />
+        <input className="adm-config-input" placeholder={cfg.nicNameLabel} value={form.nicName} onChange={e => setForm({ ...form, nicName: e.target.value })} />
+      </div>
+      <div className="adm-setup-form-row">
+        <button className="adm-config-add-btn" onClick={submit}>{editId ? "Update" : "+ Create"}</button>
+        {editId && <button className="adm-xl-clear-btn" onClick={() => { setEditId(null); setForm({ name: "", nic: "", nicName: "" }); }}>Cancel</button>}
+      </div>
+      <SetupTable
+        rows={rows}
+        cols={[{ key: "id", label: "ID" }, { key: cfg.nameField, label: cfg.nameLabel }, { key: cfg.nicField, label: "NIC" }, { key: cfg.nicNameField, label: cfg.nicNameLabel }, { key: "createdBy", label: "Created By" }]}
+        onEdit={r => { setEditId(r.id); setForm({ name: r[cfg.nameField] || "", nic: r[cfg.nicField] || "", nicName: r[cfg.nicNameField] || "" }); }}
+        onDelete={id => apiDelete(`${cfg.path}/${id}`).then(load)}
+      />
+    </div>
+  );
+}
+
+// ── Job Category panel (dropdown from Division) ────────────────────────
+function JobCategoryPanel() {
+  const [divisions, setDivisions] = useState([]);
+  const [rows, setRows] = useState([]);
+  const [form, setForm] = useState({ categoryName: "", divisionName: "" });
+  const [editId, setEditId] = useState(null);
+  const [err, setErr] = useState(null);
+
+  const load = useCallback(() => {
+    apiGet("/divisions").then(list => setDivisions(list.map(d => d.divisionName)));
+    apiGet("/job-categories").then(setRows).catch(e => setErr(e.message));
+  }, []);
+  useEffect(() => { load(); const id = setInterval(load, AUTO_REFRESH); return () => clearInterval(id); }, [load]);
+
+  const submit = async () => {
+    try {
+      const body = { ...form, createdBy: "admin" };
+      if (editId) await apiPut(`/job-categories/${editId}`, body); else await apiPost("/job-categories", body);
+      setForm({ categoryName: "", divisionName: "" }); setEditId(null); load();
+    } catch (e) { setErr(e.message); }
+  };
+
+  return (
+    <div>
+      <h3 className="adm-setup-title">🏷️ Job Category</h3>
+      {err && <div className="adm-error">⚠ {err}</div>}
+      <div className="adm-setup-form-grid">
+        <select className="adm-operator-select" value={form.divisionName} onChange={e => setForm({ ...form, divisionName: e.target.value })}>
+          <option value="">Select division…</option>
+          {divisions.map(d => <option key={d} value={d}>{d}</option>)}
+        </select>
+        <input className="adm-config-input" placeholder="Job Category Name" value={form.categoryName} onChange={e => setForm({ ...form, categoryName: e.target.value })} />
+      </div>
+      <div className="adm-setup-form-row">
+        <button className="adm-config-add-btn" onClick={submit}>{editId ? "Update" : "+ Save"}</button>
+        {editId && <button className="adm-xl-clear-btn" onClick={() => { setEditId(null); setForm({ categoryName: "", divisionName: "" }); }}>Cancel</button>}
+      </div>
+      <SetupTable
+        rows={rows}
+        cols={[{ key: "id", label: "ID" }, { key: "categoryName", label: "Category" }, { key: "divisionName", label: "Division" }, { key: "createdBy", label: "Created By" }]}
+        onEdit={r => { setEditId(r.id); setForm({ categoryName: r.categoryName || "", divisionName: r.divisionName || "" }); }}
+        onDelete={id => apiDelete(`/job-categories/${id}`).then(load)}
+      />
+    </div>
+  );
+}
+
+// ── Document File No panel (calendar from/to + single-active toggle) ────
+function FileNumberPanel() {
+  const [rows, setRows] = useState([]);
+  const [form, setForm] = useState({ fileNo: "", fromDate: "", toDate: "", active: false });
+  const [editId, setEditId] = useState(null);
+  const [err, setErr] = useState(null);
+
+  const load = useCallback(() => { apiGet("/file-numbers").then(setRows).catch(e => setErr(e.message)); }, []);
+  useEffect(() => { load(); const id = setInterval(load, AUTO_REFRESH); return () => clearInterval(id); }, [load]);
+
+  const submit = async () => {
+    try {
+      const body = { ...form, createdBy: "admin" };
+      if (editId) await apiPut(`/file-numbers/${editId}`, body); else await apiPost("/file-numbers", body);
+      setForm({ fileNo: "", fromDate: "", toDate: "", active: false }); setEditId(null); load();
+    } catch (e) { setErr(e.message); }
+  };
+
+  return (
+    <div>
+      <h3 className="adm-setup-title">🔢 Document File No — only ONE active file is ever shown in the Filing Portal</h3>
+      {err && <div className="adm-error">⚠ {err}</div>}
+      <div className="adm-setup-form-grid">
+        <input className="adm-config-input" placeholder="File No" value={form.fileNo} onChange={e => setForm({ ...form, fileNo: e.target.value })} />
+        <input type="date" className="adm-date-input" value={form.fromDate} onChange={e => setForm({ ...form, fromDate: e.target.value })} />
+        <input type="date" className="adm-date-input" value={form.toDate} onChange={e => setForm({ ...form, toDate: e.target.value })} />
+        <label className="adm-setup-checkbox-label">
+          <input type="checkbox" checked={form.active} onChange={e => setForm({ ...form, active: e.target.checked })} /> Active
+        </label>
+      </div>
+      <div className="adm-setup-form-row">
+        <button className="adm-config-add-btn" onClick={submit}>{editId ? "Update" : "+ Create"}</button>
+        {editId && <button className="adm-xl-clear-btn" onClick={() => { setEditId(null); setForm({ fileNo: "", fromDate: "", toDate: "", active: false }); }}>Cancel</button>}
+      </div>
+      <SetupTable
+        rows={rows.map(r => ({ ...r, active: r.active ? "✅ Active" : "—" }))}
+        cols={[{ key: "id", label: "ID" }, { key: "fileNo", label: "File No" }, { key: "fromDate", label: "From" }, { key: "toDate", label: "To" }, { key: "active", label: "Status" }, { key: "createdBy", label: "Created By" }]}
+        onEdit={r => { setEditId(r.id); setForm({ fileNo: r.fileNo || "", fromDate: r.fromDate || "", toDate: r.toDate || "", active: !!r.active && r.active !== "—" }); }}
+        onDelete={id => apiDelete(`/file-numbers/${id}`).then(load)}
+      />
+    </div>
+  );
+}
+
+function MasterSetupPanel() {
+  const [tab, setTab] = useState("staff");
+  return (
+    <div>
+      <h2 className="adm-title">🧩 Master Setup</h2>
+      <p className="adm-subtitle">All 10 buttons below save straight to the database and update in real time.</p>
+
+      <div className="adm-setup-tabrow">
+        {SETUP_TABS.map(t => (
+          <button
+            key={t.key}
+            className={`adm-setup-tab-btn ${tab === t.key ? "active" : ""}`}
+            onClick={() => setTab(t.key)}
+          >
+            <span>{t.icon}</span> {t.label}
+          </button>
+        ))}
+      </div>
+
+      <div className="adm-setup-panel-body">
+        {tab === "staff" && <StaffPanel />}
+        {tab === "users" && <UserAccountsPanel />}
+        {tab === "division" && <DivisionPanel />}
+        {["picker", "print", "check", "delivery", "filed"].includes(tab) && <OperatorPanel tabKey={tab} />}
+        {tab === "jobcat" && <JobCategoryPanel />}
+        {tab === "fileno" && <FileNumberPanel />}
+      </div>
+    </div>
+  );
+}
+
+// ── System Config panel (unchanged — job types for Dashboard KPI cards) ──
 
 function SystemConfigPanel({ jobTypes, setJobTypes }) {
   const [newType, setNewType] = useState("");
@@ -513,7 +878,7 @@ function NotificationPanel({ documents }) {
   );
 }
 
-// ── Report panel (job-type summary, with its own Excel export) ───────────
+// ── Report panel (unchanged from previous version) ───────────────────────
 
 function exportJobTypeReport(rows, totalCount) {
   const data = [
@@ -538,7 +903,7 @@ const REPORT_CATEGORY_OPTIONS = [
 function ReportPanel({ documents, jobTypes }) {
   const [category, setCategory]           = useState("all");
   const [jobTypeFilter, setJobTypeFilter] = useState("ALL");
-  const [dateFieldMode, setDateFieldMode] = useState("start"); // "start" | "hold"
+  const [dateFieldMode, setDateFieldMode] = useState("start");
   const [dateFrom, setDateFrom]           = useState("");
   const [dateTo, setDateTo]               = useState("");
 
@@ -783,21 +1148,19 @@ export default function AdminDashboard() {
           </>
         )}
 
-        {activeView === "print"    && <IssuePrintForm />}
-        {activeView === "pick"     && <IssuPrint />}
-        {activeView === "check"    && <IssueCheckForm />}
-        {activeView === "delivery" && <IssueDeliveryForm />}
-        {activeView === "document" && <ConfirmPortal />}
-        {activeView === "fullreport" && <DocumentsExcelPanel documents={documents} jobTypes={jobTypes} />}
-        {activeView === "config"   && <SystemConfigPanel jobTypes={jobTypes} setJobTypes={setJobTypes} />}
-        {activeView === "notify"   && <NotificationPanel documents={documents} />}
-        {activeView === "report"   && <ReportPanel documents={documents} jobTypes={jobTypes} />}
+        {activeView === "print"       && <IssuePrintForm />}
+        {activeView === "pick"        && <IssuPrint />}
+        {activeView === "check"       && <IssueCheckForm />}
+        {activeView === "delivery"    && <IssueDeliveryForm />}
+        {activeView === "document"    && <ConfirmPortal />}
+        {activeView === "fullreport"  && <DocumentsExcelPanel documents={documents} jobTypes={jobTypes} />}
+        {activeView === "mastersetup" && <MasterSetupPanel />}
+        {activeView === "notify"      && <NotificationPanel documents={documents} />}
+        {activeView === "report"      && <ReportPanel documents={documents} jobTypes={jobTypes} />}
       </div>
     </div>
   );
 }
-
-
 
 const PORTAL_COLUMNS = {
   print: ["id","printDocumentNo","jobType","customerName","requestedBy","requestDate","enteredBy",
@@ -815,17 +1178,10 @@ const PORTAL_COLUMNS = {
     "deliveryTotalHoldSeconds","deliveryDurationSeconds","deliveredBy","deliveryVehicleNo",
     "deliveryCancelReason","deliveryCancelledBy","deliveryCancelTime",
     "deliveryConfirmed","deliveryConfirmedBy","deliveryConfirmTime","deliveryStatus"],
-  // Document / Confirm Details only — a smaller subset of "all", used by the
-  // Report page's "Document / Confirm Details" filter option.
   document: ["id","requestedBy","vehicleNo","customerName","enteredBy","jobType","jobwbs",
     "requestDate","requestTime","reservationNo","status","createdDatetime",
     "deliveryConfirmed","deliveryConfirmedBy","deliveryConfirmTime",
     "cancelConfirmed","cancelConfirmedBy","cancelConfirmTime","reqId","fileNumber"],
-  // "all" = every column on the Issue entity, in one combined table/export
-  // FIX: "status" was previously listed twice here (once near the top-level
-  // document fields, once again next to the Pick-portal fields), which caused
-  // a duplicate table/th React key warning and a doubled "status" column in
-  // every "All Portals (combined)" export. Now it appears exactly once.
   all: ["id","requestedBy","vehicleNo","customerName","enteredBy","jobType","jobwbs",
     "requestDate","requestTime","reservationNo","status","createdDatetime",
     "printDocumentNo","printHandoverTime","printHandedOverBy",
@@ -840,9 +1196,6 @@ const PORTAL_COLUMNS = {
     "reqId","fileNumber"],
 };
 
-// Which fields represent "Start" and "Hold" dates for each stage, used by the
-// Full Report panel's date-wise filter. "all"/document view filters by
-// requestDate only (document entry date has no separate hold date).
 const STAGE_DATE_FIELDS = {
   all:      { start: "requestDate",        hold: null,               label: "All" },
   document: { start: "requestDate",        hold: null,               label: "Document" },
@@ -852,8 +1205,6 @@ const STAGE_DATE_FIELDS = {
   delivery: { start: "deliveryStartTime",  hold: "deliveryHoldTime", label: "Delivery" },
 };
 
-// Simple inclusive from/to date-string comparison (YYYY-MM-DD), tolerant of
-// full datetime values (only the date portion is compared).
 function dateFieldInRange(doc, field, fromDate, toDate) {
   if (!fromDate && !toDate) return true;
   if (!field) return true;
@@ -881,10 +1232,7 @@ function DocumentsExcelPanel({ documents, jobTypes }) {
   const [portalFilter, setPortalFilter] = useState("all");
   const [search, setSearch] = useState("");
 
-  // Date-wise filter: which date field (Start / Hold) of the CURRENTLY
-  // selected portal to filter on, plus a from/to range. Resets sensibly
-  // when the portal changes (hold isn't available for "all"/document view).
-  const [dateFieldMode, setDateFieldMode] = useState("start"); // "start" | "hold"
+  const [dateFieldMode, setDateFieldMode] = useState("start");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
 
@@ -922,7 +1270,7 @@ function DocumentsExcelPanel({ documents, jobTypes }) {
           value={portalFilter}
           onChange={e => {
             setPortalFilter(e.target.value);
-            setDateFieldMode("start"); // reset to Start when switching portal/table
+            setDateFieldMode("start");
           }}
         >
           <option value="all">All Portals (combined)</option>
@@ -931,7 +1279,6 @@ function DocumentsExcelPanel({ documents, jobTypes }) {
           <option value="check">Check Portal</option>
           <option value="delivery">Delivery Portal</option>
         </select>
-        
 
         <input
           className="adm-xl-search"
@@ -968,9 +1315,6 @@ function DocumentsExcelPanel({ documents, jobTypes }) {
         <button
           className="adm-xl-export-btn jobtype"
           onClick={() => {
-            // One workbook, one sheet PER job type (using the currently selected
-            // portal's columns), built from ALL documents — ignores the jobType
-            // dropdown above so every type is always included.
             const wb = XLSX.utils.book_new();
             jobTypes.forEach(t => {
               const typeRows = documents
@@ -980,7 +1324,6 @@ function DocumentsExcelPanel({ documents, jobTypes }) {
                   cols.forEach(c => { row[c] = d[c] ?? ""; });
                   return row;
                 });
-              // Excel sheet names: max 31 chars, no \ / ? * [ ] :
               const safeName = t.replace(/[\\/?*[\]:]/g, "-").substring(0, 31) || "Sheet";
               XLSX.utils.book_append_sheet(
                 wb,
@@ -995,7 +1338,6 @@ function DocumentsExcelPanel({ documents, jobTypes }) {
         </button>
       </div>
 
-      {/* ── Date-wise filter for the currently selected portal/table ── */}
       <div className="adm-xl-toolbar adm-xl-datefilter">
         <span className="adm-xl-datefilter-label">📅 {stageDates.label} date filter:</span>
 

@@ -85,37 +85,22 @@ function jobTypeColor(jt) {
 
 // ── Status helpers ────────────────────────────────────────────────────────────
 // Internal state machine (drives button enabling / accent colors):
-//   PENDING → [Handover] → HANDED_OVER → [Start] → IN_PROGRESS
+//   PENDING → [Start] → IN_PROGRESS
 //   IN_PROGRESS → [Hold] → ON_HOLD → [Start = Resume] → IN_PROGRESS
 //   IN_PROGRESS / ON_HOLD → [End] → COMPLETED
-//
-// What the person actually SEES on the badge is always one of just 3 words:
-//   Pending / Handovered / Completed
+// (Handover step now lives on the Pick Portal, not here.)
 
 function statusClass(s) {
   const v = (s || "").toLowerCase();
-  if (v.includes("cancel"))                                 return "cancelled";
-  if (v.includes("complete") || v.includes("done"))          return "completed";
-  if (v.includes("hold"))                                    return "onhold";
-  if (v.includes("in_progress") || v.includes("progress"))   return "inprogress";
-  if (v.includes("handed"))                                  return "handedover";
+  if (v.includes("hold"))     return "onhold";
+  if (v.includes("progress")) return "inprogress";
+  if (v.includes("complete") || v.includes("done")) return "completed";
   return "pending";
 }
 
-// Badge text — always Pending / Handovered / Completed
 function statusLabel(s) {
-  const sc = statusClass(s);
-  if (sc === "completed") return "Completed";
-  if (sc === "pending")   return "Pending";
-  return "Handovered"; // handedover, inprogress, onhold all read as "Handovered"
-}
-
-// Badge color grouping — pending / handedover(+inprogress+onhold) / completed
-function badgeClass(s) {
-  const sc = statusClass(s);
-  if (sc === "completed") return "completed";
-  if (sc === "pending")   return "pending";
-  return "inprogress";
+  const c = statusClass(s);
+  return { pending: "Pending", inprogress: "In Progress", onhold: "On Hold", completed: "Completed" }[c];
 }
 
 // ── Person Picker ─────────────────────────────────────────────────────────────
@@ -147,38 +132,6 @@ function PersonPicker({ value, onChange }) {
           autoFocus
         />
       )}
-    </div>
-  );
-}
-
-// ── Popup: Handover (Step 1 — separate from Start) ────────────────────────────
-
-function HandoverPopup({ onConfirm, onCancel }) {
-  const [handedOverBy, setHandedOverBy] = useState("");
-
-  return (
-    <div className="ip-popup-overlay">
-      <div className="ip-popup">
-        <div className="ip-popup-head">
-          <span>🚀 Handover Document</span>
-          <button className="ip-popup-close" onClick={onCancel}>✕</button>
-        </div>
-        <p className="ip-popup-sub">Select who is handing over this document to print</p>
-
-        <span className="ip-popup-label">Handed Over By</span>
-        <PersonPicker value={handedOverBy} onChange={setHandedOverBy} />
-
-        <div className="ip-popup-foot">
-          <button className="ip-btn ip-btn-outline" onClick={onCancel}>Cancel</button>
-          <button
-            className="ip-btn ip-btn-handover"
-            disabled={!handedOverBy}
-            onClick={() => onConfirm(handedOverBy)}
-          >
-            🚀 Confirm Handover
-          </button>
-        </div>
-      </div>
     </div>
   );
 }
@@ -286,17 +239,15 @@ function PrintDonePopup({ onConfirm, onCancel }) {
 
 // ── Single Document Card ──────────────────────────────────────────────────────
 
-function DocumentCard({ doc, requestId, onHandover, onStart, onHold, onEnd }) {
+function DocumentCard({ doc, requestId, onStart, onHold, onEnd }) {
   const sc            = statusClass(doc.printStatus);
   const jColor        = jobTypeColor(doc.jobType);
   const isPending      = sc === "pending";
-  const isHandedOver   = sc === "handedover";   // handed over, not started yet
   const isInProgress   = sc === "inprogress";   // work actively running
   const isOnHold       = sc === "onhold";
   const isDone         = sc === "completed";
 
-  const canHandover = isPending;
-  const canStart     = isHandedOver || isOnHold;    // Start = also acts as Resume
+  const canStart     = isPending || isOnHold;    // Start = also acts as Resume
   const canHold      = isInProgress;
   const canEnd       = isInProgress || isOnHold;
 
@@ -313,7 +264,7 @@ function DocumentCard({ doc, requestId, onHandover, onStart, onHold, onEnd }) {
             {doc.jobType || "—"}
           </div>
         </div>
-        <span className={`ip-badge ${badgeClass(doc.printStatus)}`}>{statusLabel(doc.printStatus)}</span>
+        <span className={`ip-badge ${sc}`}>{statusLabel(doc.printStatus)}</span>
       </div>
 
       {/* ── Body ── */}
@@ -349,16 +300,6 @@ function DocumentCard({ doc, requestId, onHandover, onStart, onHold, onEnd }) {
             <span>{doc.vehicleNo || "Not added"}</span>
           </div>
         </div>
-
-        {/* Handed Over info — shown from the moment Handover is confirmed */}
-        {!isPending && doc.printHandedOverBy && (
-          <div className="ip-handover-box">
-            <div className="ip-handover-row">
-              <span>🚀 Handed Over By</span>
-              <span>👤 {doc.printHandedOverBy}</span>
-            </div>
-          </div>
-        )}
 
         {/* Hold info */}
         {(isOnHold || doc.printHoldReason) && (
@@ -397,16 +338,8 @@ function DocumentCard({ doc, requestId, onHandover, onStart, onHold, onEnd }) {
         )}
       </div>
 
-      {/* ── Footer Buttons: Handover | Start | Hold | End ── */}
+      {/* ── Footer Buttons: Start | Hold | End ── */}
       <div className="ip-card-foot">
-        <button
-          className="ip-btn ip-btn-handover-action"
-          disabled={!canHandover}
-          onClick={() => onHandover(doc.id)}
-        >
-          🚀 Handover
-        </button>
-
         <button
           className="ip-btn ip-btn-start"
           disabled={!canStart}
@@ -471,7 +404,7 @@ export default function IssuPrinFormt() {
   const [lastUpdated,  setLastUpdated]  = useState(null);
   const [refreshing,   setRefreshing]   = useState(false);
 
-  const [activePopup, setActivePopup] = useState(null); // "handover"|"hold"|"end"
+  const [activePopup, setActivePopup] = useState(null); // "hold"|"end"
   const [activeId,    setActiveId]    = useState(null);
 
   const fetchDocuments = useCallback(async (silent = false) => {
@@ -495,22 +428,8 @@ export default function IssuPrinFormt() {
 
   const closePopup = () => { setActivePopup(null); setActiveId(null); };
 
-  const handleHandoverClick = (id) => { setActiveId(id); setActivePopup("handover"); };
   const handleHoldClick     = (id) => { setActiveId(id); setActivePopup("hold"); };
   const handleEndClick      = (id) => { setActiveId(id); setActivePopup("end"); };
-
-  // Handover confirm → PUT /handover
-  const handleHandoverConfirm = async (handedOverBy) => {
-    const id = activeId; closePopup();
-    try {
-      await fetch(`${API_BASE}/${id}/handover`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ handedOverBy }),
-      });
-      fetchDocuments(true);
-    } catch (err) { alert("Handover failed: " + err.message); }
-  };
 
   // Start / Resume → PUT /start — direct action, no popup needed
   const handleStart = async (id) => {
@@ -553,7 +472,8 @@ export default function IssuPrinFormt() {
   const STATUS_FILTERS = [
     { value: "ALL",        label: "All Status" },
     { value: "pending",    label: "Pending" },
-    { value: "inprogress", label: "Handovered" },
+    { value: "inprogress", label: "In Progress" },
+    { value: "onhold",     label: "On Hold" },
     { value: "completed",  label: "Completed" },
   ];
 
@@ -565,24 +485,19 @@ export default function IssuPrinFormt() {
       doc.requestedBy, doc.vehicleNo,
     ].some(v => (v || "").toLowerCase().includes(q));
     const matchType   = filterType   === "ALL" || doc.jobType === filterType;
-    const matchStatus = filterStatus === "ALL" || badgeClass(doc.printStatus) === filterStatus;
+    const matchStatus = filterStatus === "ALL" || statusClass(doc.printStatus) === filterStatus;
     return matchSearch && matchType && matchStatus;
   });
 
-  const total      = documents.length;
-  const pending    = documents.filter(d => statusClass(d.printStatus) === "pending").length;
-  const handedOver = documents.filter(d => {
-    const sc = statusClass(d.printStatus);
-    return sc === "handedover" || sc === "inprogress" || sc === "onhold";
-  }).length;
-  const completed  = documents.filter(d => statusClass(d.printStatus) === "completed").length;
+  const total     = documents.length;
+  const pending   = documents.filter(d => statusClass(d.printStatus) === "pending").length;
+  const inProg    = documents.filter(d => statusClass(d.printStatus) === "inprogress").length;
+  const onHold    = documents.filter(d => statusClass(d.printStatus) === "onhold").length;
+  const completed = documents.filter(d => statusClass(d.printStatus) === "completed").length;
 
   return (
     <div className="ip-page">
 
-      {activePopup === "handover" && (
-        <HandoverPopup onConfirm={handleHandoverConfirm} onCancel={closePopup} />
-      )}
       {activePopup === "hold" && (
         <HoldPopup onConfirm={handleHoldConfirm} onCancel={closePopup} />
       )}
@@ -623,11 +538,12 @@ export default function IssuPrinFormt() {
         </select>
       </div>
 
-      {/* Stats — Pending / Handovered / Completed */}
+      {/* Stats */}
       <div className="ip-stats">
         <div className="ip-stat-chip blue">Total <strong>{total}</strong></div>
         <div className="ip-stat-chip"><strong style={{color:"#f59e0b"}}>{pending}</strong> Pending</div>
-        <div className="ip-stat-chip"><strong style={{color:"#3b82f6"}}>{handedOver}</strong> Handovered</div>
+        <div className="ip-stat-chip"><strong style={{color:"#3b82f6"}}>{inProg}</strong> In Progress</div>
+        <div className="ip-stat-chip"><strong style={{color:"#fb923c"}}>{onHold}</strong> On Hold</div>
         <div className="ip-stat-chip green">Completed <strong>{completed}</strong></div>
         <div className="ip-stat-chip">Showing <strong style={{color:"#a78bfa"}}>{visible.length}</strong> of {total}</div>
       </div>
@@ -655,7 +571,6 @@ export default function IssuPrinFormt() {
           visible.map(doc => (
             <DocumentCard key={doc.id} doc={doc}
               requestId={requestIdMap[doc.id]}
-              onHandover={handleHandoverClick}
               onStart={handleStart}
               onHold={handleHoldClick}
               onEnd={handleEndClick}
