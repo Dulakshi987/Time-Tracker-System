@@ -76,4 +76,16 @@ public class Document {
     private LocalDateTime createdDatetime;
 
     
+    // ── who requested this document (shown under Request Date/Time) ──
+    @Column(name = "requested_by")
+    private String requestedBy;
+
+    // ── vehicle number for the request (shown under Requested By) ──
+    @Column(name = "vehicle_no")
+    private String vehicleNo;
+
+    
+    // ── optional — new field ──
+    @Column(name = "sap_issue_line_no")
+    private String sapIssueLineNo;
 }

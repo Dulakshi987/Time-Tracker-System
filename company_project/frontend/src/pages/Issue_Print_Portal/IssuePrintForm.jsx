@@ -2,9 +2,8 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import "./IssuePrint.css";
 
 const API_BASE = "http://localhost:8080/api/print-portal";
+const SETUP_API = "http://localhost:8080/api/admin-setup";
 const AUTO_REFRESH = 10000;
-
-const PEOPLE_OPTIONS = ["Rashani", "Arushi", "Kawya", "Pathum", "Ruwan"];
 
 const HOLD_REASONS = [
   "Printer not available",
@@ -35,12 +34,9 @@ function formatDuration(seconds) {
   return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
 }
 
-// Groups documents by their request date and numbers each group starting
-// from 1, then combines that with the date to build a unique Request ID
-// like 20260816/0001. Resets automatically whenever the date changes.
 function computeRequestIds(documents) {
   const dateKeyOf = (doc) => {
-    if (doc.requestDate)     return String(doc.requestDate).substring(0, 10);
+    if (doc.requestDate) return String(doc.requestDate).substring(0, 10);
     if (doc.createdDatetime) return String(doc.createdDatetime).substring(0, 10);
     return null;
   };
@@ -57,13 +53,9 @@ function computeRequestIds(documents) {
     const compactDate = key === "unknown" ? "00000000" : key.replace(/-/g, "");
     group
       .slice()
-      .sort((a, b) => {
-        // order within the day by creation time if we have it, else by id
-        if (a.createdDatetime && b.createdDatetime) {
-          return new Date(a.createdDatetime) - new Date(b.createdDatetime);
-        }
-        return a.id - b.id;
-      })
+      .sort((a, b) => (a.createdDatetime && b.createdDatetime 
+        ? new Date(a.createdDatetime) - new Date(b.createdDatetime) 
+        : a.id - b.id))
       .forEach((doc, idx) => {
         idMap[doc.id] = `${compactDate}/${String(idx + 1).padStart(4, "0")}`;
       });
@@ -74,25 +66,15 @@ function computeRequestIds(documents) {
 
 function jobTypeColor(jt) {
   const map = {
-    balance:      "#a78bfa",
-    domestic:     "#34d399",
-    cost_center:  "#f59e0b",
-    commercial:   "#3b82f6",
-    sales_order:  "#f472b6",
+    balance: "#8b5cf6", domestic: "#16a34a", cost_center: "#b45309",
+    commercial: "#1d4ed8", sales_order: "#db2777",
   };
-  return map[(jt || "").toLowerCase().replace(/\s+/g, "_")] || "#7c8db0";
+  return map[(jt || "").toLowerCase().replace(/\s+/g, "_")] || "#64748b";
 }
-
-// ── Status helpers ────────────────────────────────────────────────────────────
-// Internal state machine (drives button enabling / accent colors):
-//   PENDING → [Start] → IN_PROGRESS
-//   IN_PROGRESS → [Hold] → ON_HOLD → [Start = Resume] → IN_PROGRESS
-//   IN_PROGRESS / ON_HOLD → [End] → COMPLETED
-// (Handover step now lives on the Pick Portal, not here.)
 
 function statusClass(s) {
   const v = (s || "").toLowerCase();
-  if (v.includes("hold"))     return "onhold";
+  if (v.includes("hold")) return "onhold";
   if (v.includes("progress")) return "inprogress";
   if (v.includes("complete") || v.includes("done")) return "completed";
   return "pending";
@@ -103,49 +85,36 @@ function statusLabel(s) {
   return { pending: "Pending", inprogress: "In Progress", onhold: "On Hold", completed: "Completed" }[c];
 }
 
-// ── Person Picker ─────────────────────────────────────────────────────────────
-
-function PersonPicker({ value, onChange }) {
-  const [showOther, setShowOther] = useState(value && !PEOPLE_OPTIONS.includes(value));
-  const [otherVal, setOtherVal]   = useState(showOther ? value : "");
-
+// ── Person Picker (Only Master Data - No "Other") ───────────────────────────
+function PersonPicker({ value, onChange, people }) {
   return (
     <div className="ip-popup-options">
-      {PEOPLE_OPTIONS.map(name => (
-        <button
-          key={name}
-          className={`ip-popup-option ${value === name && !showOther ? "selected" : ""}`}
-          onClick={() => { setShowOther(false); onChange(name); }}
-        >👤 {name}</button>
-      ))}
-      <button
-        className={`ip-popup-option ${showOther ? "selected" : ""}`}
-        onClick={() => { setShowOther(true); onChange(otherVal); }}
-      >✏️ Other</button>
-      {showOther && (
-        <input
-          className="ip-popup-input"
-          type="text"
-          placeholder="Type name..."
-          value={otherVal}
-          onChange={e => { setOtherVal(e.target.value); onChange(e.target.value); }}
-          autoFocus
-        />
+      {people.length === 0 ? (
+        <div className="ip-popup-empty">No operators in Master Setup</div>
+      ) : (
+        people.map(name => (
+          <button
+            key={name}
+            className={`ip-popup-option ${value === name ? "selected" : ""}`}
+            onClick={() => onChange(name)}
+          >
+            👤 {name}
+          </button>
+        ))
       )}
     </div>
   );
 }
 
-// ── Popup: Hold Reason + Held By ─────────────────────────────────────────────
-
-function HoldPopup({ onConfirm, onCancel }) {
-  const [reason, setReason]         = useState("");
+// ── Hold Popup ─────────────────────────────────────────────────────────────
+function HoldPopup({ onConfirm, onCancel, printOperators }) {
+  const [reason, setReason] = useState("");
   const [otherReason, setOtherReason] = useState("");
-  const [heldBy, setHeldBy]         = useState("");
+  const [heldBy, setHeldBy] = useState("");
 
-  const isOtherReason = reason === "Other";
-  const finalReason   = isOtherReason ? otherReason.trim() : reason;
-  const canConfirm    = !!finalReason && !!heldBy;
+  const isOther = reason === "Other";
+  const finalReason = isOther ? otherReason.trim() : reason;
+  const canConfirm = !!finalReason && !!heldBy;
 
   return (
     <div className="ip-popup-overlay">
@@ -154,7 +123,7 @@ function HoldPopup({ onConfirm, onCancel }) {
           <span>⏸ Hold Document</span>
           <button className="ip-popup-close" onClick={onCancel}>✕</button>
         </div>
-        <p className="ip-popup-sub">Select a reason and who is putting this on hold</p>
+        <p className="ip-popup-sub">Select reason and who is holding</p>
 
         <span className="ip-popup-label">Hold Reason</span>
         <div className="ip-popup-options" style={{ marginBottom: 16 }}>
@@ -163,12 +132,13 @@ function HoldPopup({ onConfirm, onCancel }) {
               key={r}
               className={`ip-popup-option ${reason === r ? "selected" : ""}`}
               onClick={() => setReason(r)}
-            >{r === "Other" ? "✏️ " : "⏸ "}{r}</button>
+            >
+              {r}
+            </button>
           ))}
-          {isOtherReason && (
+          {isOther && (
             <input
               className="ip-popup-input"
-              type="text"
               placeholder="Type reason..."
               value={otherReason}
               onChange={e => setOtherReason(e.target.value)}
@@ -178,7 +148,7 @@ function HoldPopup({ onConfirm, onCancel }) {
         </div>
 
         <span className="ip-popup-label">Held By</span>
-        <PersonPicker value={heldBy} onChange={setHeldBy} />
+        <PersonPicker value={heldBy} onChange={setHeldBy} people={printOperators} />
 
         <div className="ip-popup-foot">
           <button className="ip-btn ip-btn-outline" onClick={onCancel}>Cancel</button>
@@ -186,18 +156,19 @@ function HoldPopup({ onConfirm, onCancel }) {
             className="ip-btn ip-btn-hold-confirm"
             disabled={!canConfirm}
             onClick={() => onConfirm(finalReason, heldBy)}
-          >⏸ Confirm Hold</button>
+          >
+            ⏸ Confirm Hold
+          </button>
         </div>
       </div>
     </div>
   );
 }
 
-// ── Popup: Print Done ─────────────────────────────────────────────────────────
-
-function PrintDonePopup({ onConfirm, onCancel }) {
+// ── Print Done Popup ───────────────────────────────────────────────────────
+function PrintDonePopup({ onConfirm, onCancel, printOperators }) {
   const [documentNo, setDocumentNo] = useState("");
-  const [printedBy, setPrintedBy]   = useState("");
+  const [printedBy, setPrintedBy] = useState("");
   const canConfirm = documentNo.trim().length > 0 && !!printedBy;
 
   return (
@@ -207,7 +178,7 @@ function PrintDonePopup({ onConfirm, onCancel }) {
           <span>🖨️ Print Done</span>
           <button className="ip-popup-close" onClick={onCancel}>✕</button>
         </div>
-        <p className="ip-popup-sub">Enter the document number and who printed it</p>
+        <p className="ip-popup-sub">Enter document number and printer</p>
 
         <div className="ip-popup-field">
           <span className="ip-popup-label">Document Number</span>
@@ -221,8 +192,8 @@ function PrintDonePopup({ onConfirm, onCancel }) {
           />
         </div>
 
-        <span className="ip-popup-label">Print By</span>
-        <PersonPicker value={printedBy} onChange={setPrintedBy} />
+        <span className="ip-popup-label">Printed By</span>
+        <PersonPicker value={printedBy} onChange={setPrintedBy} people={printOperators} />
 
         <div className="ip-popup-foot">
           <button className="ip-btn ip-btn-outline" onClick={onCancel}>Cancel</button>
@@ -230,35 +201,35 @@ function PrintDonePopup({ onConfirm, onCancel }) {
             className="ip-btn ip-btn-done"
             disabled={!canConfirm}
             onClick={() => onConfirm(documentNo.trim(), printedBy)}
-          >✅ Print Done</button>
+          >
+            ✅ Print Done
+          </button>
         </div>
       </div>
     </div>
   );
 }
 
-// ── Single Document Card ──────────────────────────────────────────────────────
-
+// ── Document Card ──────────────────────────────────────────────────────────
 function DocumentCard({ doc, requestId, onStart, onHold, onEnd }) {
-  const sc            = statusClass(doc.printStatus);
-  const jColor        = jobTypeColor(doc.jobType);
-  const isPending      = sc === "pending";
-  const isInProgress   = sc === "inprogress";   // work actively running
-  const isOnHold       = sc === "onhold";
-  const isDone         = sc === "completed";
+  const sc = statusClass(doc.printStatus);
+  const jColor = jobTypeColor(doc.jobType);
+  const isPending = sc === "pending";
+  const isInProgress = sc === "inprogress";
+  const isOnHold = sc === "onhold";
+  const isDone = sc === "completed";
 
-  const canStart     = isPending || isOnHold;    // Start = also acts as Resume
-  const canHold      = isInProgress;
-  const canEnd       = isInProgress || isOnHold;
+  const canStart = isPending || isOnHold;
+  const canHold = isInProgress;
+  const canEnd = isInProgress || isOnHold;
 
   return (
     <div className={`ip-card status-${sc}`}>
-      {/* ── Head ── */}
       <div className="ip-card-head">
         <div>
           <div className="ip-doc-no">{requestId || "—"}</div>
           <div className="ip-doc-number-sub">
-            Doc No: {doc.printDocumentNo ? doc.printDocumentNo : "Not entered"}
+            Doc No: {doc.printDocumentNo || "Not entered"}
           </div>
           <div style={{ color: jColor, fontWeight: 700, fontSize: "0.78rem", marginTop: 2 }}>
             {doc.jobType || "—"}
@@ -267,7 +238,6 @@ function DocumentCard({ doc, requestId, onStart, onHold, onEnd }) {
         <span className={`ip-badge ${sc}`}>{statusLabel(doc.printStatus)}</span>
       </div>
 
-      {/* ── Body ── */}
       <div className="ip-card-body">
         <div className="ip-detail-row">
           <span className="ip-detail-label">Requested By</span>
@@ -281,86 +251,38 @@ function DocumentCard({ doc, requestId, onStart, onHold, onEnd }) {
           <span className="ip-detail-label">Reservation No</span>
           <span className="ip-detail-value">{doc.reservationNo || "—"}</span>
         </div>
-        <div className="ip-detail-row">
-          <span className="ip-detail-label">Entered By</span>
-          <span className="ip-detail-value">{doc.enteredBy || "—"}</span>
-        </div>
 
         <div className="ip-times">
-          <div className="ip-time-row">
-            <span>Request Date</span>
-            <span>{formatDate(doc.requestDate)}</span>
-          </div>
-          <div className="ip-time-row">
-            <span>Request Time</span>
-            <span>{formatTime(doc.requestTime)}</span>
-          </div>
-          <div className="ip-time-row">
-            <span>Vehicle Number</span>
-            <span>{doc.vehicleNo || "Not added"}</span>
-          </div>
+          <div className="ip-time-row"><span>Request Date</span><span>{formatDate(doc.requestDate)}</span></div>
+          <div className="ip-time-row"><span>Request Time</span><span>{formatTime(doc.requestTime)}</span></div>
+          <div className="ip-time-row"><span>Vehicle No</span><span>{doc.vehicleNo || "Not added"}</span></div>
         </div>
 
-        {/* Hold info */}
         {(isOnHold || doc.printHoldReason) && (
           <div className="ip-hold-box">
-            <div className="ip-hold-row">
-              <span>⏸ Hold Reason</span>
-              <span>{doc.printHoldReason || "—"}</span>
-            </div>
-            <div className="ip-hold-row">
-              <span>Held By</span>
-              <span>👤 {doc.printHeldBy || "—"}</span>
-            </div>
-            <div className="ip-hold-row">
-              <span>Held At</span>
-              <span>{formatDateTime(doc.printHoldTime)}</span>
-            </div>
+            <div className="ip-hold-row"><span>Hold Reason</span><span>{doc.printHoldReason || "—"}</span></div>
+            <div className="ip-hold-row"><span>Held By</span><span>👤 {doc.printHeldBy || "—"}</span></div>
+            <div className="ip-hold-row"><span>Held At</span><span>{formatDateTime(doc.printHoldTime)}</span></div>
           </div>
         )}
 
-        {/* Print Done summary */}
         {isDone && (
           <div className="ip-print-done-box">
-            <div className="ip-print-done-row">
-              <span>Document No</span>
-              <span>{doc.printDocumentNo || "—"}</span>
-            </div>
-            <div className="ip-print-done-row">
-              <span>Print By</span>
-              <span>👤 {doc.printedBy || "—"}</span>
-            </div>
-            <div className="ip-print-done-row">
-              <span>Duration</span>
-              <span>⏱ {formatDuration(doc.printDurationSeconds)}</span>
-            </div>
+            <div className="ip-print-done-row"><span>Document No</span><span>{doc.printDocumentNo || "—"}</span></div>
+            <div className="ip-print-done-row"><span>Printed By</span><span>👤 {doc.printedBy || "—"}</span></div>
+            <div className="ip-print-done-row"><span>Duration</span><span>⏱ {formatDuration(doc.printDurationSeconds)}</span></div>
           </div>
         )}
       </div>
 
-      {/* ── Footer Buttons: Start | Hold | End ── */}
       <div className="ip-card-foot">
-        <button
-          className="ip-btn ip-btn-start"
-          disabled={!canStart}
-          onClick={() => onStart(doc.id)}
-        >
+        <button className="ip-btn ip-btn-start" disabled={!canStart} onClick={() => onStart(doc.id)}>
           {isOnHold ? "▶ Resume" : "▶ Start"}
         </button>
-
-        <button
-          className="ip-btn ip-btn-hold"
-          disabled={!canHold}
-          onClick={() => onHold(doc.id)}
-        >
+        <button className="ip-btn ip-btn-hold" disabled={!canHold} onClick={() => onHold(doc.id)}>
           ⏸ Hold
         </button>
-
-        <button
-          className="ip-btn ip-btn-end"
-          disabled={!canEnd}
-          onClick={() => onEnd(doc.id)}
-        >
+        <button className="ip-btn ip-btn-end" disabled={!canEnd} onClick={() => onEnd(doc.id)}>
           ■ End
         </button>
       </div>
@@ -368,70 +290,69 @@ function DocumentCard({ doc, requestId, onStart, onHold, onEnd }) {
   );
 }
 
-// ── Skeleton ──────────────────────────────────────────────────────────────────
-
-function SkeletonCard() {
-  return (
-    <div className="ip-card status-pending">
-      <div className="ip-card-head">
-        <div>
-          <div className="ip-skeleton" style={{ width: 100, height: 15, marginBottom: 6 }} />
-          <div className="ip-skeleton" style={{ width: 70,  height: 11 }} />
-        </div>
-        <div className="ip-skeleton" style={{ width: 72, height: 22, borderRadius: 12 }} />
-      </div>
-      <div className="ip-card-body">
-        {[1,2,3,4].map(i => (
-          <div key={i} className="ip-detail-row">
-            <div className="ip-skeleton" style={{ width: 90,  height: 11 }} />
-            <div className="ip-skeleton" style={{ width: 130, height: 11 }} />
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-// ── Main ─────────────────────────────────────────────────────────────────────
-
+// ── Main Component ─────────────────────────────────────────────────────────
 export default function IssuPrinFormt() {
-  const [documents,    setDocuments]    = useState([]);
-  const [loading,      setLoading]      = useState(true);
-  const [error,        setError]        = useState(null);
-  const [search,       setSearch]       = useState("");
-  const [filterType,   setFilterType]   = useState("ALL");
+  const [documents, setDocuments] = useState([]);
+  const [printOperators, setPrintOperators] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [search, setSearch] = useState("");
+  const [filterType, setFilterType] = useState("ALL");
   const [filterStatus, setFilterStatus] = useState("ALL");
-  const [lastUpdated,  setLastUpdated]  = useState(null);
-  const [refreshing,   setRefreshing]   = useState(false);
+  const [lastUpdated, setLastUpdated] = useState(null);
+  const [refreshing, setRefreshing] = useState(false);
 
-  const [activePopup, setActivePopup] = useState(null); // "hold"|"end"
-  const [activeId,    setActiveId]    = useState(null);
+  const [activePopup, setActivePopup] = useState(null);
+  const [activeId, setActiveId] = useState(null);
 
   const fetchDocuments = useCallback(async (silent = false) => {
-    if (!silent) setLoading(true); else setRefreshing(true);
+    if (!silent) setLoading(true);
+    else setRefreshing(true);
     setError(null);
     try {
-      const res  = await fetch(API_BASE);
+      const res = await fetch(API_BASE);
       if (!res.ok) throw new Error(`Server error: ${res.status}`);
       const data = await res.json();
       setDocuments(data);
       setLastUpdated(new Date());
-    } catch (err) { setError(err.message); }
-    finally { setLoading(false); setRefreshing(false); }
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
   }, []);
 
-  useEffect(() => { fetchDocuments(false); }, [fetchDocuments]);
+  const fetchPrintOperators = useCallback(async () => {
+    try {
+      const res = await fetch(`${SETUP_API}/print-operators`);
+      if (res.ok) {
+        const data = await res.json();
+        setPrintOperators(data.map(op => op.operatorName || op.name).filter(Boolean));
+      }
+    } catch (e) {
+      console.warn("Failed to load print operators", e);
+    }
+  }, []);
+
   useEffect(() => {
-    const id = setInterval(() => fetchDocuments(true), AUTO_REFRESH);
+    fetchDocuments(false);
+    fetchPrintOperators();
+  }, [fetchDocuments, fetchPrintOperators]);
+
+  useEffect(() => {
+    const id = setInterval(() => {
+      fetchDocuments(true);
+      fetchPrintOperators();
+    }, AUTO_REFRESH);
     return () => clearInterval(id);
-  }, [fetchDocuments]);
+  }, [fetchDocuments, fetchPrintOperators]);
 
-  const closePopup = () => { setActivePopup(null); setActiveId(null); };
+  const closePopup = () => {
+    setActivePopup(null);
+    setActiveId(null);
+  };
 
-  const handleHoldClick     = (id) => { setActiveId(id); setActivePopup("hold"); };
-  const handleEndClick      = (id) => { setActiveId(id); setActivePopup("end"); };
-
-  // Start / Resume → PUT /start — direct action, no popup needed
   const handleStart = async (id) => {
     try {
       await fetch(`${API_BASE}/${id}/start`, { method: "PUT" });
@@ -439,8 +360,12 @@ export default function IssuPrinFormt() {
     } catch (err) { alert("Start failed: " + err.message); }
   };
 
+  const handleHoldClick = (id) => { setActiveId(id); setActivePopup("hold"); };
+  const handleEndClick = (id) => { setActiveId(id); setActivePopup("end"); };
+
   const handleHoldConfirm = async (holdReason, heldBy) => {
-    const id = activeId; closePopup();
+    const id = activeId;
+    closePopup();
     try {
       await fetch(`${API_BASE}/${id}/hold`, {
         method: "PUT",
@@ -452,7 +377,8 @@ export default function IssuPrinFormt() {
   };
 
   const handlePrintDoneConfirm = async (printDocumentNo, printedBy) => {
-    const id = activeId; closePopup();
+    const id = activeId;
+    closePopup();
     try {
       await fetch(`${API_BASE}/${id}/end`, {
         method: "PUT",
@@ -463,113 +389,131 @@ export default function IssuPrinFormt() {
     } catch (err) { alert("Print Done failed: " + err.message); }
   };
 
-  // Request ID: date + daily sequence, e.g. 20260816/0001
   const requestIdMap = useMemo(() => computeRequestIds(documents), [documents]);
 
-  // Job type options for filter dropdown (raw values, unaffected by status grouping)
   const jobTypes = ["ALL", ...new Set(documents.map(d => d.jobType).filter(Boolean))];
 
   const STATUS_FILTERS = [
-    { value: "ALL",        label: "All Status" },
-    { value: "pending",    label: "Pending" },
+    { value: "ALL", label: "All Status" },
+    { value: "pending", label: "Pending" },
     { value: "inprogress", label: "In Progress" },
-    { value: "onhold",     label: "On Hold" },
-    { value: "completed",  label: "Completed" },
+    { value: "onhold", label: "On Hold" },
+    { value: "completed", label: "Completed" },
   ];
 
   const visible = documents.filter(doc => {
     const q = search.toLowerCase();
     const matchSearch = !q || [
-      String(doc.id), doc.jobwbs,
-      doc.reservationNo, doc.enteredBy, doc.jobType,
-      doc.requestedBy, doc.vehicleNo,
+      String(doc.id), doc.jobwbs, doc.reservationNo,
+      doc.enteredBy, doc.jobType, doc.requestedBy, doc.vehicleNo
     ].some(v => (v || "").toLowerCase().includes(q));
-    const matchType   = filterType   === "ALL" || doc.jobType === filterType;
+
+    const matchType = filterType === "ALL" || doc.jobType === filterType;
     const matchStatus = filterStatus === "ALL" || statusClass(doc.printStatus) === filterStatus;
+
     return matchSearch && matchType && matchStatus;
   });
 
-  const total     = documents.length;
-  const pending   = documents.filter(d => statusClass(d.printStatus) === "pending").length;
-  const inProg    = documents.filter(d => statusClass(d.printStatus) === "inprogress").length;
-  const onHold    = documents.filter(d => statusClass(d.printStatus) === "onhold").length;
+  const total = documents.length;
+  const pending = documents.filter(d => statusClass(d.printStatus) === "pending").length;
+  const inProg = documents.filter(d => statusClass(d.printStatus) === "inprogress").length;
+  const onHold = documents.filter(d => statusClass(d.printStatus) === "onhold").length;
   const completed = documents.filter(d => statusClass(d.printStatus) === "completed").length;
 
   return (
     <div className="ip-page">
-
       {activePopup === "hold" && (
-        <HoldPopup onConfirm={handleHoldConfirm} onCancel={closePopup} />
+        <HoldPopup
+          onConfirm={handleHoldConfirm}
+          onCancel={closePopup}
+          printOperators={printOperators}
+        />
       )}
       {activePopup === "end" && (
-        <PrintDonePopup onConfirm={handlePrintDoneConfirm} onCancel={closePopup} />
+        <PrintDonePopup
+          onConfirm={handlePrintDoneConfirm}
+          onCancel={closePopup}
+          printOperators={printOperators}
+        />
       )}
 
-      {/* Header */}
       <div className="ip-header">
         <div className="ip-header-left">
-          <h1>🖨️ Print Portal</h1>
-          <p>Document Cart View
+          <h1>LOGITRACK-WAREHOUSE TIME EFFICENCY TRACKER SYSTEM</h1>
+          <h1>  Print Portal</h1>
+          <p>
+            Document Cart View
             {lastUpdated && (
-              <span style={{ marginLeft:10, fontSize:"0.75rem", color:"#3b82f6" }}>
+              <span style={{ marginLeft: 10, fontSize: "0.75rem", color: "#3b82f6" }}>
                 {refreshing ? "⟳ Refreshing..." : `Updated: ${lastUpdated.toLocaleTimeString()}`}
               </span>
             )}
           </p>
         </div>
-        <button className="ip-btn ip-btn-outline"
-          style={{ flex:"unset", padding:"8px 18px" }}
-          onClick={() => fetchDocuments(false)}>↻ Refresh</button>
+        <button
+          className="ip-btn ip-btn-outline"
+          style={{ flex: "unset", padding: "8px 18px" }}
+          onClick={() => fetchDocuments(false)}
+        >
+          ↻ Refresh
+        </button>
       </div>
-
       {/* Toolbar */}
       <div className="ip-toolbar">
         <div className="ip-search-wrap">
           <span className="ip-search-icon">🔍</span>
-          <input className="ip-search" type="text"
-            placeholder="Search by ID, Customer, WBS, Reservation..."
-            value={search} onChange={e => setSearch(e.target.value)} />
+          <input
+            className="ip-search"
+            type="text"
+            placeholder="Search by ID, WBS, Reservation..."
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+          />
         </div>
         <select className="ip-filter-select" value={filterType} onChange={e => setFilterType(e.target.value)}>
-          {jobTypes.map(t => <option key={t} value={t}>{t === "ALL" ? "All Job Types" : t}</option>)}
+          {jobTypes.map(t => (
+            <option key={t} value={t}>{t === "ALL" ? "All Job Types" : t}</option>
+          ))}
         </select>
         <select className="ip-filter-select" value={filterStatus} onChange={e => setFilterStatus(e.target.value)}>
-          {STATUS_FILTERS.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
+          {STATUS_FILTERS.map(opt => (
+            <option key={opt.value} value={opt.value}>{opt.label}</option>
+          ))}
         </select>
       </div>
 
       {/* Stats */}
       <div className="ip-stats">
         <div className="ip-stat-chip blue">Total <strong>{total}</strong></div>
-        <div className="ip-stat-chip"><strong style={{color:"#f59e0b"}}>{pending}</strong> Pending</div>
-        <div className="ip-stat-chip"><strong style={{color:"#3b82f6"}}>{inProg}</strong> In Progress</div>
-        <div className="ip-stat-chip"><strong style={{color:"#fb923c"}}>{onHold}</strong> On Hold</div>
+        <div className="ip-stat-chip"><strong style={{ color: "#b45309" }}>{pending}</strong> Pending</div>
+        <div className="ip-stat-chip"><strong style={{ color: "#1d4ed8" }}>{inProg}</strong> In Progress</div>
+        <div className="ip-stat-chip"><strong style={{ color: "#c2410c" }}>{onHold}</strong> On Hold</div>
         <div className="ip-stat-chip green">Completed <strong>{completed}</strong></div>
-        <div className="ip-stat-chip">Showing <strong style={{color:"#a78bfa"}}>{visible.length}</strong> of {total}</div>
       </div>
 
-      {/* Error */}
       {error && (
-        <div style={{ background:"rgba(239,68,68,0.12)", border:"1px solid #ef4444",
-          borderRadius:8, padding:"12px 16px", color:"#fca5a5", marginBottom:18, fontSize:"0.85rem" }}>
-          ⚠ {error} — <button onClick={() => fetchDocuments(false)}
-            style={{background:"none",border:"none",color:"#60a5fa",cursor:"pointer",textDecoration:"underline"}}>
-            retry</button>
+        <div style={{ background: "rgba(239,68,68,0.08)", border: "1px solid #ef4444", borderRadius: 8, padding: "12px 16px", color: "#b91c1c", marginBottom: 18 }}>
+          ⚠ {error} — <button onClick={() => fetchDocuments(false)} style={{ color: "#1d4ed8", textDecoration: "underline" }}>retry</button>
         </div>
       )}
 
-      {/* Grid */}
       <div className="ip-grid">
         {loading ? (
-          [1,2,3,4,5,6].map(i => <SkeletonCard key={i} />)
+          Array.from({ length: 6 }).map((_, i) => (
+            <div key={i} className="ip-card status-pending">
+              {/* Simple skeleton */}
+              <div className="ip-card-head" style={{ opacity: 0.6 }}>
+                <div style={{ height: 40, background: "#e2e8f0", borderRadius: 4 }} />
+              </div>
+            </div>
+          ))
         ) : visible.length === 0 ? (
-          <div className="ip-empty">
-            <div className="ip-empty-icon">📭</div>
-            <p>No documents found{search ? ` for "${search}"` : ""}.</p>
-          </div>
+          <div className="ip-empty">No documents found.</div>
         ) : (
           visible.map(doc => (
-            <DocumentCard key={doc.id} doc={doc}
+            <DocumentCard
+              key={doc.id}
+              doc={doc}
               requestId={requestIdMap[doc.id]}
               onStart={handleStart}
               onHold={handleHoldClick}

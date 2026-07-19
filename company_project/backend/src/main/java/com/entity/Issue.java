@@ -21,6 +21,11 @@ public class Issue {
     @Column(name = "vehicle_no")
     private String vehicleNo;
 
+    
+    // ── optional — new field ──
+    @Column(name = "sap_issue_line_no")
+    private String sapIssueLineNo;
+
     @Column(name = "print_handover_time")
     private LocalDateTime printHandoverTime;
 

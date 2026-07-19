@@ -39,40 +39,49 @@ public class ExcelHelper {
 
                 Document doc = new Document();
 
-                // COLUMN 0
+                // COLUMN 0 — Job Type
                 doc.setJobType(
                         getCellValue(row.getCell(0))
                 );
 
-                // COLUMN 1
+                // COLUMN 1 — Job WBS
                 doc.setJobWBS(
                         getCellValue(row.getCell(1))
                 );
 
-                // COLUMN 2
+                // COLUMN 2 — Reservation No
                 doc.setReservationNo(
                         getCellValue(row.getCell(2))
                 );
 
-                // COLUMN 3
+                // COLUMN 3 — Customer Name
                 doc.setCustomerName(
                         getCellValue(row.getCell(3))
                 );
 
-                // COLUMN 4
+                // COLUMN 4 — Entered By
                 doc.setEnteredBy(
                         getCellValue(row.getCell(4))
                 );
 
-                // COLUMN 5
-                doc.setRequestDate(
-                        getCellValue(row.getCell(5)));
+                // COLUMN 5 — Requested By
+                doc.setRequestedBy(
+                        getCellValue(row.getCell(5))
+                );
 
-                // COLUMN 6
-                doc.setRequestTime(
-                        getCellValue(row.getCell(6)));
+                // COLUMN 6 — Vehicle No
+                doc.setVehicleNo(
+                        getCellValue(row.getCell(6))
+                );
 
-                // AUTO VALUES
+                // COLUMN 7 — SAP Issue Line No
+                doc.setSapIssueLineNo(
+                        getCellValue(row.getCell(7))
+                );
+
+                // AUTO VALUES — always stamped with "now", regardless of
+                // whatever the excel sheet contains, since these represent
+                // when the row was actually imported.
                 doc.setRequestDate(
                         LocalDate.now().toString()
                 );

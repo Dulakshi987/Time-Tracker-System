@@ -1,16 +1,14 @@
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 // import DateRangeFilter from "./DateRangeFilter";
 import "./IssueCheck.css";
 
 const API_BASE = "http://localhost:8080/api/check-portal";
+// Master Setup API — same base the Admin Dashboard's "Master Setup → Check"
+// panel saves to. We read from here so Held By / Checked By always match
+// whatever names are entered in Admin Dashboard, live from the DB.
+const SETUP_API = "http://localhost:8080/api/admin-setup";
 const AUTO_REFRESH = 10000;
-
-const PEOPLE_OPTIONS = ["Kavishaka", "Anushi", "Chaminda"];
-
-const HOLD_REASONS = [
-  "Printer not available",
- 
-];
+const OPERATOR_REFRESH = 15000;
 
 // Reasons a Picking Error can be logged under.
 // Only "Material Shortage" and "Material Excess" represent an actual
@@ -106,76 +104,113 @@ function statusLabel(s) {
   return { pending: "Pending", inprogress: "In Progress", onhold: "On Hold", completed: "Check Done" }[c];
 }
 
-// ── Generic Person Picker (with Other text input) ──────────────────────────
+// ── Checker names — live from Master Setup (DB) ─────────────────────────────
+// Replaces the old hardcoded PEOPLE_OPTIONS list. Reads the same
+// "/check-operators" table that Admin Dashboard → Master Setup → Check
+// writes to, so adding / editing / deleting a checker there shows up here
+// automatically (polled).
 
-function PersonPicker({ value, onChange }) {
-  const [showOther, setShowOther] = useState(value && !PEOPLE_OPTIONS.includes(value));
-  const [otherVal, setOtherVal]   = useState(showOther ? value : "");
+function useCheckOperatorNames() {
+  const [names, setNames] = useState([]);
+
+  const load = useCallback(() => {
+    fetch(`${SETUP_API}/check-operators`)
+      .then(res => {
+        if (!res.ok) throw new Error(`Server error: ${res.status}`);
+        return res.json();
+      })
+      .then(data => {
+        setNames(
+          (Array.isArray(data) ? data : [])
+            .map(p => p.operatorName)
+            .filter(Boolean)
+        );
+      })
+      .catch(() => { /* keep last known list on transient errors */ });
+  }, []);
+
+  useEffect(() => {
+    load();
+    const id = setInterval(load, OPERATOR_REFRESH);
+    return () => clearInterval(id);
+  }, [load]);
+
+  return names;
+}
+
+// ── Generic Person Picker ──────────────────────────────────────────────────
+// Now driven purely by the `options` prop (Master Setup checker names).
+// "Other" free-text entry has been removed — only names that exist in the
+// Check Operators master table can be selected, so whatever gets saved to
+// the DB (heldBy / checkedBy) always matches Master Setup.
+
+function PersonPicker({ value, onChange, options }) {
+  if (!options || options.length === 0) {
+    return (
+      <div className="ip-popup-options">
+        <div style={{ color: "#7c8db0", fontSize: "0.8rem", padding: "8px 2px" }}>
+          No checkers set up yet. Add names in Admin Dashboard → Master Setup → Check.
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="ip-popup-options">
-      {PEOPLE_OPTIONS.map(name => (
+      {options.map(name => (
         <button
           key={name}
-          className={`ip-popup-option ${value === name && !showOther ? "selected" : ""}`}
-          onClick={() => { setShowOther(false); onChange(name); }}
+          className={`ip-popup-option ${value === name ? "selected" : ""}`}
+          onClick={() => onChange(name)}
         >
           👤 {name}
         </button>
       ))}
-      <button
-        className={`ip-popup-option ${showOther ? "selected" : ""}`}
-        onClick={() => { setShowOther(true); onChange(otherVal); }}
-      >
-        ✏️ Other
-      </button>
-      {showOther && (
-        <input
-          className="ip-popup-input"
-          type="text"
-          placeholder="Type name..."
-          value={otherVal}
-          onChange={e => { setOtherVal(e.target.value); onChange(e.target.value); }}
-          autoFocus
-        />
-      )}
     </div>
   );
 }
 
-// ── Popup: Hold Reason + Held By ────────────────────────────────────────────
+// ── Popup: Hold + Picking Error (Held By, no reason field) ──────────────────
+// "Hold Reason" has been removed entirely. Holding now only asks:
+//   1) Is there a picking error, and if so which materials/quantities
+//      (any number of rows, added with "+ Add Material")
+//   2) Who is holding this (Held By, from Master Setup checkers)
 
-function HoldPopup({ onConfirm, onCancel }) {
-  const [reason, setReason]   = useState("");
-  const [otherReason, setOtherReason] = useState("");
-  const [heldBy, setHeldBy]   = useState("");
+function HoldPopup({ operatorNames, onConfirm, onCancel }) {
+  const [heldBy, setHeldBy] = useState("");
   const [pickingErrorKey, setPickingErrorKey] = useState(null); // "SHORTAGE" | "EXCESS" | "DIFFERENT" | "NONE" | null
-  const [sku, setSku]         = useState("");
-  const [qty, setQty]         = useState("");
-
-  const isOtherReason = reason === "Other";
-  const finalReason   = isOtherReason ? otherReason.trim() : reason;
+  const [materials, setMaterials] = useState([{ sku: "", qty: "" }]);
 
   const selectedErrorReason = PICKING_ERROR_REASONS.find(r => r.key === pickingErrorKey) || null;
   // Only "Material Shortage" and "Material Excess" actually create a picking
-  // error (and therefore require SKU/Qty). "Collected Different Material" is
-  // recorded but does not create a picking error.
+  // error (and therefore require SKU/Qty rows). "Collected Different
+  // Material" is recorded but does not create a picking error.
   const needsDetails = !!selectedErrorReason && selectedErrorReason.createsError;
 
+  const addMaterialRow    = () => setMaterials(prev => [...prev, { sku: "", qty: "" }]);
+  const removeMaterialRow = (idx) => setMaterials(prev => prev.filter((_, i) => i !== idx));
+  const updateMaterialRow = (idx, field, value) =>
+    setMaterials(prev => prev.map((m, i) => (i === idx ? { ...m, [field]: value } : m)));
+
+  const filledMaterials = materials.filter(m => m.sku.trim().length > 0 && m.qty.trim().length > 0);
+
   const canConfirm =
-    !!finalReason &&
     !!heldBy &&
     pickingErrorKey !== null &&
-    (!needsDetails || (sku.trim().length > 0 && qty.trim().length > 0));
+    (!needsDetails || filledMaterials.length > 0);
 
   const handleConfirm = () => {
     const hasWrongMaterial = needsDetails ? "YES" : "NO";
+    // Multiple material rows are joined into one string per field so no
+    // backend/DB schema change is needed — "SKU-A; SKU-B" ↔ "5; 12" line up
+    // by position (same separator, same order).
+    const skuJoined = needsDetails ? filledMaterials.map(m => m.sku.trim()).join("; ") : "";
+    const qtyJoined = needsDetails ? filledMaterials.map(m => m.qty.trim()).join("; ") : "";
     onConfirm(
-      finalReason,
       heldBy,
       hasWrongMaterial,
-      needsDetails ? sku.trim() : "",
-      needsDetails ? qty.trim() : "",
+      skuJoined,
+      qtyJoined,
       pickingErrorKey === "NONE" ? "" : (selectedErrorReason ? selectedErrorReason.label : "")
     );
   };
@@ -187,77 +222,77 @@ function HoldPopup({ onConfirm, onCancel }) {
           <span>⏸ Hold Check</span>
           <button className="ip-popup-close" onClick={onCancel}>✕</button>
         </div>
-        <p className="ip-popup-sub">Select a reason, who is holding this, and whether there's a picking error</p>
+        <p className="ip-popup-sub">Select whether there's a picking error, and who is holding this</p>
 
         <span className="ip-popup-label">Picking Error?</span>
-        <div className="ip-popup-options" style={{ marginBottom: needsDetails ? 16 : 16 }}>
+        <div className="ip-popup-options" style={{ marginBottom: 16 }}>
           {PICKING_ERROR_REASONS.map(r => (
             <button
               key={r.key}
               className={`ip-popup-option ${pickingErrorKey === r.key ? "selected" : ""}`}
-              onClick={() => { setPickingErrorKey(r.key); if (!r.createsError) { setSku(""); setQty(""); } }}
+              onClick={() => {
+                setPickingErrorKey(r.key);
+                if (!r.createsError) setMaterials([{ sku: "", qty: "" }]);
+              }}
             >
               {r.createsError ? "⚠️ " : "ℹ️ "}{r.label}
             </button>
           ))}
           <button
             className={`ip-popup-option ${pickingErrorKey === "NONE" ? "selected" : ""}`}
-            onClick={() => { setPickingErrorKey("NONE"); setSku(""); setQty(""); }}
+            onClick={() => { setPickingErrorKey("NONE"); setMaterials([{ sku: "", qty: "" }]); }}
           >
             ✅ No Picking Error
           </button>
         </div>
 
         {needsDetails && (
-          <>
-            <div className="ip-popup-field">
-              <span className="ip-popup-label">SKU / Description</span>
-              <input
-                className="ip-popup-text-input"
-                type="text"
-                placeholder="Enter SKU or description..."
-                value={sku}
-                onChange={e => setSku(e.target.value)}
-              />
-            </div>
-            <div className="ip-popup-field" style={{ marginBottom: 16 }}>
-              <span className="ip-popup-label">Quantity</span>
-              <input
-                className="ip-popup-text-input"
-                type="text"
-                placeholder="Enter quantity..."
-                value={qty}
-                onChange={e => setQty(e.target.value)}
-              />
-            </div>
-          </>
+          <div style={{ marginBottom: 16 }}>
+            <span className="ip-popup-label">Wrong Material(s)</span>
+
+            {materials.map((m, idx) => (
+              <div key={idx} style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 8 }}>
+                <input
+                  className="ip-popup-text-input"
+                  type="text"
+                  placeholder="SKU / Description"
+                  value={m.sku}
+                  onChange={e => updateMaterialRow(idx, "sku", e.target.value)}
+                  style={{ flex: 2 }}
+                />
+                <input
+                  className="ip-popup-text-input"
+                  type="text"
+                  placeholder="Quantity"
+                  value={m.qty}
+                  onChange={e => updateMaterialRow(idx, "qty", e.target.value)}
+                  style={{ flex: 1 }}
+                />
+                {materials.length > 1 && (
+                  <button
+                    className="ip-btn ip-btn-outline"
+                    style={{ padding: "6px 10px", flex: "unset" }}
+                    onClick={() => removeMaterialRow(idx)}
+                    aria-label="Remove row"
+                  >
+                    ✕
+                  </button>
+                )}
+              </div>
+            ))}
+
+            <button
+              className="ip-btn ip-btn-outline"
+              style={{ marginTop: 10, padding: "6px 14px", flex: "unset" }}
+              onClick={addMaterialRow}
+            >
+              + Add Material
+            </button>
+          </div>
         )}
 
-        <span className="ip-popup-label">Hold Reason</span>
-        <div className="ip-popup-options" style={{ marginBottom: 16 }}>
-          {HOLD_REASONS.map(r => (
-            <button
-              key={r}
-              className={`ip-popup-option ${reason === r ? "selected" : ""}`}
-              onClick={() => setReason(r)}
-            >
-              {r === "Other" ? "✏️ " : "⏸ "}{r}
-            </button>
-          ))}
-          {isOtherReason && (
-            <input
-              className="ip-popup-input"
-              type="text"
-              placeholder="Type reason..."
-              value={otherReason}
-              onChange={e => setOtherReason(e.target.value)}
-              autoFocus
-            />
-          )}
-        </div>
-
         <span className="ip-popup-label">Held By</span>
-        <PersonPicker value={heldBy} onChange={setHeldBy} />
+        <PersonPicker value={heldBy} onChange={setHeldBy} options={operatorNames} />
 
         <div className="ip-popup-foot">
           <button className="ip-btn ip-btn-outline" onClick={onCancel}>Cancel</button>
@@ -276,7 +311,7 @@ function HoldPopup({ onConfirm, onCancel }) {
 
 // ── Popup: Check Done (Yes/No wrong material) ────────────────────────────────
 
-function CheckDonePopup({ onConfirm, onCancel }) {
+function CheckDonePopup({ operatorNames, onConfirm, onCancel }) {
   const [checkedBy, setCheckedBy] = useState("");
   const canConfirm = !!checkedBy;
 
@@ -289,7 +324,7 @@ function CheckDonePopup({ onConfirm, onCancel }) {
         </div>
         <p className="ip-popup-sub">Select who completed this check</p>
 
-        <PersonPicker value={checkedBy} onChange={setCheckedBy} />
+        <PersonPicker value={checkedBy} onChange={setCheckedBy} options={operatorNames} />
 
         <div className="ip-popup-foot" style={{ marginTop: 18 }}>
           <button className="ip-btn ip-btn-outline" onClick={onCancel}>Cancel</button>
@@ -397,9 +432,61 @@ function ViewDetailsPopup({ doc, onClose }) {
   );
 }
 
+// ── Popup: New Emergency Pick Done Alert (auto-triggered from Pick Portal) ──
+// Mirrors the Pick Portal's red "New Picking Error" alert popup, but in
+// green, and fires when Pick Portal confirms an Emergency Pick Done for a
+// document that was previously flagged with a wrong-material error. Clicking
+// an item jumps/scrolls to the matching card in the grid below.
+
+function ResolvedPickAlertPopup({ docs, requestIdMap, onJump, onClose }) {
+  return (
+    <div className="ip-popup-overlay">
+      <div className="ip-popup">
+        <div className="ip-popup-head">
+          <span>✅ Emergency Pick{docs.length > 1 ? "s" : ""} Done</span>
+          <button className="ip-popup-close" onClick={onClose}>✕</button>
+        </div>
+        <p className="ip-popup-sub">
+          Pick Portal re-picked {docs.length} document{docs.length > 1 ? "s" : ""} — click one to jump to it
+        </p>
+
+        <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 16 }}>
+          {docs.map(d => (
+            <button
+              key={d.id}
+              onClick={() => onJump(d.id)}
+              style={{
+                textAlign: "left",
+                background: "rgba(52,211,153,0.1)",
+                border: "1px solid #34d399",
+                borderRadius: 8,
+                padding: "10px 12px",
+                cursor: "pointer",
+                color: "#fff",
+              }}
+            >
+              <div style={{ fontWeight: 700, color: "#34d399", marginBottom: 4 }}>
+                {requestIdMap[d.id] || "—"} · Doc No: {d.printDocumentNo || "—"}
+              </div>
+              <div style={{ fontSize: "0.8rem", color: "#86efac" }}>
+                {d.pickingErrorReason ? `${d.pickingErrorReason} · ` : ""}
+                Re-picked by {d.emergencyPickResolvedBy || "—"}
+              </div>
+            </button>
+          ))}
+        </div>
+
+        <div className="ip-popup-foot">
+          <button className="ip-btn ip-btn-outline" onClick={onClose}>Close</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Single Document Card ─────────────────────────────────────────────────────
 
-function DocumentCard({ doc, requestId, onStart, onHold, onEnd, onView }) {
+function DocumentCard({ doc, requestId, onStart, onHold, onEnd, onView, cardRef, jumpHighlighted }) {
   const sc        = statusClass(doc.checkStatus);
   const jColor    = jobTypeColor(doc.jobType);
   const isPending = sc === "pending";
@@ -433,8 +520,18 @@ function DocumentCard({ doc, requestId, onStart, onHold, onEnd, onView }) {
       }
     : undefined;
 
+  // Extra pulsing ring shown briefly right after jumping here from the
+  // "Emergency Pick Done" alert popup, so it's obvious which card it meant.
+  const jumpStyle = jumpHighlighted
+    ? {
+        outline: "3px solid #facc15",
+        outlineOffset: 2,
+        transition: "outline-color 0.3s ease",
+      }
+    : undefined;
+
   return (
-    <div className={cardClassName} style={cardStyle}>
+    <div ref={cardRef} className={cardClassName} style={{ ...cardStyle, ...jumpStyle }}>
       {hasUnresolvedError && (
         <div
           style={{
@@ -522,13 +619,9 @@ function DocumentCard({ doc, requestId, onStart, onHold, onEnd, onView }) {
           </div>
         </div>
 
-        {/* Hold info banner */}
-        {(isOnHold || doc.checkHoldReason) && (
+        {/* Hold info banner — Hold Reason removed, Held By / Held At only */}
+        {(isOnHold || doc.checkHeldBy) && (
           <div className="ip-hold-box">
-            <div className="ip-hold-row">
-              <span>⏸ Hold Reason</span>
-              <span>{doc.checkHoldReason || "—"}</span>
-            </div>
             <div className="ip-hold-row">
               <span>Held By</span>
               <span>👤 {doc.checkHeldBy || "—"}</span>
@@ -663,8 +756,28 @@ export default function IssueCheckForm() {
   const [lastUpdated,  setLastUpdated]  = useState(null);
   const [refreshing,   setRefreshing]   = useState(false);
 
+  // Checker names — live from Admin Dashboard → Master Setup → Check (DB).
+  const checkOperatorNames = useCheckOperatorNames();
+
   const [activePopup,  setActivePopup]  = useState(null); // "hold" | "end" | "view" | null
   const [activeId,     setActiveId]     = useState(null);
+
+  // "Emergency Pick Done" alert popup (separate from activePopup — auto-triggered
+  // when Pick Portal confirms a re-pick, on top of the persistent green bar).
+  const [resolvedAlertDocs, setResolvedAlertDocs] = useState([]); // docs waiting to be acknowledged
+  const [seenResolvedIds,   setSeenResolvedIds]   = useState(() => new Set()); // ids already alerted for
+
+  // Card scroll/highlight — used by the alert popup's "jump to card" click
+  const cardRefs = useRef({});
+  const [jumpHighlightId, setJumpHighlightId] = useState(null);
+
+  const handleJumpToCard = (id) => {
+    setResolvedAlertDocs([]); // close the alert popup
+    const el = cardRefs.current[id];
+    if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
+    setJumpHighlightId(id);
+    setTimeout(() => setJumpHighlightId(prev => (prev === id ? null : prev)), 2500);
+  };
 
   // ── Fetch ──
   const fetchDocuments = useCallback(async (silent = false) => {
@@ -716,13 +829,14 @@ export default function IssueCheckForm() {
   const handleViewClick = (id) => { setActiveId(id); setActivePopup("view"); };
   const closePopup = () => { setActivePopup(null); setActiveId(null); };
 
-  const handleHoldConfirm = async (holdReason, heldBy, hasWrongMaterial, wrongMaterialSku, wrongMaterialQty, pickingErrorReason) => {
+  // Hold Reason removed — Hold now only carries heldBy + picking-error info.
+  const handleHoldConfirm = async (heldBy, hasWrongMaterial, wrongMaterialSku, wrongMaterialQty, pickingErrorReason) => {
     closePopup();
     try {
       await fetch(`${API_BASE}/${activeId}/hold`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ holdReason, heldBy, hasWrongMaterial, wrongMaterialSku, wrongMaterialQty, pickingErrorReason }),
+        body: JSON.stringify({ heldBy, hasWrongMaterial, wrongMaterialSku, wrongMaterialQty, pickingErrorReason }),
       });
       fetchDocuments(true);
     } catch (err) {
@@ -748,17 +862,40 @@ export default function IssueCheckForm() {
   const requestIdMap = useMemo(() => computeRequestIds(documents), [documents]);
 
   // Picking errors still open — Pick Portal hasn't re-picked yet.
-  const activeErrorDocs = documents.filter(d => {
-    const isFlagged = (d.hasWrongMaterial || "").toUpperCase() === "YES";
-    return isFlagged && !d.emergencyPickResolved && statusClass(d.checkStatus) !== "completed";
-  });
+  const activeErrorDocs = useMemo(
+    () => documents.filter(d => {
+      const isFlagged = (d.hasWrongMaterial || "").toUpperCase() === "YES";
+      return isFlagged && !d.emergencyPickResolved && statusClass(d.checkStatus) !== "completed";
+    }),
+    [documents]
+  );
 
   // Picking errors Pick Portal has just resolved (Emergency Pick Done
   // confirmed) — still waiting for this Check to be finished/confirmed.
-  const resolvedErrorDocs = documents.filter(d => {
-    const isFlagged = (d.hasWrongMaterial || "").toUpperCase() === "YES";
-    return isFlagged && d.emergencyPickResolved && statusClass(d.checkStatus) !== "completed";
-  });
+  const resolvedErrorDocs = useMemo(
+    () => documents.filter(d => {
+      const isFlagged = (d.hasWrongMaterial || "").toUpperCase() === "YES";
+      return isFlagged && d.emergencyPickResolved && statusClass(d.checkStatus) !== "completed";
+    }),
+    [documents]
+  );
+
+  // Whenever a NEW Emergency Pick Done shows up (one we haven't alerted for
+  // yet), queue it into the popup. Runs once per new event, not on every 10s
+  // poll — and if a doc later gets checked/completed and then re-flagged, it
+  // can alert again since it drops out of "seen" once no longer pending.
+  useEffect(() => {
+    setSeenResolvedIds(prevSeen => {
+      const newOnes = resolvedErrorDocs.filter(d => !prevSeen.has(d.id));
+      if (newOnes.length > 0) {
+        setResolvedAlertDocs(prevAlert => {
+          const existingIds = new Set(prevAlert.map(d => d.id));
+          return [...prevAlert, ...newOnes.filter(d => !existingIds.has(d.id))];
+        });
+      }
+      return new Set(resolvedErrorDocs.map(d => d.id));
+    });
+  }, [resolvedErrorDocs]);
 
   // ── Filters ──
   const jobTypes = ["ALL", ...new Set(documents.map(d => d.jobType).filter(Boolean))];
@@ -796,19 +933,28 @@ export default function IssueCheckForm() {
     <div className="ip-page">
 
       {activePopup === "hold" && (
-        <HoldPopup onConfirm={handleHoldConfirm} onCancel={closePopup} />
+        <HoldPopup operatorNames={checkOperatorNames} onConfirm={handleHoldConfirm} onCancel={closePopup} />
       )}
       {activePopup === "end" && (
-        <CheckDonePopup onConfirm={handleCheckDoneConfirm} onCancel={closePopup} />
+        <CheckDonePopup operatorNames={checkOperatorNames} onConfirm={handleCheckDoneConfirm} onCancel={closePopup} />
       )}
       {activePopup === "view" && (
         <ViewDetailsPopup doc={viewingDoc} onClose={closePopup} />
       )}
+      {resolvedAlertDocs.length > 0 && (
+        <ResolvedPickAlertPopup
+          docs={resolvedAlertDocs}
+          requestIdMap={requestIdMap}
+          onJump={handleJumpToCard}
+          onClose={() => setResolvedAlertDocs([])}
+        />
+      )}
 
       {/* ── Header ── */}
-      <div className="ip-header">
+     <div className="ip-header">
         <div className="ip-header-left">
-          <h1>✅ Check Portal</h1>
+          <h1>LOGITRACK-WAREHOUSE TIME EFFICENCY TRACKER SYSTEM</h1>
+          <h1>  Check Portal</h1>
           <p>
             Document Cart View
             {lastUpdated && (
@@ -864,7 +1010,7 @@ export default function IssueCheckForm() {
         </div>
       )}
 
-      {/* ── Resolved Picking Error Notification Bar ── */}
+      {/* ── Resolved Picking Error Notification Bar (green, real-time count) ── */}
       {resolvedErrorDocs.length > 0 && (
         <div
           style={{
@@ -883,8 +1029,9 @@ export default function IssueCheckForm() {
           </div>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
             {resolvedErrorDocs.map(d => (
-              <span
+              <button
                 key={d.id}
+                onClick={() => handleJumpToCard(d.id)}
                 style={{
                   background: "#34d399",
                   color: "#06281c",
@@ -892,10 +1039,12 @@ export default function IssueCheckForm() {
                   fontSize: "0.78rem",
                   padding: "4px 10px",
                   borderRadius: 6,
+                  border: "none",
+                  cursor: "pointer",
                 }}
               >
                 {requestIdMap[d.id] || "—"} · Doc No: {d.printDocumentNo || "—"} · Emergency Pick Done
-              </span>
+              </button>
             ))}
           </div>
         </div>
@@ -976,6 +1125,8 @@ export default function IssueCheckForm() {
               onHold={handleHoldClick}
               onEnd={handleEndClick}
               onView={handleViewClick}
+              cardRef={el => { cardRefs.current[doc.id] = el; }}
+              jumpHighlighted={jumpHighlightId === doc.id}
             />
           ))
         )}

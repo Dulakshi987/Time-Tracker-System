@@ -2,9 +2,12 @@ import { useState, useEffect, useCallback } from "react";
 import "./IssueDelivery.css";
 
 const API_BASE = "http://localhost:8080/api/delivery-portal";
+// Master Setup API — same base the Admin Dashboard's "Master Setup → Delivery"
+// panel saves to. We read from here so Held By / Cancelled By / Delivered By
+// always match whatever names are entered in Admin Dashboard, live from the DB.
+const SETUP_API = "http://localhost:8080/api/admin-setup";
 const AUTO_REFRESH = 10000;
-
-const PEOPLE_OPTIONS = ["Shanuka", "Chameera", "Randunu"];
+const OPERATOR_REFRESH = 15000;
 
 const HOLD_REASONS = [
   "Vehicle not available",
@@ -109,46 +112,76 @@ function yn(v) {
   return v || "—";
 }
 
-// ── Generic Person Picker (with Other text input) ──────────────────────────
+// ── Delivery operator names — live from Master Setup (DB) ──────────────────
+// Replaces the old hardcoded PEOPLE_OPTIONS list. Reads the same
+// "/delivery-operators" table that Admin Dashboard → Master Setup → Delivery
+// writes to, so adding / editing / deleting a delivery operator there shows
+// up here automatically (polled).
 
-function PersonPicker({ value, onChange }) {
-  const [showOther, setShowOther] = useState(value && !PEOPLE_OPTIONS.includes(value));
-  const [otherVal, setOtherVal]   = useState(showOther ? value : "");
+function useDeliveryOperatorNames() {
+  const [names, setNames] = useState([]);
+
+  const load = useCallback(() => {
+    fetch(`${SETUP_API}/delivery-operators`)
+      .then(res => {
+        if (!res.ok) throw new Error(`Server error: ${res.status}`);
+        return res.json();
+      })
+      .then(data => {
+        setNames(
+          (Array.isArray(data) ? data : [])
+            .map(p => p.operatorName)
+            .filter(Boolean)
+        );
+      })
+      .catch(() => { /* keep last known list on transient errors */ });
+  }, []);
+
+  useEffect(() => {
+    load();
+    const id = setInterval(load, OPERATOR_REFRESH);
+    return () => clearInterval(id);
+  }, [load]);
+
+  return names;
+}
+
+// ── Generic Person Picker ──────────────────────────────────────────────────
+// Now driven purely by the `options` prop (Master Setup delivery operator
+// names). "Other" free-text entry has been removed — only names that exist
+// in the Delivery Operators master table can be selected, so whatever gets
+// saved to the DB (heldBy / cancelledBy / deliveredBy) always matches
+// Master Setup.
+
+function PersonPicker({ value, onChange, options }) {
+  if (!options || options.length === 0) {
+    return (
+      <div className="ip-popup-options">
+        <div style={{ color: "#7c8db0", fontSize: "0.8rem", padding: "8px 2px" }}>
+          No delivery operators set up yet. Add names in Admin Dashboard → Master Setup → Delivery.
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="ip-popup-options">
-      {PEOPLE_OPTIONS.map(name => (
+      {options.map(name => (
         <button
           key={name}
-          className={`ip-popup-option ${value === name && !showOther ? "selected" : ""}`}
-          onClick={() => { setShowOther(false); onChange(name); }}
+          className={`ip-popup-option ${value === name ? "selected" : ""}`}
+          onClick={() => onChange(name)}
         >
           👤 {name}
         </button>
       ))}
-      <button
-        className={`ip-popup-option ${showOther ? "selected" : ""}`}
-        onClick={() => { setShowOther(true); onChange(otherVal); }}
-      >
-        ✏️ Other
-      </button>
-      {showOther && (
-        <input
-          className="ip-popup-input"
-          type="text"
-          placeholder="Type name..."
-          value={otherVal}
-          onChange={e => { setOtherVal(e.target.value); onChange(e.target.value); }}
-          autoFocus
-        />
-      )}
     </div>
   );
 }
 
 // ── Popup: Hold Reason + Held By ────────────────────────────────────────────
 
-function HoldPopup({ onConfirm, onCancel }) {
+function HoldPopup({ operatorNames, onConfirm, onCancel }) {
   const [reason, setReason]   = useState("");
   const [otherReason, setOtherReason] = useState("");
   const [heldBy, setHeldBy]   = useState("");
@@ -190,7 +223,7 @@ function HoldPopup({ onConfirm, onCancel }) {
         </div>
 
         <span className="ip-popup-label">Held By</span>
-        <PersonPicker value={heldBy} onChange={setHeldBy} />
+        <PersonPicker value={heldBy} onChange={setHeldBy} options={operatorNames} />
 
         <div className="ip-popup-foot">
           <button className="ip-btn ip-btn-outline" onClick={onCancel}>Cancel</button>
@@ -209,7 +242,7 @@ function HoldPopup({ onConfirm, onCancel }) {
 
 // ── Popup: Cancel Reason + Cancelled By ─────────────────────────────────────
 
-function CancelPopup({ onConfirm, onCancel }) {
+function CancelPopup({ operatorNames, onConfirm, onCancel }) {
   const [reason, setReason]   = useState("");
   const [otherReason, setOtherReason] = useState("");
   const [cancelledBy, setCancelledBy] = useState("");
@@ -251,7 +284,7 @@ function CancelPopup({ onConfirm, onCancel }) {
         </div>
 
         <span className="ip-popup-label">Cancelled By</span>
-        <PersonPicker value={cancelledBy} onChange={setCancelledBy} />
+        <PersonPicker value={cancelledBy} onChange={setCancelledBy} options={operatorNames} />
 
         <div className="ip-popup-foot">
           <button className="ip-btn ip-btn-outline" onClick={onCancel}>Back</button>
@@ -270,7 +303,7 @@ function CancelPopup({ onConfirm, onCancel }) {
 
 // ── Popup: Delivery Done (Delivered By) ──────────────────────────────────────
 
-function DeliveryDonePopup({ onConfirm, onCancel }) {
+function DeliveryDonePopup({ operatorNames, onConfirm, onCancel }) {
   const [deliveredBy, setDeliveredBy] = useState("");
   const [vehicleNo, setVehicleNo]     = useState("");
 
@@ -280,14 +313,14 @@ function DeliveryDonePopup({ onConfirm, onCancel }) {
     <div className="ip-popup-overlay">
       <div className="ip-popup">
         <div className="ip-popup-head">
-          <span>🚚 Delivery Done</span>
+          <span> Delivery Done</span>
           <button className="ip-popup-close" onClick={onCancel}>✕</button>
         </div>
         <p className="ip-popup-sub">Select who delivered this document</p>
 
         <span className="ip-popup-label">Delivered By</span>
         <div style={{ marginBottom: 16 }}>
-          <PersonPicker value={deliveredBy} onChange={setDeliveredBy} />
+          <PersonPicker value={deliveredBy} onChange={setDeliveredBy} options={operatorNames} />
         </div>
 
         <div className="ip-popup-field">
@@ -308,7 +341,7 @@ function DeliveryDonePopup({ onConfirm, onCancel }) {
             disabled={!canConfirm}
             onClick={() => onConfirm(deliveredBy, vehicleNo.trim())}
           >
-            ✅ Delivery Done
+            Delivery Done
           </button>
         </div>
       </div>
@@ -330,7 +363,7 @@ function ChangeVehiclePopup({ doc, mode, onConfirm, onCancel }) {
     <div className="ip-popup-overlay">
       <div className="ip-popup">
         <div className="ip-popup-head">
-          <span>🚐 Change {isDelivery ? "Delivery" : "Request"} Vehicle No</span>
+          <span>Change {isDelivery ? "Delivery" : "Request"} Vehicle No</span>
           <button className="ip-popup-close" onClick={onCancel}>✕</button>
         </div>
         <p className="ip-popup-sub">
@@ -358,7 +391,7 @@ function ChangeVehiclePopup({ doc, mode, onConfirm, onCancel }) {
             disabled={!canConfirm}
             onClick={() => onConfirm(vehicleNo.trim())}
           >
-            💾 Save Vehicle No
+            Save Vehicle No
           </button>
         </div>
       </div>
@@ -407,7 +440,7 @@ function ViewDrawer({ doc, onClose, onChangeVehicle }) {
         <div className="ip-drawer-body">
 
           {/* Request info */}
-          <Section icon="📝" title="Request Details">
+          <Section icon="" title="Request Details">
             <DetailRow label="Customer" value={doc.customerName} />
             <DetailRow label="Job Type" value={
               <span style={{ color: jobTypeColor(doc.jobType), fontWeight: 700 }}>{doc.jobType || "—"}</span>
@@ -419,8 +452,8 @@ function ViewDrawer({ doc, onClose, onChangeVehicle }) {
             <DetailRow label="Requested By" value={doc.requestedBy} />
             <DetailRow label="Request Vehicle No" value={
               <span>
-                🚐 {doc.vehicleNo || "—"}{" "}
-                <button className="ip-inline-edit-btn" onClick={() => onChangeVehicle(doc, "request")}>✏️ Change</button>
+                 {doc.vehicleNo || "—"}{" "}
+                <button className="ip-inline-edit-btn" onClick={() => onChangeVehicle(doc, "request")}> Change</button>
               </span>
             } />
             <DetailRow label="Days Pending" value={
@@ -646,6 +679,9 @@ export default function IssueDeliveryForm() {
   const [lastUpdated,  setLastUpdated]  = useState(null);
   const [refreshing,   setRefreshing]   = useState(false);
 
+  // Delivery operator names — live from Admin Dashboard → Master Setup → Delivery (DB).
+  const deliveryOperatorNames = useDeliveryOperatorNames();
+
   const [activePopup,  setActivePopup]  = useState(null); // "hold" | "delivered" | "cancel" | "vehicle" | null
   const [activeId,     setActiveId]     = useState(null);
   const [vehicleDoc,   setVehicleDoc]   = useState(null);
@@ -791,13 +827,13 @@ export default function IssueDeliveryForm() {
     <div className="ip-page">
 
       {activePopup === "hold" && (
-        <HoldPopup onConfirm={handleHoldConfirm} onCancel={closePopup} />
+        <HoldPopup operatorNames={deliveryOperatorNames} onConfirm={handleHoldConfirm} onCancel={closePopup} />
       )}
       {activePopup === "delivered" && (
-        <DeliveryDonePopup onConfirm={handleDeliveryDoneConfirm} onCancel={closePopup} />
+        <DeliveryDonePopup operatorNames={deliveryOperatorNames} onConfirm={handleDeliveryDoneConfirm} onCancel={closePopup} />
       )}
       {activePopup === "cancel" && (
-        <CancelPopup onConfirm={handleCancelConfirm} onCancel={closePopup} />
+        <CancelPopup operatorNames={deliveryOperatorNames} onConfirm={handleCancelConfirm} onCancel={closePopup} />
       )}
       {activePopup === "vehicle" && vehicleDoc && (
         <ChangeVehiclePopup doc={vehicleDoc} mode={vehicleMode} onConfirm={handleChangeVehicleConfirm} onCancel={closePopup} />
@@ -809,9 +845,10 @@ export default function IssueDeliveryForm() {
       {/* ── Header ── */}
       <div className="ip-header">
         <div className="ip-header-left">
-          <h1>🚚 Delivery Portal</h1>
+          <h1>LOGITRACK-WAREHOUSE TIME EFFICENCY TRACKER SYSTEM</h1>
+          <h1>  Delivery Portal</h1>
           <p>
-            Check Done documents only
+            Document Cart View
             {lastUpdated && (
               <span style={{ marginLeft: 10, fontSize: "0.75rem", color: "#3b82f6" }}>
                 {refreshing ? "⟳ Refreshing..." : `Updated: ${lastUpdated.toLocaleTimeString()}`}

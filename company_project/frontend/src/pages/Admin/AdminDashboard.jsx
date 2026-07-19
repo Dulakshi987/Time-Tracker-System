@@ -8,6 +8,7 @@ import IssuPrint         from "../Issue_Pick_Portal/IssuePickForm";
 import IssueCheckForm    from "../Issue_Check_Portal/IssueCheckForm";
 import IssueDeliveryForm from "../Issue_Delivery_Portal/IssueDeliveryForm";
 import ConfirmPortal     from "../Confirm_Portal/ConfirmPortal";
+import DocumentForm      from "../Documents_Portal/DocumentForm"; 
 // NOTE: AdminConfigCenter (old "usersetup" page) removed — replaced by
 // MasterSetupPanel below, which now lives inside this same file and saves
 // everything straight to the database through AdminSetupController.
@@ -287,37 +288,114 @@ function useTick(intervalMs = 1000) {
   return now;
 }
 
+// ── Icon set ─────────────────────────────────────────────────────────────
+// Minimal, single-weight line icons (no emoji) so the sidebar and the
+// Master Setup tab row read as one deliberate icon language instead of a
+// mix of platform emoji glyphs.
+
+const ICON_PROPS = {
+  width: 17, height: 17, viewBox: "0 0 24 24", fill: "none",
+  stroke: "currentColor", strokeWidth: 1.8, strokeLinecap: "round", strokeLinejoin: "round",
+};
+
+const Icon = {
+  dashboard: (p) => (
+    <svg {...ICON_PROPS} {...p}><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg>
+  ),
+  // Sidebar item "DocumentForm" (key: docentry) uses this icon — was
+  // previously missing, which crashed the Sidebar render with
+  // "Element type is invalid ... got: undefined".
+  docentry: (p) => (
+    <svg {...ICON_PROPS} {...p}>
+      <path d="M7 3h7l4 4v14H7z"/>
+      <path d="M14 3v4h4"/>
+      <path d="M9.5 13h5"/>
+      <path d="M12 15v-4"/>
+    </svg>
+  ),
+  print: (p) => (
+    <svg {...ICON_PROPS} {...p}><path d="M6 9V3h12v6"/><rect x="5" y="9" width="14" height="7" rx="1.2"/><path d="M6 16h12v5H6z"/></svg>
+  ),
+  pick: (p) => (
+    <svg {...ICON_PROPS} {...p}><path d="M3 8l9-5 9 5-9 5-9-5z"/><path d="M3 8v8l9 5 9-5V8"/><path d="M12 13v8"/></svg>
+  ),
+  check: (p) => (
+    <svg {...ICON_PROPS} {...p}><circle cx="12" cy="12" r="9"/><path d="M8 12.5l2.5 2.5L16 9.5"/></svg>
+  ),
+  delivery: (p) => (
+    <svg {...ICON_PROPS} {...p}><rect x="1.5" y="7" width="12" height="9" rx="1"/><path d="M13.5 10.5H18l3 3V16h-7.5z"/><circle cx="6" cy="18" r="1.6"/><circle cx="16.5" cy="18" r="1.6"/></svg>
+  ),
+  document: (p) => (
+    <svg {...ICON_PROPS} {...p}><path d="M7 3h7l4 4v14H7z"/><path d="M14 3v4h4"/><path d="M9.5 12h5M9.5 15.5h5"/></svg>
+  ),
+  report: (p) => (
+    <svg {...ICON_PROPS} {...p}><path d="M4 20V10M11 20V4M18 20v-7"/></svg>
+  ),
+  setup: (p) => (
+    <svg {...ICON_PROPS} {...p}><circle cx="12" cy="12" r="2.8"/><path d="M12 3v2.4M12 18.6V21M4.9 4.9l1.7 1.7M17.4 17.4l1.7 1.7M3 12h2.4M18.6 12H21M4.9 19.1l1.7-1.7M17.4 6.6l1.7-1.7"/></svg>
+  ),
+  bell: (p) => (
+    <svg {...ICON_PROPS} {...p}><path d="M6 10a6 6 0 1112 0c0 4 1.5 5.5 2 6H4c.5-.5 2-2 2-6z"/><path d="M10 19a2 2 0 004 0"/></svg>
+  ),
+  folder: (p) => (
+    <svg {...ICON_PROPS} {...p}><path d="M3 6.5A1.5 1.5 0 014.5 5H10l2 2.5h7A1.5 1.5 0 0120.5 9v9A1.5 1.5 0 0119 19.5H4.5A1.5 1.5 0 013 18z"/></svg>
+  ),
+  staff: (p) => (
+    <svg {...ICON_PROPS} {...p}><circle cx="9" cy="7.5" r="3.2"/><path d="M2.5 20c0-4 3-6.5 6.5-6.5S15.5 16 15.5 20"/><path d="M16 7a3.2 3.2 0 010 6.2M18 13.6c2.4.5 3.8 2.4 3.8 4.9"/></svg>
+  ),
+  users: (p) => (
+    <svg {...ICON_PROPS} {...p}><rect x="3" y="4" width="18" height="14" rx="2"/><circle cx="8.5" cy="10.2" r="2"/><path d="M5 15.2c.6-1.6 1.9-2.4 3.5-2.4s2.9.8 3.5 2.4"/><path d="M14.5 9h4M14.5 13h4"/></svg>
+  ),
+  division: (p) => (
+    <svg {...ICON_PROPS} {...p}><rect x="4" y="3" width="16" height="18" rx="1"/><path d="M8 7.5h2M14 7.5h2M8 11.5h2M14 11.5h2M8 15.5h2M14 15.5h2"/></svg>
+  ),
+  picker: (p) => (
+    <svg {...ICON_PROPS} {...p}><path d="M4 8l8-4.5L20 8v8l-8 4.5L4 16z"/><path d="M4 8l8 4.5L20 8M12 12.5V21"/></svg>
+  ),
+  category: (p) => (
+    <svg {...ICON_PROPS} {...p}><path d="M20.5 12.9L12.9 20.5a2 2 0 01-2.8 0L3.5 13.9a2 2 0 010-2.8L11.1 3.5a2 2 0 012.8 0l6.6 6.6a2 2 0 010 2.8z"/><circle cx="9" cy="9" r="1.4"/></svg>
+  ),
+  fileno: (p) => (
+    <svg {...ICON_PROPS} {...p}><rect x="4" y="3" width="16" height="18" rx="1.5"/><path d="M8 8h8M8 12h8M8 16h4"/></svg>
+  ),
+};
+
 // ── Sidebar ──────────────────────────────────────────────────────────────
 // "System Config" and "User & Division Setup" removed — replaced by the
 // single "Master Setup" entry, which contains all 10 buttons in one row.
 
 const NAV_ITEMS = [
-  { key: "dashboard",   label: "Dashboard",       icon: "📊" },
-  { key: "print",       label: "Print Portal",    icon: "🖨️" },
-  { key: "pick",        label: "Picking Portal",  icon: "📦" },
-  { key: "check",       label: "Checking Portal", icon: "✅" },
-  { key: "delivery",    label: "Delivery Portal", icon: "🚚" },
-  { key: "document",    label: "Document Portal", icon: "📁" },
-  { key: "fullreport",  label: "Full Report",     icon: "📊" },
-  { key: "mastersetup", label: "Master Setup",    icon: "🧩" },
-  { key: "notify",      label: "Notification",    icon: "🔔" },
-  { key: "report",      label: "Report",          icon: "🗂️" },
+  { key: "dashboard",   label: "Dashboard",       icon: Icon.dashboard },
+  { key: "docentry",    label: "DocumentForm",    icon: Icon.docentry },
+  { key: "print",       label: "Print Portal",    icon: Icon.print },
+  { key: "pick",        label: "Picking Portal",  icon: Icon.pick },
+  { key: "check",       label: "Checking Portal", icon: Icon.check },
+  { key: "delivery",    label: "Delivery Portal", icon: Icon.delivery },
+  { key: "document",    label: "Document Portal", icon: Icon.folder },
+  { key: "fullreport",  label: "Full Report",     icon: Icon.dashboard },
+  { key: "mastersetup", label: "Master Setup",    icon: Icon.setup },
+  { key: "notify",      label: "Notification",    icon: Icon.bell },
+  { key: "report",      label: "Report",          icon: Icon.report },
 ];
 
-function Sidebar({ active, onSelect }) {
+function Sidebar({ active, onSelect, open, onClose }) {
   return (
-    <div className="adm-sidebar">
-      <div className="adm-sidebar-title">Fentons Admin</div>
-      {NAV_ITEMS.map(item => (
-        <button
-          key={item.key}
-          onClick={() => onSelect(item.key)}
-          className={`adm-nav-btn ${active === item.key ? "active" : ""}`}
-        >
-          <span>{item.icon}</span><span>{item.label}</span>
-        </button>
-      ))}
-    </div>
+    <>
+      {open && <div className="adm-sidebar-scrim" onClick={onClose} />}
+      <div className={`adm-sidebar ${open ? "open" : ""}`}>
+        <div className="adm-sidebar-title">Fentons Admin</div>
+        {NAV_ITEMS.map(item => (
+          <button
+            key={item.key}
+            onClick={() => { onSelect(item.key); onClose && onClose(); }}
+            className={`adm-nav-btn ${active === item.key ? "active" : ""}`}
+          >
+            <span className="adm-nav-icon"><item.icon /></span>
+            <span>{item.label}</span>
+          </button>
+        ))}
+      </div>
+    </>
   );
 }
 
@@ -394,16 +472,16 @@ async function apiDelete(path) {
 }
 
 const SETUP_TABS = [
-  { key: "staff",    label: "1️⃣ Staff / User Character", icon: "🙋" },
-  { key: "users",    label: "2️⃣ User Accounts",          icon: "🔐" },
-  { key: "division", label: "Division",                   icon: "🏢" },
-  { key: "picker",   label: "Picker",                      icon: "📦" },
-  { key: "print",    label: "Document / Print",             icon: "🖨️" },
-  { key: "check",    label: "Check",                        icon: "✅" },
-  { key: "delivery", label: "Delivery",                     icon: "🚚" },
-  { key: "filed",    label: "Filed",                        icon: "🗂️" },
-  { key: "jobcat",   label: "Job Category",                 icon: "🏷️" },
-  { key: "fileno",   label: "Document File No",             icon: "🔢" },
+  { key: "staff",    label: "Staff / User Character", icon: Icon.staff },
+  { key: "users",    label: "User Accounts",          icon: Icon.users },
+  { key: "division", label: "Division",               icon: Icon.division },
+  { key: "picker",   label: "Picker",                 icon: Icon.picker },
+  { key: "print",    label: "Document / Print",       icon: Icon.print },
+  { key: "check",    label: "Check",                  icon: Icon.check },
+  { key: "delivery", label: "Delivery",                icon: Icon.delivery },
+  { key: "filed",    label: "Filed",                  icon: Icon.folder },
+  { key: "jobcat",   label: "Job Category",           icon: Icon.category },
+  { key: "fileno",   label: "Document File No",       icon: Icon.fileno },
 ];
 
 // Configuration for the 5 identical "name master" panels (Picker, Print/
@@ -481,7 +559,7 @@ function StaffPanel() {
 
   return (
     <div>
-      <h3 className="adm-setup-title">🙋 Staff / User Character — create names used across document entering, printing, picking, checking, delivering & filing</h3>
+      <h3 className="adm-setup-title"><Icon.staff /> Staff / User Character — create names used across document entering, printing, picking, checking, delivering & filing</h3>
       {err && <div className="adm-error">⚠ {err}</div>}
       <div className="adm-setup-form-row">
         <input className="adm-config-input" placeholder="Full name" value={name} onChange={e => setName(e.target.value)} />
@@ -537,7 +615,7 @@ function UserAccountsPanel() {
 
   return (
     <div>
-      <h3 className="adm-setup-title">🔐 User Accounts — grants system / API login access (password stored hashed)</h3>
+      <h3 className="adm-setup-title"><Icon.users /> User Accounts — grants system / API login access (password stored hashed)</h3>
       {err && <div className="adm-error">⚠ {err}</div>}
 
       <div className="adm-setup-form-grid">
@@ -600,7 +678,7 @@ function DivisionPanel() {
 
   return (
     <div>
-      <h3 className="adm-setup-title">🏢 Division</h3>
+      <h3 className="adm-setup-title"><Icon.division /> Division</h3>
       {err && <div className="adm-error">⚠ {err}</div>}
       <div className="adm-setup-form-grid">
         <input className="adm-config-input" placeholder="Division Name" value={form.divisionName} onChange={e => setForm({ ...form, divisionName: e.target.value })} />
@@ -624,6 +702,7 @@ function DivisionPanel() {
 // ── Generic "operator" master panel — reused for Picker / Print / Check / Delivery / Filed ──
 function OperatorPanel({ tabKey }) {
   const cfg = OPERATOR_PANEL_CONFIG[tabKey];
+  const TabIcon = SETUP_TABS.find(t => t.key === tabKey)?.icon || Icon.staff;
   const [rows, setRows] = useState([]);
   const [form, setForm] = useState({ name: "", nic: "", nicName: "" });
   const [editId, setEditId] = useState(null);
@@ -644,7 +723,7 @@ function OperatorPanel({ tabKey }) {
 
   return (
     <div>
-      <h3 className="adm-setup-title">{cfg.nameLabel} Setup</h3>
+      <h3 className="adm-setup-title"><TabIcon /> {cfg.nameLabel} Setup</h3>
       {err && <div className="adm-error">⚠ {err}</div>}
       <div className="adm-setup-form-grid">
         <input className="adm-config-input" placeholder={cfg.nameLabel} value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} />
@@ -689,7 +768,7 @@ function JobCategoryPanel() {
 
   return (
     <div>
-      <h3 className="adm-setup-title">🏷️ Job Category</h3>
+      <h3 className="adm-setup-title"><Icon.category /> Job Category</h3>
       {err && <div className="adm-error">⚠ {err}</div>}
       <div className="adm-setup-form-grid">
         <select className="adm-operator-select" value={form.divisionName} onChange={e => setForm({ ...form, divisionName: e.target.value })}>
@@ -732,7 +811,7 @@ function FileNumberPanel() {
 
   return (
     <div>
-      <h3 className="adm-setup-title">🔢 Document File No — only ONE active file is ever shown in the Filing Portal</h3>
+      <h3 className="adm-setup-title"><Icon.fileno /> Document File No — only ONE active file is ever shown in the Filing Portal</h3>
       {err && <div className="adm-error">⚠ {err}</div>}
       <div className="adm-setup-form-grid">
         <input className="adm-config-input" placeholder="File No" value={form.fileNo} onChange={e => setForm({ ...form, fileNo: e.target.value })} />
@@ -760,8 +839,8 @@ function MasterSetupPanel() {
   const [tab, setTab] = useState("staff");
   return (
     <div>
-      <h2 className="adm-title">🧩 Master Setup</h2>
-      <p className="adm-subtitle">All 10 buttons below save straight to the database and update in real time.</p>
+      <h2 className="adm-title">Master Setup</h2>
+      <p className="adm-subtitle">All 10 sections below save straight to the database and update in real time.</p>
 
       <div className="adm-setup-tabrow">
         {SETUP_TABS.map(t => (
@@ -770,7 +849,8 @@ function MasterSetupPanel() {
             className={`adm-setup-tab-btn ${tab === t.key ? "active" : ""}`}
             onClick={() => setTab(t.key)}
           >
-            <span>{t.icon}</span> {t.label}
+            <span className="adm-setup-tab-icon"><t.icon /></span>
+            <span>{t.label}</span>
           </button>
         ))}
       </div>
@@ -808,7 +888,7 @@ function SystemConfigPanel({ jobTypes, setJobTypes }) {
 
   return (
     <div className="adm-config-wrap">
-      <h2 className="adm-title">⚙️ System Config</h2>
+      <h2 className="adm-title">System Config</h2>
       <p className="adm-subtitle">
         Job types entered here drive the "Total Jobs by Job Type" cards on the Dashboard.
       </p>
@@ -851,9 +931,9 @@ function NotificationPanel({ documents }) {
 
   return (
     <div>
-      <h2 className="adm-title">🔔 Notifications</h2>
+      <h2 className="adm-title"><Icon.bell /> Notifications</h2>
 
-      <SectionTitle>🚨 Open Picking Errors ({openErrors.length})</SectionTitle>
+      <SectionTitle>Open Picking Errors ({openErrors.length})</SectionTitle>
       {openErrors.length === 0 ? <div className="adm-notify-empty">None</div> : (
         <div className="adm-notify-list">
           {openErrors.map(d => (
@@ -864,7 +944,7 @@ function NotificationPanel({ documents }) {
         </div>
       )}
 
-      <SectionTitle>⚠ Overdue Deliveries (30+ days, {overdue.length})</SectionTitle>
+      <SectionTitle>Overdue Deliveries (30+ days, {overdue.length})</SectionTitle>
       {overdue.length === 0 ? <div className="adm-notify-empty">None</div> : (
         <div className="adm-notify-list">
           {overdue.map(d => (
@@ -923,7 +1003,7 @@ function ReportPanel({ documents, jobTypes }) {
 
   return (
     <div>
-      <h2 className="adm-title">🗂️ Report</h2>
+      <h2 className="adm-title">Report</h2>
       <p className="adm-subtitle">Pick a category, job type, and date range — the table below and the Excel export both follow your selection.</p>
 
       <div className="adm-xl-toolbar">
@@ -952,7 +1032,7 @@ function ReportPanel({ documents, jobTypes }) {
         className="adm-xl-toolbar adm-xl-datefilter"
         style={{ flexWrap: "nowrap", overflowX: "auto" }}
       >
-        <span className="adm-xl-datefilter-label" style={{ whiteSpace: "nowrap" }}>📅 {stageDates.label} date filter:</span>
+        <span className="adm-xl-datefilter-label" style={{ whiteSpace: "nowrap" }}>{stageDates.label} date filter:</span>
 
         {stageDates.hold && (
           <select
@@ -1045,10 +1125,10 @@ function DashboardPanel({ documents, jobTypes }) {
 
       <SectionTitle>Total Jobs Issued Per Day / Portal</SectionTitle>
       <div className="adm-triple-row">
-        <TripleStat title="🖨️ Print Portal"    {...print} />
-        <TripleStat title="📦 Pick Portal"     {...pick} />
-        <TripleStat title="✅ Check Portal"    {...check} />
-        <TripleStat title="🚚 Delivery Portal" {...delivery} />
+        <TripleStat title="Print Portal"    {...print} />
+        <TripleStat title="Pick Portal"     {...pick} />
+        <TripleStat title="Check Portal"    {...check} />
+        <TripleStat title="Delivery Portal" {...delivery} />
       </div>
 
       <SectionTitle>Document Filing Status</SectionTitle>
@@ -1062,10 +1142,10 @@ function DashboardPanel({ documents, jobTypes }) {
 
       <SectionTitle>System Efficiency — by Operator</SectionTitle>
       <div className="adm-eff-row">
-        <EfficiencyTable title="🖨️ Print Efficiency" rows={printEff} />
-        <EfficiencyTable title="📦 Picking Efficiency" rows={pickEff} />
-        <EfficiencyTable title="✅ Checking Efficiency" rows={checkEff} />
-        <EfficiencyTable title="🚚 Delivery Efficiency" rows={deliveryEff} />
+        <EfficiencyTable title="Print Efficiency" rows={printEff} />
+        <EfficiencyTable title="Picking Efficiency" rows={pickEff} />
+        <EfficiencyTable title="Checking Efficiency" rows={checkEff} />
+        <EfficiencyTable title="Delivery Efficiency" rows={deliveryEff} />
       </div>
     </div>
   );
@@ -1075,6 +1155,7 @@ function DashboardPanel({ documents, jobTypes }) {
 
 export default function AdminDashboard() {
   const [activeView, setActiveView] = useState("dashboard");
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   const [documents, setDocuments]   = useState([]);
   const [loading, setLoading]       = useState(true);
@@ -1122,11 +1203,28 @@ export default function AdminDashboard() {
     });
   }, [documents, range, fromDate, toDate, operator]);
 
+  const activeLabel = NAV_ITEMS.find(n => n.key === activeView)?.label || "Dashboard";
+
   return (
     <div className="adm-page">
-      <Sidebar active={activeView} onSelect={setActiveView} />
+      <Sidebar
+        active={activeView}
+        onSelect={setActiveView}
+        open={sidebarOpen}
+        onClose={() => setSidebarOpen(false)}
+      />
 
       <div className="adm-main">
+        <div className="adm-topbar">
+          <button
+            className="adm-menu-btn"
+            aria-label="Open menu"
+            onClick={() => setSidebarOpen(true)}
+          >
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+          </button>
+          <span className="adm-topbar-label">{activeLabel}</span>
+        </div>
 
         {activeView === "dashboard" && (
           <>
@@ -1148,6 +1246,7 @@ export default function AdminDashboard() {
           </>
         )}
 
+        {activeView === "docentry"    && <DocumentForm />}
         {activeView === "print"       && <IssuePrintForm />}
         {activeView === "pick"        && <IssuPrint />}
         {activeView === "check"       && <IssueCheckForm />}
@@ -1256,7 +1355,7 @@ function DocumentsExcelPanel({ documents, jobTypes }) {
 
   return (
     <div>
-      <h2 className="adm-title">📊 All Documents</h2>
+      <h2 className="adm-title">All Documents</h2>
       <p className="adm-subtitle">Every document, every portal, one table.</p>
 
       <div className="adm-xl-toolbar">
@@ -1339,7 +1438,7 @@ function DocumentsExcelPanel({ documents, jobTypes }) {
       </div>
 
       <div className="adm-xl-toolbar adm-xl-datefilter">
-        <span className="adm-xl-datefilter-label">📅 {stageDates.label} date filter:</span>
+        <span className="adm-xl-datefilter-label">{stageDates.label} date filter:</span>
 
         {stageDates.hold && (
           <select

@@ -2,9 +2,12 @@ import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import "./IssuePick.css";
 
 const API_BASE = "http://localhost:8080/api/pick-portal";
+// Master Setup API — same base the Admin Dashboard's "Master Setup → Picker"
+// panel saves to. We read from here so Held By / Picked By / Emergency Pick By
+// always match whatever names are entered in Admin Dashboard, live from the DB.
+const SETUP_API = "http://localhost:8080/api/admin-setup";
 const AUTO_REFRESH = 10000;
-
-const PEOPLE_OPTIONS = ["Kavishaka", "Anushi", "Chaminda"];
+const PICKER_REFRESH = 15000;
 
 const HOLD_REASONS = [
   "Printer not available",
@@ -83,6 +86,39 @@ function jobTypeColor(jt) {
   return map[(jt || "").toLowerCase().replace(/\s+/g, "_")] || "#7c8db0";
 }
 
+// ── Picker names — live from Master Setup (DB) ──────────────────────────────
+// Replaces the old hardcoded PEOPLE_OPTIONS list. Reads the same "/pickers"
+// table that Admin Dashboard → Master Setup → Picker writes to, so adding /
+// editing / deleting a picker there shows up here automatically (polled).
+
+function usePickerNames() {
+  const [names, setNames] = useState([]);
+
+  const load = useCallback(() => {
+    fetch(`${SETUP_API}/pickers`)
+      .then(res => {
+        if (!res.ok) throw new Error(`Server error: ${res.status}`);
+        return res.json();
+      })
+      .then(data => {
+        setNames(
+          (Array.isArray(data) ? data : [])
+            .map(p => p.pickerName)
+            .filter(Boolean)
+        );
+      })
+      .catch(() => { /* keep last known list on transient errors */ });
+  }, []);
+
+  useEffect(() => {
+    load();
+    const id = setInterval(load, PICKER_REFRESH);
+    return () => clearInterval(id);
+  }, [load]);
+
+  return names;
+}
+
 // ── Status helpers ────────────────────────────────────────────────────────────
 // Internal state machine (drives button enabling / accent colors):
 //   PENDING → [Handover] → HANDED_OVER → [Start] → IN_PROGRESS
@@ -110,46 +146,41 @@ function statusLabel(s) {
   }[c];
 }
 
-// ── Generic Person Picker (with Other text input) ──────────────────────────
+// ── Generic Person Picker ──────────────────────────────────────────────────
+// Now driven purely by the `options` prop (Master Setup picker names).
+// "Other" free-text entry has been removed — only names that exist in the
+// Picker master table can be selected, so whatever gets saved to the DB
+// (heldBy / pickedBy / resolvedBy / handedOverBy) always matches Master Setup.
 
-function PersonPicker({ value, onChange }) {
-  const [showOther, setShowOther] = useState(value && !PEOPLE_OPTIONS.includes(value));
-  const [otherVal, setOtherVal]   = useState(showOther ? value : "");
+function PersonPicker({ value, onChange, options }) {
+  if (!options || options.length === 0) {
+    return (
+      <div className="ip-popup-options">
+        <div style={{ color: "#7c8db0", fontSize: "0.8rem", padding: "8px 2px" }}>
+          No pickers set up yet. Add names in Admin Dashboard → Master Setup → Picker.
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="ip-popup-options">
-      {PEOPLE_OPTIONS.map(name => (
+      {options.map(name => (
         <button
           key={name}
-          className={`ip-popup-option ${value === name && !showOther ? "selected" : ""}`}
-          onClick={() => { setShowOther(false); onChange(name); }}
+          className={`ip-popup-option ${value === name ? "selected" : ""}`}
+          onClick={() => onChange(name)}
         >
           👤 {name}
         </button>
       ))}
-      <button
-        className={`ip-popup-option ${showOther ? "selected" : ""}`}
-        onClick={() => { setShowOther(true); onChange(otherVal); }}
-      >
-        ✏️ Other
-      </button>
-      {showOther && (
-        <input
-          className="ip-popup-input"
-          type="text"
-          placeholder="Type name..."
-          value={otherVal}
-          onChange={e => { setOtherVal(e.target.value); onChange(e.target.value); }}
-          autoFocus
-        />
-      )}
     </div>
   );
 }
 
 // ── Popup: Handover (Step 1 — separate from Start) ────────────────────────────
 
-function HandoverPopup({ onConfirm, onCancel }) {
+function HandoverPopup({ pickerNames, onConfirm, onCancel }) {
   const [handedOverBy, setHandedOverBy] = useState("");
 
   return (
@@ -162,7 +193,7 @@ function HandoverPopup({ onConfirm, onCancel }) {
         <p className="ip-popup-sub">Select who is handing over this document to pick</p>
 
         <span className="ip-popup-label">Handed Over By</span>
-        <PersonPicker value={handedOverBy} onChange={setHandedOverBy} />
+        <PersonPicker value={handedOverBy} onChange={setHandedOverBy} options={pickerNames} />
 
         <div className="ip-popup-foot">
           <button className="ip-btn ip-btn-outline" onClick={onCancel}>Cancel</button>
@@ -181,7 +212,7 @@ function HandoverPopup({ onConfirm, onCancel }) {
 
 // ── Popup: Hold Reason + Held By ────────────────────────────────────────────
 
-function HoldPopup({ onConfirm, onCancel }) {
+function HoldPopup({ pickerNames, onConfirm, onCancel }) {
   const [reason, setReason]   = useState("");
   const [otherReason, setOtherReason] = useState("");
   const [heldBy, setHeldBy]   = useState("");
@@ -227,7 +258,7 @@ function HoldPopup({ onConfirm, onCancel }) {
         <div style={{ marginBottom: 6, fontSize: "0.78rem", color: "#7c8db0", fontWeight: 600 }}>
           Held By
         </div>
-        <PersonPicker value={heldBy} onChange={setHeldBy} />
+        <PersonPicker value={heldBy} onChange={setHeldBy} options={pickerNames} />
 
         <div className="ip-popup-foot" style={{ marginTop: 18 }}>
           <button className="ip-btn ip-btn-outline" onClick={onCancel}>Cancel</button>
@@ -246,7 +277,7 @@ function HoldPopup({ onConfirm, onCancel }) {
 
 // ── Popup: Picked By (End) ──────────────────────────────────────────────────
 
-function PickedByPopup({ onConfirm, onCancel }) {
+function PickedByPopup({ pickerNames, onConfirm, onCancel }) {
   const [pickedBy, setPickedBy] = useState("");
 
   return (
@@ -258,7 +289,7 @@ function PickedByPopup({ onConfirm, onCancel }) {
         </div>
         <p className="ip-popup-sub">Select the person who completed this pick</p>
 
-        <PersonPicker value={pickedBy} onChange={setPickedBy} />
+        <PersonPicker value={pickedBy} onChange={setPickedBy} options={pickerNames} />
 
         <div className="ip-popup-foot" style={{ marginTop: 18 }}>
           <button className="ip-btn ip-btn-outline" onClick={onCancel}>Cancel</button>
@@ -277,7 +308,7 @@ function PickedByPopup({ onConfirm, onCancel }) {
 
 // ── Popup: Emergency Pick Done (re-pick after Check reported an error) ──────
 
-function EmergencyPickDonePopup({ onConfirm, onCancel }) {
+function EmergencyPickDonePopup({ pickerNames, onConfirm, onCancel }) {
   const [resolvedBy, setResolvedBy] = useState("");
 
   return (
@@ -289,7 +320,7 @@ function EmergencyPickDonePopup({ onConfirm, onCancel }) {
         </div>
         <p className="ip-popup-sub">Select who re-picked the correct material</p>
 
-        <PersonPicker value={resolvedBy} onChange={setResolvedBy} />
+        <PersonPicker value={resolvedBy} onChange={setResolvedBy} options={pickerNames} />
 
         <div className="ip-popup-foot" style={{ marginTop: 18 }}>
           <button className="ip-btn ip-btn-outline" onClick={onCancel}>Cancel</button>
@@ -632,9 +663,9 @@ function DocumentCard({ doc, requestId, onHandover, onStart, onHold, onEnd, onVi
         <button
           className="ip-btn ip-btn-outline"
           onClick={() => onView(doc.id)}
-        >
+          >
           👁 View
-        </button>
+</button>
         {hasCheckError && (
           <button
             className="ip-btn"
@@ -684,6 +715,9 @@ export default function IssuPrinFormt() {
   const [filterStatus, setFilterStatus] = useState("ALL");
   const [lastUpdated,  setLastUpdated]  = useState(null);
   const [refreshing,   setRefreshing]   = useState(false);
+
+  // Picker names — live from Admin Dashboard → Master Setup → Picker (DB).
+  const pickerNames = usePickerNames();
 
   // Popup state
   const [activePopup,  setActivePopup]  = useState(null); // "handover" | "hold" | "end" | "view" | "emergency" | null
@@ -887,13 +921,13 @@ export default function IssuPrinFormt() {
 
       {/* Popups */}
       {activePopup === "handover" && (
-        <HandoverPopup onConfirm={handleHandoverConfirm} onCancel={closePopup} />
+        <HandoverPopup pickerNames={pickerNames} onConfirm={handleHandoverConfirm} onCancel={closePopup} />
       )}
       {activePopup === "hold" && (
-        <HoldPopup onConfirm={handleHoldConfirm} onCancel={closePopup} />
+        <HoldPopup pickerNames={pickerNames} onConfirm={handleHoldConfirm} onCancel={closePopup} />
       )}
       {activePopup === "end" && (
-        <PickedByPopup onConfirm={handleEndConfirm} onCancel={closePopup} />
+        <PickedByPopup pickerNames={pickerNames} onConfirm={handleEndConfirm} onCancel={closePopup} />
       )}
       {activePopup === "view" && (
         <ViewDetailsPopup
@@ -903,7 +937,7 @@ export default function IssuPrinFormt() {
         />
       )}
       {activePopup === "emergency" && (
-        <EmergencyPickDonePopup onConfirm={handleEmergencyConfirm} onCancel={closePopup} />
+        <EmergencyPickDonePopup pickerNames={pickerNames} onConfirm={handleEmergencyConfirm} onCancel={closePopup} />
       )}
       {errorAlertDocs.length > 0 && (
         <PickingErrorAlertPopup
@@ -915,9 +949,10 @@ export default function IssuPrinFormt() {
       )}
 
       {/* ── Header ── */}
-      <div className="ip-header">
+     <div className="ip-header">
         <div className="ip-header-left">
-          <h1>🖨️ Pick Portal</h1>
+          <h1>LOGITRACK-WAREHOUSE TIME EFFICENCY TRACKER SYSTEM</h1>
+          <h1>  Pick Portal</h1>
           <p>
             Document Cart View
             {lastUpdated && (

@@ -1,0 +1,300 @@
+.docf-page {
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  font-family: "Inter", system-ui, -apple-system, sans-serif;
+  box-sizing: border-box;
+}
+
+.docf-card {
+  background: #ffffff;
+  border: 1px solid #d7e8fb;
+  border-radius: 14px;
+  padding: 22px;
+  box-shadow: 0 2px 10px rgba(15, 43, 82, 0.06);
+}
+
+.docf-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.docf-title {
+  margin: 0 0 6px;
+  font-size: 1.15rem;
+  font-weight: 800;
+  color: #0f2b52;
+  background: linear-gradient(135deg, #1d4ed8, #3b82f6);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.docf-division-pill {
+  display: inline-block;
+  background: #eaf3ff;
+  color: #1d4ed8;
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 4px 12px;
+  border-radius: 999px;
+  border: 1px solid #cfe3fb;
+}
+
+.docf-excel-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.docf-btn {
+  border: none;
+  border-radius: 8px;
+  padding: 9px 16px;
+  font-weight: 700;
+  font-size: 0.8rem;
+  cursor: pointer;
+  transition: transform 0.1s, box-shadow 0.15s, background 0.15s;
+}
+
+.docf-btn:active { transform: translateY(1px); }
+
+.docf-btn-primary {
+  background: linear-gradient(135deg, #3b82f6, #1d4ed8);
+  color: #ffffff;
+  box-shadow: 0 3px 10px rgba(37, 99, 235, 0.3);
+}
+
+.docf-btn-primary:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.docf-btn-ghost {
+  background: #f4f9ff;
+  color: #1d4ed8;
+  border: 1px solid #cfe3fb;
+}
+
+.docf-btn-ghost:hover {
+  background: #eaf3ff;
+}
+
+.docf-upload-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* ── Form grid ── */
+
+.docf-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 14px;
+  margin-bottom: 18px;
+}
+
+.docf-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.docf-field label {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #4b6584;
+  letter-spacing: 0.01em;
+}
+
+.docf-optional {
+  font-weight: 500;
+  color: #93a9c4;
+  text-transform: lowercase;
+}
+
+.docf-input {
+  background: #f4f9ff;
+  border: 1px solid #cfe3fb;
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 0.85rem;
+  color: #0f2b52;
+  transition: border-color 0.15s, box-shadow 0.15s;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.docf-input:focus {
+  outline: none;
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
+}
+
+.docf-input-readonly {
+  background: #eef2f8;
+  color: #5b7291;
+  cursor: not-allowed;
+}
+
+.docf-status-input {
+  font-weight: 700;
+}
+
+.docf-form-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.docf-message {
+  border-radius: 8px;
+  padding: 10px 14px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  margin-bottom: 14px;
+}
+
+.docf-message.ok {
+  background: #ecfdf5;
+  color: #15803d;
+  border: 1px solid #bbf7d0;
+}
+
+.docf-message.error {
+  background: #fff1f2;
+  color: #b91c1c;
+  border: 1px solid #fca5a5;
+}
+
+/* ── Table ── */
+
+.docf-table-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.docf-table-title {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 800;
+  color: #0f2b52;
+}
+
+.docf-search {
+  background: #f4f9ff;
+  border: 1px solid #cfe3fb;
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 0.8rem;
+  color: #0f2b52;
+  min-width: 220px;
+}
+
+.docf-status-text {
+  color: #6c8bb3;
+  font-size: 0.82rem;
+}
+
+.docf-table-wrap {
+  overflow-x: auto;
+  border: 1px solid #d7e8fb;
+  border-radius: 10px;
+  -webkit-overflow-scrolling: touch;
+}
+
+.docf-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.76rem;
+  white-space: nowrap;
+}
+
+.docf-table th {
+  position: sticky;
+  top: 0;
+  background: #dbeeff;
+  color: #1d4ed8;
+  text-align: left;
+  padding: 9px 12px;
+  font-weight: 700;
+}
+
+.docf-table td {
+  padding: 8px 12px;
+  border-top: 1px solid #e8f1fc;
+  color: #0f2b52;
+}
+
+.docf-table tbody tr:nth-child(even) {
+  background: #f8fbff;
+}
+
+.docf-empty-row {
+  text-align: center;
+  color: #8fa8c4;
+  padding: 18px !important;
+}
+
+.docf-badge {
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  background: #eef2ff;
+  color: #4338ca;
+}
+
+.docf-actions-cell {
+  display: flex;
+  gap: 6px;
+}
+
+.docf-edit-btn,
+.docf-del-btn {
+  border: none;
+  border-radius: 6px;
+  padding: 5px 10px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.docf-edit-btn {
+  background: #eaf3ff;
+  color: #1d4ed8;
+}
+
+.docf-del-btn {
+  background: #fff1f2;
+  color: #dc2626;
+}
+
+/* ── Responsive ── */
+
+@media (max-width: 768px) {
+  .docf-page { padding: 14px; gap: 14px; }
+  .docf-card { padding: 16px; border-radius: 12px; }
+  .docf-grid { grid-template-columns: 1fr; gap: 10px; }
+  .docf-card-header { flex-direction: column; align-items: stretch; }
+  .docf-excel-actions { width: 100%; }
+  .docf-btn-ghost { flex: 1 1 auto; text-align: center; justify-content: center; }
+  .docf-form-actions .docf-btn { flex: 1 1 auto; }
+  .docf-search { width: 100%; min-width: 0; }
+  .docf-table-header { flex-direction: column; align-items: stretch; }
+}
+
+@media (max-width: 420px) {
+  .docf-title { font-size: 1rem; }
+}

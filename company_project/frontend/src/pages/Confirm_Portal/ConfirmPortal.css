@@ -1,18 +1,18 @@
 /* ─── Issue Confirm Portal ─────────────────────────────────────────── */
 
 :root {
-  --icf-bg:          #0f1724;
-  --icf-surface:     #1a2540;
-  --icf-surface2:    #243052;
+  --icf-bg:          #ebeef1;
+  --icf-surface:     #e0e5f0;
+  --icf-surface2:    #e2e4e7;
   --icf-border:      #2e3f66;
   --icf-accent:      #3b82f6;
-  --icf-accent-soft: rgba(59, 130, 246, 0.15);
+  --icf-accent-soft: rgba(157, 190, 243, 0.15);
   --icf-green:       #22c55e;
   --icf-orange:      #fb923c;
   --icf-red:         #ef4444;
-  --icf-purple:      #a78bfa;
-  --icf-text:        #e2e8f0;
-  --icf-muted:       #7c8db0;
+  --icf-purple:      #7348f1;
+  --icf-text:        #050505;
+  --icf-muted:       #01060e;
   --icf-radius:      10px;
   --icf-shadow:      0 4px 20px rgba(0,0,0,0.35);
   --icf-font:        'Inter', 'Segoe UI', sans-serif;
@@ -426,7 +426,7 @@
 
 /* ── Sections inside the drawer ── */
 .icf-view-section {
-  background: #161b33;
+  background: #ccced6;
   border: 1px solid #262c4a;
   border-radius: 10px;
   padding: 14px 16px;
@@ -444,7 +444,7 @@
 .icf-view-section-head {
   font-weight: 700;
   font-size: 0.88rem;
-  color: #e4e7f5;
+  color: #000208;
   margin-bottom: 10px;
 }
 
@@ -465,7 +465,7 @@
   min-width: 0;
 }
 .icf-view-section-body .icf-detail-value {
-  color: #e4e7f5;
+  color: #000103;
   text-align: right;
   font-weight: 600;
 }

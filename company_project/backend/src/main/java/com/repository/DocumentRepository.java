@@ -11,11 +11,9 @@ public interface DocumentRepository extends JpaRepository<Document, Long> {
 
     List<Document> findByJobType(String jobType);
 
-    @Query("SELECT d FROM Document d "
-         + "WHERE (:fromDate IS NULL OR d.requestDate >= :fromDate) "
-         + "AND (:toDate IS NULL OR d.requestDate <= :toDate)")
-    List<Document> findByDateRange(
-            @Param("fromDate") String fromDate,
-            @Param("toDate") String toDate
-    );
+    // requestDate is stored as a plain "yyyy-MM-dd" string (see entity),
+    // so a string BETWEEN works fine and keeps this in line with the
+    // rest of the codebase's date-as-string convention.
+    @Query("SELECT d FROM Document d WHERE d.requestDate BETWEEN :fromDate AND :toDate")
+    List<Document> findByDateRange(@Param("fromDate") String fromDate, @Param("toDate") String toDate);
 }

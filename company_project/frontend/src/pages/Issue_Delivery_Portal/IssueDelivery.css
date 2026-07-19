@@ -1,18 +1,18 @@
 /* ─── IssuePrint Portal – Print Cart View ─────────────────────────── */
 
 :root {
-  --ip-bg:          #0f1724;
-  --ip-surface:     #1a2540;
-  --ip-surface2:    #243052;
+  --ip-bg:          #dddfe2;
+  --ip-surface:     #f1f3f7;
+  --ip-surface2:    #f1eeee;
   --ip-border:      #2e3f66;
   --ip-accent:      #3b82f6;
-  --ip-accent-soft: rgba(59, 130, 246, 0.15);
+  --ip-accent-soft: rgba(230, 233, 238, 0.15);
   --ip-green:       #22c55e;
   --ip-amber:       #f59e0b;
   --ip-orange:      #fb923c;
   --ip-red:         #ef4444;
-  --ip-text:        #e2e8f0;
-  --ip-muted:       #7c8db0;
+  --ip-text:        #0c0d0e;
+  --ip-muted:       #080808;
   --ip-radius:      10px;
   --ip-shadow:      0 4px 20px rgba(0,0,0,0.35);
   --ip-font:        'Inter', 'Segoe UI', sans-serif;
@@ -123,6 +123,8 @@
   color: var(--ip-muted);
 }
 
+
+
 .ip-stat-chip strong { color: var(--ip-text); font-weight: 600; }
 .ip-stat-chip.green  strong { color: var(--ip-green); }
 .ip-stat-chip.blue   strong { color: var(--ip-accent); }
@@ -171,7 +173,7 @@
   border-left: 3px solid transparent;
 }
 
-.ip-row:hover { background: rgba(59, 130, 246, 0.06); }
+.ip-row:hover { background: rgba(213, 214, 216, 0.06); }
 .ip-row:last-child td { border-bottom: none; }
 
 .ip-row.status-pending    { border-left-color: var(--ip-amber); }
@@ -287,6 +289,7 @@
   background: rgba(251,146,60,0.2);
   border-color: var(--ip-orange);
 }
+
 
 .ip-mini-cancel.active {
   background: rgba(239,68,68,0.2);
@@ -754,14 +757,14 @@
 .ip-card.status-cancelled::before { background: var(--ip-red); }
 
 .ip-badge.cancelled {
-  background: rgba(239, 68, 68, 0.15);
+  background: var(--ip-red);
   color: var(--ip-red);
 }
 
 /* ─── Cancel info box ──────────────────────────────────────────────── */
 .ip-cancel-box {
   margin-top: 6px;
-  background: rgba(239, 68, 68, 0.08);
+  background: rgba(216, 8, 8, 0.08);
   border: 1px solid rgba(239, 68, 68, 0.3);
   border-radius: 8px;
   padding: 10px 14px;
@@ -777,7 +780,7 @@
 }
 
 .ip-cancel-row span:first-child { color: var(--ip-red); font-weight: 600; }
-.ip-cancel-row span:last-child  { color: var(--ip-text); text-align: right; max-width: 60%; }
+.ip-cancel-row span:last-child  { color: var(--ip-red); text-align: right; max-width: 60%; }
 
 /* ─── Trail box (Print By / Picked By / Checked By) ───────────────── */
 .ip-trail-box {
@@ -800,11 +803,12 @@
 .ip-trail-row span:last-child  { color: var(--ip-text); font-weight: 500; }
 
 /* ─── Cancel button ────────────────────────────────────────────────── */
+/* ─── Cancel button ────────────────────────────────────────────────── */
 .ip-btn-cancel {
   flex: 1;
   padding: 8px 0;
   background: var(--ip-red);
-  color: #fff;
+  color: #fff; /* change this */
   border: none;
   border-radius: 7px;
   font-size: 0.8rem;
@@ -813,9 +817,19 @@
   transition: opacity 0.15s, transform 0.12s;
 }
 
-.ip-btn-cancel:hover:not(:disabled) { opacity: 0.88; }
-.ip-btn-cancel:active { transform: scale(0.97); }
-.ip-btn-cancel:disabled { opacity: 0.35; cursor: not-allowed; background: #4a1f1f; }
+.ip-btn-cancel:hover:not(:disabled) {
+  opacity: 0.88;
+}
+
+.ip-btn-cancel:active {
+  transform: scale(0.97);
+}
+
+.ip-btn-cancel:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+  background: #4a1f1f;
+}
 
 /* ─── Cancel confirm button (inside popup) ────────────────────────── */
 .ip-btn-cancel-confirm {
@@ -850,12 +864,13 @@
   display: flex;
   align-items: center;
   gap: 4px;
-  color: #9aa5c0;
+  color: #0a0a0a;
   margin-top: 2px;
   font-size: 0.78rem;
 }
 .ip-inline-edit-btn {
   background: none;
+  color:black;
   border: none;
   cursor: pointer;
   font-size: 0.78rem;
@@ -870,7 +885,7 @@
 .ip-drawer-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(10, 12, 24, 0.55);
+  background: rgba(15, 15, 15, 0.55);
   display: flex;
   justify-content: flex-end;
   z-index: 1000;
@@ -880,7 +895,7 @@
 .ip-drawer {
   width: min(480px, 100%);
   height: 100%;
-  background: #12162a;
+  background: #0a0a0a;
   border-left: 1px solid #262c4a;
   display: flex;
   flex-direction: column;
@@ -919,8 +934,8 @@
 
 /* ── Sections inside the drawer ── */
 .ip-view-section {
-  background: #161b33;
-  border: 1px solid #262c4a;
+  background: #dcdde0;
+  border: 1px solid #dee0e7;
   border-radius: 10px;
   padding: 14px 16px;
   margin-bottom: 14px;
@@ -954,7 +969,7 @@
   border-bottom: none;
 }
 .ip-view-section-body .ip-detail-label {
-  color: #8891b3;
+  color: #f8f8f8;
   flex-shrink: 0;
   min-width: 0;
 }

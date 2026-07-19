@@ -3,6 +3,8 @@ import "./ConfirmPortal.css";
 
 const DELIVERY_API = "http://localhost:8080/api/delivery-portal";
 const CONFIRM_API = "http://localhost:8080/api/issue-confirm";
+// Same source Master Setup → "Document File No" panel writes to.
+const SETUP_API = "http://localhost:8080/api/admin-setup";
 const AUTO_REFRESH = 10000;
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -107,11 +109,24 @@ function eventInfo(doc) {
   return { dateTime: null, by: null, reason: null };
 }
 
-// ── Add to File popup ───────────────────────────────────────────────────────
+// ── Active file number (set by admin in Master Setup → Document File No) ──
+// Fetches the single record marked "active" — the Master Setup panel
+// guarantees only one is ever active at a time.
+async function fetchActiveFileNumber() {
+  const res = await fetch(`${SETUP_API}/file-numbers`);
+  if (!res.ok) throw new Error(`Server error: ${res.status}`);
+  const list = await res.json();
+  const active = list.find(f => f.active === true || f.active === "true");
+  return active ? active.fileNo : null;
+}
 
-function AddFilePopup({ doc, reqId, onConfirm, onCancel }) {
-  const [fileNumber, setFileNumber] = useState("");
-  const canConfirm = fileNumber.trim().length > 0;
+// ── Add to File popup ───────────────────────────────────────────────────────
+// File number is no longer typed by hand — it's pulled straight from the
+// active record admin set up in Master Setup, so this portal and the admin
+// panel always agree on which file number is currently in use.
+
+function AddFilePopup({ doc, reqId, activeFileNo, loadingFileNo, fileNoError, onConfirm, onCancel }) {
+  const canConfirm = !!activeFileNo && !loadingFileNo;
 
   return (
     <div className="icf-popup-overlay">
@@ -121,27 +136,38 @@ function AddFilePopup({ doc, reqId, onConfirm, onCancel }) {
           <button className="icf-popup-close" onClick={onCancel}>✕</button>
         </div>
         <p className="icf-popup-sub">
-          {doc.printDocumentNo || `Doc #${doc.id}`} (Req ID: {reqId || "—"}) සඳහා file number එක ඇතුළත් කරන්න
+          {doc.printDocumentNo || `Doc #${doc.id}`} (Req ID: {reqId || "—"}) සඳහා
+          admin විසින් setup කළ active file number එක auto-fill වේ
         </p>
 
         <div className="icf-popup-field">
-          <span className="icf-popup-label">File Number</span>
+          <span className="icf-popup-label">Active File Number</span>
           <input
             className="icf-popup-text-input"
             type="text"
-            placeholder="Enter file number..."
-            value={fileNumber}
-            onChange={e => setFileNumber(e.target.value)}
-            autoFocus
+            value={loadingFileNo ? "Loading..." : (activeFileNo || "")}
+            readOnly
+            placeholder="No active file number set by admin"
           />
         </div>
+
+        {!loadingFileNo && fileNoError && (
+          <div className="icf-error" style={{ marginTop: 8 }}>
+            ⚠ Could not load active file number: {fileNoError}
+          </div>
+        )}
+        {!loadingFileNo && !fileNoError && !activeFileNo && (
+          <div className="icf-error" style={{ marginTop: 8 }}>
+            ⚠ Admin has not marked any file number as Active yet in Master Setup → Document File No.
+          </div>
+        )}
 
         <div className="icf-popup-foot">
           <button className="icf-btn icf-btn-outline" onClick={onCancel}>Cancel</button>
           <button
             className="icf-btn-done"
             disabled={!canConfirm}
-            onClick={() => onConfirm(fileNumber.trim())}
+            onClick={() => onConfirm(activeFileNo)}
           >
             📁 Confirm
           </button>
@@ -332,7 +358,14 @@ export default function IssueConfirm() {
   const [filterStatus, setFilterStatus] = useState("ALL"); // ALL | completed | onhold | cancelled
   const [savingId,    setSavingId]    = useState(null);
   const [viewDoc,     setViewDoc]     = useState(null);
-  const [fileDoc,     setFileDoc]     = useState(null); // doc currently being filed via popup
+
+  // Add-to-File popup state — file number now comes from Master Setup, not
+  // typed in by hand, so we track the doc being filed plus the fetched
+  // active file number / loading / error state for that fetch.
+  const [fileDoc,       setFileDoc]       = useState(null);
+  const [activeFileNo,  setActiveFileNo]  = useState(null);
+  const [loadingFileNo, setLoadingFileNo] = useState(false);
+  const [fileNoError,   setFileNoError]   = useState(null);
 
   const fetchDocuments = useCallback(async (silent = false) => {
     if (!silent) setLoading(true); else setRefreshing(true);
@@ -379,12 +412,32 @@ export default function IssueConfirm() {
     if (fresh) setViewDoc(fresh);
   }, [documents]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const handleAddToFileClick = (doc) => setFileDoc(doc);
-  const closeFilePopup       = () => setFileDoc(null);
+  // Opening "Add to File" now pulls the active file number set by admin in
+  // Master Setup → Document File No, instead of showing a blank text box.
+  const handleAddToFileClick = async (doc) => {
+    setFileDoc(doc);
+    setActiveFileNo(null);
+    setFileNoError(null);
+    setLoadingFileNo(true);
+    try {
+      const fno = await fetchActiveFileNumber();
+      setActiveFileNo(fno);
+    } catch (err) {
+      setFileNoError(err.message);
+    } finally {
+      setLoadingFileNo(false);
+    }
+  };
+
+  const closeFilePopup = () => {
+    setFileDoc(null);
+    setActiveFileNo(null);
+    setFileNoError(null);
+  };
 
   const handleAddToFileConfirm = async (fileNumber) => {
     const doc = fileDoc;
-    if (!doc) return;
+    if (!doc || !fileNumber) return;
     closeFilePopup();
     setSavingId(doc.id);
     try {
@@ -422,24 +475,35 @@ export default function IssueConfirm() {
         <AddFilePopup
           doc={fileDoc}
           reqId={reqIdMap[fileDoc.id]}
+          activeFileNo={activeFileNo}
+          loadingFileNo={loadingFileNo}
+          fileNoError={fileNoError}
           onConfirm={handleAddToFileConfirm}
           onCancel={closeFilePopup}
         />
       )}
 
       {/* Header */}
-      <div className="icf-header">
-        <div className="icf-header-left">
-          <h1>✔ Issue Confirm</h1>
-          <p>Delivered, on-hold and cancelled documents in one place
+       <div className="ip-header">
+        <div className="ip-header-left">
+          <h1>LOGITRACK-WAREHOUSE TIME EFFICENCY TRACKER SYSTEM</h1>
+          <h1>  Issue Confirm Portal</h1>
+          <p>
+            Document Cart View
             {lastUpdated && (
-              <span className="icf-updated">
+              <span style={{ marginLeft: 10, fontSize: "0.75rem", color: "#3b82f6" }}>
                 {refreshing ? "⟳ Refreshing..." : `Updated: ${lastUpdated.toLocaleTimeString()}`}
               </span>
             )}
           </p>
         </div>
-        <button className="icf-btn icf-btn-outline" onClick={() => fetchDocuments(false)}>↻ Refresh</button>
+        <button
+          className="ip-btn ip-btn-outline"
+          style={{ flex: "unset", padding: "8px 18px" }}
+          onClick={() => fetchDocuments(false)}
+        >
+          ↻ Refresh
+        </button>
       </div>
 
       {/* Toolbar — the 3-way status filter */}

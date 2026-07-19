@@ -1,5 +1,7 @@
 /* ── Admin Dashboard — Light Blue Theme ─────────────────────────────── */
 
+* { box-sizing: border-box; }
+
 .adm-page {
   display: flex;
   min-height: 100vh;
@@ -16,36 +18,53 @@
   padding: 18px 12px;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 3px;
   min-height: 100vh;
   box-sizing: border-box;
+  flex-shrink: 0;
 }
 
 .adm-sidebar-title {
   color: #1d4ed8;
   font-weight: 800;
   font-size: 1rem;
-  padding: 0 6px 14px;
+  letter-spacing: 0.01em;
+  padding: 0 10px 16px;
 }
 
 .adm-nav-btn {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 11px;
   background: transparent;
   color: #4b6584;
   border: none;
   border-radius: 8px;
-  padding: 10px 12px;
+  padding: 9px 10px;
   font-weight: 700;
-  font-size: 0.82rem;
+  font-size: 0.8rem;
   cursor: pointer;
   text-align: left;
   transition: background 0.15s, color 0.15s;
 }
 
+.adm-nav-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
+  color: #7fa5d6;
+  transition: color 0.15s;
+}
+
 .adm-nav-btn:hover {
   background: #eaf3ff;
+  color: #1d4ed8;
+}
+
+.adm-nav-btn:hover .adm-nav-icon {
   color: #1d4ed8;
 }
 
@@ -55,12 +74,50 @@
   box-shadow: 0 2px 8px rgba(59, 130, 246, 0.35);
 }
 
+.adm-nav-btn.active .adm-nav-icon {
+  color: #ffffff;
+}
+
+.adm-sidebar-scrim {
+  display: none;
+}
+
+/* ── Top bar (mobile menu trigger) ── */
+
+.adm-topbar {
+  display: none;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.adm-menu-btn {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  background: #ffffff;
+  border: 1px solid #d7e8fb;
+  border-radius: 8px;
+  color: #1d4ed8;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.adm-topbar-label {
+  color: #0f2b52;
+  font-weight: 800;
+  font-size: 0.95rem;
+}
+
 /* ── Main content ── */
 
 .adm-main {
   flex: 1;
   padding: 20px 26px;
   box-sizing: border-box;
+  min-width: 0;
 }
 
 .adm-title {
@@ -68,6 +125,9 @@
   font-size: 1.15rem;
   font-weight: 800;
   margin-bottom: 4px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .adm-subtitle {
@@ -120,6 +180,7 @@
   border-radius: 6px;
   padding: 6px 10px;
   font-size: 0.76rem;
+  max-width: 100%;
 }
 
 .adm-operator-select {
@@ -214,7 +275,7 @@
   border-radius: 10px;
   padding: 12px 14px;
   flex: 1 1 220px;
-  min-width: 220px;
+  min-width: 200px;
   box-shadow: 0 1px 4px rgba(59, 130, 246, 0.06);
 }
 
@@ -228,6 +289,7 @@
 .adm-triple-stats {
   display: flex;
   gap: 14px;
+  flex-wrap: wrap;
 }
 
 .adm-stat-label {
@@ -259,7 +321,7 @@
   border-radius: 10px;
   padding: 12px 14px;
   flex: 1 1 320px;
-  min-width: 300px;
+  min-width: 260px;
   box-shadow: 0 1px 4px rgba(59, 130, 246, 0.06);
 }
 
@@ -305,10 +367,12 @@
   display: flex;
   gap: 8px;
   margin-bottom: 14px;
+  flex-wrap: wrap;
 }
 
 .adm-config-input {
   flex: 1;
+  min-width: 140px;
   background: #f4f9ff;
   color: #0f2b52;
   border: 1px solid #cfe3fb;
@@ -453,47 +517,68 @@
 .adm-xl-datefilter { background:#f4f9ff; border:1px dashed #b9d7f5; margin-bottom:14px; }
 .adm-xl-datefilter-label { color:#1d4ed8; font-weight:700; font-size:0.78rem; }
 .adm-xl-clear-btn { background:none; border:1px solid #cfe3fb; border-radius:6px; padding:6px 10px; color:#dc2626; font-size:0.74rem; font-weight:700; cursor:pointer; }
-.adm-xl-table-wrap { overflow:auto; max-height:70vh; border:1px solid #d7e8fb; border-radius:10px; }
+.adm-xl-table-wrap { overflow:auto; max-height:70vh; border:1px solid #d7e8fb; border-radius:10px; -webkit-overflow-scrolling: touch; }
 .adm-xl-table { border-collapse:collapse; width:100%; font-size:0.74rem; white-space:nowrap; }
 .adm-xl-table th { position:sticky; top:0; background:#dbeeff; color:#1d4ed8; padding:8px 10px; text-align:left; z-index:1; }
 .adm-xl-table td { padding:6px 10px; border-top:1px solid #e8f1fc; color:#0f2b52; }
 .adm-xl-table tbody tr:nth-child(even) { background:#f8fbff; }
 
-/* ── Master Setup panel (10 buttons in one row) ──────────────────────── */
+/* ── Master Setup panel (10 tabs, elegant icon + label buttons) ────────── */
 
 .adm-setup-tabrow {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 6px;
   background: #ffffff;
   border: 1px solid #d7e8fb;
   border-radius: 12px;
-  padding: 10px;
+  padding: 8px;
   margin-bottom: 18px;
   box-shadow: 0 1px 4px rgba(59, 130, 246, 0.06);
 }
 
 .adm-setup-tab-btn {
-  background: #eaf3ff;
-  color: #1d4ed8;
-  border: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  background: #f4f9ff;
+  color: #35567f;
+  border: 1px solid transparent;
   border-radius: 8px;
-  padding: 8px 12px;
+  padding: 8px 13px;
   font-weight: 700;
   font-size: 0.74rem;
   cursor: pointer;
   white-space: nowrap;
-  transition: background 0.15s, color 0.15s;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.adm-setup-tab-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #7fa5d6;
+  transition: color 0.15s;
 }
 
 .adm-setup-tab-btn:hover {
-  background: #d7e8fb;
+  background: #eaf3ff;
+  border-color: #d7e8fb;
+  color: #1d4ed8;
+}
+
+.adm-setup-tab-btn:hover .adm-setup-tab-icon {
+  color: #1d4ed8;
 }
 
 .adm-setup-tab-btn.active {
   background: linear-gradient(135deg, #60a5fa, #3b82f6);
   color: #ffffff;
-  box-shadow: 0 2px 8px rgba(59, 130, 246, 0.35);
+  box-shadow: 0 2px 8px rgba(59, 130, 246, 0.3);
+}
+
+.adm-setup-tab-btn.active .adm-setup-tab-icon {
+  color: #ffffff;
 }
 
 .adm-setup-panel-body {
@@ -509,6 +594,14 @@
   font-size: 0.95rem;
   font-weight: 800;
   margin-bottom: 14px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.adm-setup-title svg {
+  flex-shrink: 0;
+  color: #3b82f6;
 }
 
 .adm-setup-form-row {
@@ -583,4 +676,94 @@
   gap: 6px;
   font-size: 0.82rem;
   color: #0f2b52;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   ── Responsive ──────────────────────────────────────────────────────────
+   ═══════════════════════════════════════════════════════════════════════ */
+
+/* Tablet / narrow desktop */
+@media (max-width: 1024px) {
+  .adm-main { padding: 16px 18px; }
+  .adm-kpi-card { min-width: 100px; }
+  .adm-eff-card { min-width: 240px; }
+}
+
+/* Mobile: sidebar becomes an off-canvas drawer opened from a top bar */
+@media (max-width: 768px) {
+  .adm-page {
+    flex-direction: column;
+  }
+
+  .adm-topbar {
+    display: flex;
+  }
+
+  .adm-menu-btn {
+    display: inline-flex;
+  }
+
+  .adm-sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    height: 100vh;
+    min-height: 100vh;
+    width: 78vw;
+    max-width: 280px;
+    transform: translateX(-100%);
+    transition: transform 0.22s ease;
+    z-index: 40;
+    box-shadow: 2px 0 24px rgba(15, 43, 82, 0.18);
+  }
+
+  .adm-sidebar.open {
+    transform: translateX(0);
+  }
+
+  .adm-sidebar-scrim {
+    display: block;
+    position: fixed;
+    inset: 0;
+    background: rgba(15, 43, 82, 0.35);
+    z-index: 30;
+  }
+
+  .adm-main {
+    padding: 14px;
+    width: 100%;
+  }
+
+  .adm-title { font-size: 1.02rem; }
+
+  .adm-filterbar { padding: 8px; }
+  .adm-operator-select { margin-left: 0; width: 100%; }
+
+  .adm-kpi-row,
+  .adm-triple-row,
+  .adm-eff-row {
+    gap: 8px;
+  }
+
+  .adm-kpi-card { flex: 1 1 45%; min-width: 0; padding: 12px; }
+  .adm-triple-card { flex: 1 1 100%; min-width: 0; }
+  .adm-eff-card { flex: 1 1 100%; min-width: 0; }
+
+  .adm-setup-tabrow { padding: 6px; gap: 5px; }
+  .adm-setup-tab-btn { flex: 1 1 auto; justify-content: center; padding: 8px 10px; font-size: 0.7rem; }
+  .adm-setup-panel-body { padding: 14px; }
+
+  .adm-setup-form-grid { grid-template-columns: 1fr; }
+  .adm-setup-forgot-btn { margin-left: 0; width: 100%; text-align: center; }
+
+  .adm-xl-toolbar { gap: 6px; }
+  .adm-xl-select, .adm-xl-search, .adm-xl-export-btn { flex: 1 1 auto; }
+  .adm-xl-table-wrap { max-height: 60vh; }
+}
+
+/* Small phones */
+@media (max-width: 420px) {
+  .adm-kpi-card { flex: 1 1 100%; }
+  .adm-nav-btn { font-size: 0.78rem; }
+  .adm-setup-tab-btn span:last-child { display: inline; }
 }
