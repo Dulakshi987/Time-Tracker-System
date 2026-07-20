@@ -190,6 +190,7 @@ public class Issue {
     @Column(name = "print_handed_over_by")
     private String PrintHandedOverBy;
 
+
     @Column(name = "delivery_held_by")
     private String deliveryHeldBy;
 

@@ -100,4 +100,16 @@ public class PickPortalController {
         issuePickService.delete(id);
         return ResponseEntity.noContent().build();
     }
+
+    // body: { handedOverBy }
+@PutMapping("/{id}/handover")
+public ResponseEntity<Issue> handover(@PathVariable Long id, @RequestBody Map<String, String> body) {
+    try {
+        return ResponseEntity.ok(issuePickService.handoverPrint(
+            id, body.getOrDefault("handedOverBy", "")
+        ));
+    } catch (RuntimeException e) {
+        return ResponseEntity.notFound().build();
+    }
+}
 }

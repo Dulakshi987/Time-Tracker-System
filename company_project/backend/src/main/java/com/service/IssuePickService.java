@@ -96,4 +96,13 @@ public class IssuePickService {
     public void delete(Long id) {
         issueRepository.deleteById(id);
     }
+    public Issue handoverPrint(Long id, String handedOverBy) {
+    Issue doc = getById(id);
+
+            doc.setStatus("HANDED_OVER");
+            doc.setPrintHandedOverBy(handedOverBy);
+            // doc.setHandoverTime(LocalDateTime.now());
+
+    return issueRepository.save(doc);
+}
 }
