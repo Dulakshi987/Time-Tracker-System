@@ -1,0 +1,125 @@
+.login-page {
+  min-height: 100vh;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: radial-gradient(circle at top, #10192b 0%, #060b14 70%);
+  padding: 20px;
+  box-sizing: border-box;
+}
+
+.login-card {
+  width: 100%;
+  max-width: 380px;
+  background: #0e1626;
+  border: 1px solid #1c2b45;
+  border-radius: 14px;
+  padding: 32px 28px;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.45);
+}
+
+.login-title {
+  font-size: 22px;
+  font-weight: 700;
+  color: #eaf2ff;
+  text-align: center;
+}
+
+.login-subtitle {
+  font-size: 13px;
+  color: #6c8bb3;
+  text-align: center;
+  margin-top: 4px;
+  margin-bottom: 24px;
+}
+
+.login-error {
+  background: rgba(220, 60, 60, 0.12);
+  border: 1px solid rgba(220, 60, 60, 0.4);
+  color: #ff8a8a;
+  font-size: 13px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  margin-bottom: 16px;
+}
+
+.login-form {
+  display: flex;
+  flex-direction: column;
+}
+
+.login-label {
+  font-size: 12px;
+  color: #9db4d4;
+  margin-bottom: 6px;
+  margin-top: 14px;
+}
+
+.login-label:first-of-type {
+  margin-top: 0;
+}
+
+.login-input {
+  width: 100%;
+  box-sizing: border-box;
+  background: #0a1120;
+  border: 1px solid #223252;
+  border-radius: 8px;
+  padding: 10px 12px;
+  color: #eaf2ff;
+  font-size: 14px;
+  outline: none;
+  transition: border-color 0.15s ease;
+}
+
+.login-input:focus {
+  border-color: #3d7bfa;
+}
+
+.login-password-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.login-password-row .login-input {
+  padding-right: 60px;
+}
+
+.login-toggle-btn {
+  position: absolute;
+  right: 8px;
+  background: none;
+  border: none;
+  color: #6c8bb3;
+  font-size: 12px;
+  cursor: pointer;
+  padding: 4px 6px;
+}
+
+.login-toggle-btn:hover {
+  color: #9db4d4;
+}
+
+.login-submit-btn {
+  margin-top: 24px;
+  background: #3d7bfa;
+  border: none;
+  border-radius: 8px;
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
+  padding: 11px 0;
+  cursor: pointer;
+  transition: background 0.15s ease, opacity 0.15s ease;
+}
+
+.login-submit-btn:hover:not(:disabled) {
+  background: #2f66d9;
+}
+
+.login-submit-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
