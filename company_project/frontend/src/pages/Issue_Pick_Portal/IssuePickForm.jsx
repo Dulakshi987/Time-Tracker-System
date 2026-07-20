@@ -783,73 +783,88 @@ export default function IssuPrinFormt() {
   const handleEmergencyClick = (id) => { setActiveId(id); setActivePopup("emergency"); };
   const closePopup = () => { setActivePopup(null); setActiveId(null); };
 
+  // Helper: throw with server-provided detail whenever a mutation PUT
+  // doesn't come back OK, so failures show up in the alert() instead of
+  // silently leaving the document (and its buttons) unchanged.
+  const assertOk = async (res, action) => {
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      throw new Error(`${action} failed: Server error ${res.status}${body ? " — " + body : ""}`);
+    }
+  };
+
   // ── Confirm Handover ──
   const handleHandoverConfirm = async (handedOverBy) => {
     const id = activeId; closePopup();
     try {
-      await fetch(`${API_BASE}/${id}/handover`, {
+      const res = await fetch(`${API_BASE}/${id}/handover`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ handedOverBy }),
       });
+      await assertOk(res, "Handover");
       fetchDocuments(true);
     } catch (err) {
-      alert("Handover failed: " + err.message);
+      alert(err.message);
     }
   };
 
   // ── Start / Resume ──
   const handleStart = async (id) => {
     try {
-      await fetch(`${API_BASE}/${id}/start`, { method: "PUT" });
+      const res = await fetch(`${API_BASE}/${id}/start`, { method: "PUT" });
+      await assertOk(res, "Start");
       fetchDocuments(true);
     } catch (err) {
-      alert("Start failed: " + err.message);
+      alert(err.message);
     }
   };
 
   // ── Confirm Hold ──
   const handleHoldConfirm = async (holdReason, heldBy) => {
-    closePopup();
+    const id = activeId; closePopup();
     try {
-      await fetch(`${API_BASE}/${activeId}/hold`, {
+      const res = await fetch(`${API_BASE}/${id}/hold`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ holdReason, heldBy }),
       });
+      await assertOk(res, "Hold");
       fetchDocuments(true);
     } catch (err) {
-      alert("Hold failed: " + err.message);
+      alert(err.message);
     }
   };
 
   // ── Confirm End ──
   const handleEndConfirm = async (pickedBy) => {
-    closePopup();
+    const id = activeId; closePopup();
     try {
-      await fetch(`${API_BASE}/${activeId}/end`, {
+      const res = await fetch(`${API_BASE}/${id}/end`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ pickedBy }),
       });
+      await assertOk(res, "End");
       fetchDocuments(true);
     } catch (err) {
-      alert("End failed: " + err.message);
+      alert(err.message);
     }
   };
 
   // ── Confirm Emergency Pick Done (re-pick after Check reported wrong material) ──
   const handleEmergencyConfirm = async (resolvedBy) => {
-    closePopup();
+    const id = activeId; closePopup();
     try {
-      await fetch(`${API_BASE}/${activeId}/emergency-resolve`, {
+      const res = await fetch(`${API_BASE}/${id}/emergency-resolve`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ resolvedBy }),
       });
+      await assertOk(res, "Emergency Pick Done");
       fetchDocuments(true);
     } catch (err) {
-      alert("Emergency Pick Done failed: " + err.message);
+      alert(err.message);
     }
   };
 
