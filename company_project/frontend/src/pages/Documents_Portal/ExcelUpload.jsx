@@ -5,9 +5,15 @@ import axios from "axios";
 // upload — same pattern as loadRows() in DocumentForm.jsx.
 const ExcelUpload = ({ onUploaded }) => {
 
+  // const downloadTemplate = () => {
+  //   window.open("http://localhost:8080/api/excel/download-template");
+  // };
+
   const downloadTemplate = () => {
-    window.open("http://localhost:8080/api/excel/download-template");
-  };
+  window.open(
+    `${import.meta.env.VITE_API_URL}/api/excel/download-template`
+  );
+};
 
   const handleUpload = async (e) => {
     const file = e.target.files[0];
@@ -17,11 +23,16 @@ const ExcelUpload = ({ onUploaded }) => {
     formData.append("file", file);
 
     try {
+      // const res = await axios.post(
+      //   "http://localhost:8080/api/excel/upload",
+      //   formData,
+      //   { headers: { "Content-Type": "multipart/form-data" } }
+      // );
       const res = await axios.post(
-        "http://localhost:8080/api/excel/upload",
-        formData,
-        { headers: { "Content-Type": "multipart/form-data" } }
-      );
+  "https://time-tracker-system-production.up.railway.app/api/excel/upload",
+  formData,
+  { headers: { "Content-Type": "multipart/form-data" } }
+);
       alert(res.data || "Excel Uploaded Successfully");
 
       // let the parent know so it can reload the table

@@ -1,8 +1,11 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import "./IssuePrint.css";
 
-const API_BASE = "http://localhost:8080/api/print-portal";
-const SETUP_API = "http://localhost:8080/api/admin-setup";
+// const API_BASE = "http://localhost:8080/api/print-portal";
+// const SETUP_API = "http://localhost:8080/api/admin-setup";
+
+const API_BASE = "https://time-tracker-system-production.up.railway.app/api/print-portal";
+const SETUP_API = "https://time-tracker-system-production.up.railway.app/api/admin-setup";
 const AUTO_REFRESH = 10000;
 
 const HOLD_REASONS = [

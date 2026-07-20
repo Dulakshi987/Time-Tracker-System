@@ -1,11 +1,15 @@
 import { useState, useEffect, useCallback } from "react";
 import "./IssueDelivery.css";
 
-const API_BASE = "http://localhost:8080/api/delivery-portal";
-// Master Setup API — same base the Admin Dashboard's "Master Setup → Delivery"
-// panel saves to. We read from here so Held By / Cancelled By / Delivered By
-// always match whatever names are entered in Admin Dashboard, live from the DB.
-const SETUP_API = "http://localhost:8080/api/admin-setup";
+// const API_BASE = "http://localhost:8080/api/delivery-portal";
+// // Master Setup API — same base the Admin Dashboard's "Master Setup → Delivery"
+// // panel saves to. We read from here so Held By / Cancelled By / Delivered By
+// // always match whatever names are entered in Admin Dashboard, live from the DB.
+// const SETUP_API = "http://localhost:8080/api/admin-setup";
+
+const API_BASE = "https://time-tracker-system-production.up.railway.app/api/delivery-portal";
+
+const SETUP_API = "https://time-tracker-system-production.up.railway.app/api/admin-setup";
 const AUTO_REFRESH = 10000;
 const OPERATOR_REFRESH = 15000;
 

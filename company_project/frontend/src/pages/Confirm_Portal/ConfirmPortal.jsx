@@ -1,10 +1,17 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import "./ConfirmPortal.css";
 
-const DELIVERY_API = "http://localhost:8080/api/delivery-portal";
-const CONFIRM_API = "http://localhost:8080/api/issue-confirm";
+// const DELIVERY_API = "http://localhost:8080/api/delivery-portal";
+// const CONFIRM_API = "http://localhost:8080/api/issue-confirm";
+// // Same source Master Setup → "Document File No" panel writes to.
+// const SETUP_API = "http://localhost:8080/api/admin-setup";
+
+const DELIVERY_API = "https://time-tracker-system-production.up.railway.app/api/delivery-portal";
+
+const CONFIRM_API = "https://time-tracker-system-production.up.railway.app/api/issue-confirm";
+
 // Same source Master Setup → "Document File No" panel writes to.
-const SETUP_API = "http://localhost:8080/api/admin-setup";
+const SETUP_API = "https://time-tracker-system-production.up.railway.app/api/admin-setup";
 const AUTO_REFRESH = 10000;
 
 // ── Helpers ─────────────────────────────────────────────────────────────────

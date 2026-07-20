@@ -14,8 +14,10 @@ import DocumentForm      from "../Documents_Portal/DocumentForm";
 // everything straight to the database through AdminSetupController.
 
 // ── Config ───────────────────────────────────────────────────────────────
-const MASTER_API   = "http://localhost:8080/api/print-portal";
-const SETUP_API    = "http://localhost:8080/api/admin-setup";
+// const MASTER_API   = "http://localhost:8080/api/print-portal";
+// const SETUP_API    = "http://localhost:8080/api/admin-setup";
+const MASTER_API   = "https://time-tracker-system-production.up.railway.app/api/print-portal";
+const SETUP_API    = "https://time-tracker-system-production.up.railway.app/api/admin-setup";
 const AUTO_REFRESH = 1000;
 const CONFIG_KEY    = "admin_job_types_config";
 
