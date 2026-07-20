@@ -25,7 +25,7 @@
 // export default App;
 
 
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { Routes, Route, Navigate } from "react-router-dom";
 
 import Login from "./pages/Login/Login";
 import IssuPrint from "./pages/Issue_Pick_Portal/IssuePickForm";
@@ -48,29 +48,27 @@ function ProtectedRoute({ children }) {
 
 function App() {
   return (
-    <BrowserRouter>
-      <Routes>
-        <Route path="/" element={<Login />} />
+    <Routes>
+      <Route path="/" element={<Login />} />
 
-        <Route
-          path="/admin"
-          element={
-            <ProtectedRoute>
-              <AdminDashboard />
-            </ProtectedRoute>
-          }
-        />
+      <Route
+        path="/admin"
+        element={
+          <ProtectedRoute>
+            <AdminDashboard />
+          </ProtectedRoute>
+        }
+      />
 
-        <Route path="/print" element={<IssuePrintForm />} />
-        <Route path="/pick" element={<IssuPrint />} />
-        <Route path="/check" element={<IssueCheckForm />} />
-        <Route path="/delivery" element={<IssueDeliveryForm />} />
-        <Route path="/confirm" element={<ConfirmPortal />} />
-        <Route path="/documents" element={<DocumentForm />} />
+      <Route path="/print" element={<IssuePrintForm />} />
+      <Route path="/pick" element={<IssuPrint />} />
+      <Route path="/check" element={<IssueCheckForm />} />
+      <Route path="/delivery" element={<IssueDeliveryForm />} />
+      <Route path="/confirm" element={<ConfirmPortal />} />
+      <Route path="/documents" element={<DocumentForm />} />
 
-        <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
-    </BrowserRouter>
+      <Route path="*" element={<Navigate to="/" replace />} />
+    </Routes>
   );
 }
 
