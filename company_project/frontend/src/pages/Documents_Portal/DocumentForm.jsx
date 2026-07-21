@@ -4,10 +4,11 @@ import {
   createDocument,
   updateDocument,
   deleteDocument,
-  fetchDocumentsByType,
   fetchAllDocuments,
   fetchJobCategories,
   fetchEnteredByUsers,
+  fetchDivisions, // <-- NEW: must exist in services/Documents_Portal/api.js
+                  //     (see note at bottom of this file / chat message)
 } from "../../services/Documents_Portal/api";
 import "./DocumentsForm.css";
 
@@ -26,10 +27,18 @@ const emptyForm = (jobType) => ({
   requestedBy: "",
   vehicleNo: "",
   sapIssueLineNo: "",
-  divisionNo: "",
+  divisionNo: "", // holds the DIVISION CODE (e.g. "D01"), not the name
   requestDate: getCurrentDate(),
   requestTime: getCurrentTime(),
   status: "Draft",
+});
+
+// Table-side filters live completely separately from the form's filters.
+const emptyTableFilters = () => ({
+  search: "",
+  jobType: "ALL",
+  divisionNo: "ALL",
+  status: "ALL",
 });
 
 const DocumentForm = ({ selectedType }) => {
@@ -39,17 +48,22 @@ const DocumentForm = ({ selectedType }) => {
   const [formData, setFormData] = useState(emptyForm(isSummary ? "" : safeSelectedType));
   const [editingId, setEditingId] = useState(null);
 
+  // ── Master data ─────────────────────────────────────────────────────
+  const [divisions, setDivisions] = useState([]); // [{ id, divisionNo, divisionName, ... }]
+  const [divisionsLoading, setDivisionsLoading] = useState(true);
+
   const [jobCategories, setJobCategories] = useState([]);
   const [jobCategoriesLoading, setJobCategoriesLoading] = useState(true);
 
   const [enteredByOptions, setEnteredByOptions] = useState([]);
   const [enteredByLoading, setEnteredByLoading] = useState(true);
 
+  // ── Table (always shows ALL documents; filtered independently below) ─
   const [rows, setRows] = useState([]);
   const [rowsLoading, setRowsLoading] = useState(true);
   const [rowsError, setRowsError] = useState(null);
+  const [tableFilters, setTableFilters] = useState(emptyTableFilters());
 
-  const [search, setSearch] = useState("");
   const [saving, setSaving] = useState(false);
   const [saveMsg, setSaveMsg] = useState(null);
 
@@ -59,6 +73,17 @@ const DocumentForm = ({ selectedType }) => {
     setSaveMsg(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [safeSelectedType]);
+
+  // Real Division master list — this is the single source of truth for
+  // "which division is this", using divisionNo (the code) as the key,
+  // exactly the way Master Setup / print-operators store it.
+  useEffect(() => {
+    setDivisionsLoading(true);
+    fetchDivisions()
+      .then(res => setDivisions(res.data || res || []))
+      .catch(() => setDivisions([]))
+      .finally(() => setDivisionsLoading(false));
+  }, []);
 
   useEffect(() => {
     setJobCategoriesLoading(true);
@@ -76,41 +101,29 @@ const DocumentForm = ({ selectedType }) => {
       .finally(() => setEnteredByLoading(false));
   }, []);
 
-  // Unique list of divisions, derived from job categories — this drives
-  // the FIRST dropdown now. Adjust c.divisionName below if your job
-  // category objects use a different field name.
-  const divisionOptions = useMemo(() => {
-    const seen = new Set();
-    const list = [];
-    jobCategories.forEach(c => {
-      const name = c.divisionName || c.divisionNo;
-      if (name && !seen.has(name)) {
-        seen.add(name);
-        list.push(name);
-      }
-    });
-    return list;
-  }, [jobCategories]);
+  // divisionNo -> divisionName lookup, needed because Job Categories are
+  // stored against divisionName (not divisionNo).
+  const divisionNoToName = useMemo(() => {
+    const map = {};
+    divisions.forEach(d => { map[d.divisionNo] = d.divisionName; });
+    return map;
+  }, [divisions]);
 
-  // Job Types filtered down to the selected Division. When no division is
-  // selected yet, show nothing (forces the user to pick a division first).
+  // Job Types filtered down to the selected Division.
+  // Job Categories store divisionName, so we translate the selected
+  // divisionNo -> divisionName before comparing.
   const filteredJobTypes = useMemo(() => {
     if (!formData.divisionNo) return [];
-    return jobCategories.filter(
-      c => (c.divisionName || c.divisionNo) === formData.divisionNo
-    );
-  }, [jobCategories, formData.divisionNo]);
+    const divisionName = divisionNoToName[formData.divisionNo];
+    return jobCategories.filter(c => c.divisionName === divisionName);
+  }, [jobCategories, formData.divisionNo, divisionNoToName]);
 
   // Entered By people filtered down to the selected Division.
-  // NOTE: assumes each entry in enteredByOptions carries a division field
-  // (divisionName or divisionNo) coming from the Admin → Document/Print By
-  // master setup. If your API doesn't return that field yet, add it there
-  // first — otherwise this filter will always come back empty.
+  // Print / Document operators (Master Setup) store divisionNo directly,
+  // so this is now a direct code-to-code match — no more name-vs-code bug.
   const filteredEnteredBy = useMemo(() => {
     if (!formData.divisionNo) return [];
-    return enteredByOptions.filter(
-      u => (u.divisionName || u.divisionNo) === formData.divisionNo
-    );
+    return enteredByOptions.filter(u => u.divisionNo === formData.divisionNo);
   }, [enteredByOptions, formData.divisionNo]);
 
   // When Division changes, reset Job Type and Entered By since the old
@@ -125,20 +138,16 @@ const DocumentForm = ({ selectedType }) => {
     }));
   };
 
-  const effectiveType = formData.jobType || safeSelectedType;
-  const effectiveIsSummary = !formData.jobType && isSummary;
-
+  // ── Table always loads ALL documents. It is no longer tied to the form's
+  //    division/job-type selection — filtering the visible rows is done
+  //    entirely by the filter bar above the table (tableFilters). ─────────
   const loadRows = useCallback(() => {
     setRowsLoading(true);
-    const req = effectiveIsSummary
-      ? fetchAllDocuments()
-      : fetchDocumentsByType(effectiveType);
-
-    req
+    fetchAllDocuments()
       .then(res => { setRows(res.data || []); setRowsError(null); })
       .catch(err => setRowsError(err.message || "Failed to load documents"))
       .finally(() => setRowsLoading(false));
-  }, [effectiveType, effectiveIsSummary]);
+  }, []);
 
   useEffect(() => { loadRows(); }, [loadRows]);
 
@@ -221,16 +230,69 @@ const DocumentForm = ({ selectedType }) => {
     }
   };
 
+  // ── Table filter bar options (derived from whatever rows exist) ──────
+  const rowJobTypeOptions = useMemo(() => {
+    const set = new Set();
+    rows.forEach(r => { if (r.jobType) set.add(r.jobType); });
+    return Array.from(set).sort();
+  }, [rows]);
+
+  const rowStatusOptions = useMemo(() => {
+    const set = new Set();
+    rows.forEach(r => { if (r.status) set.add(r.status); });
+    return Array.from(set).sort();
+  }, [rows]);
+
+  const handleTableFilterChange = (field, value) => {
+    setTableFilters(prev => ({ ...prev, [field]: value }));
+  };
+
+  const clearTableFilters = () => setTableFilters(emptyTableFilters());
+
+  // Search + per-column filters, applied on top of "all documents".
   const filteredRows = useMemo(() => {
-    if (!search.trim()) return rows;
-    const s = search.trim().toLowerCase();
-    return rows.filter(r => {
-      const hay = `${r.id} ${r.jobwbs || r.jobWBS || ""} ${r.reservationNo || ""} ${r.customerName || ""} ${r.requestedBy || ""} ${r.vehicleNo || ""}`.toLowerCase();
+    const s = tableFilters.search.trim().toLowerCase();
+
+    return rows.filter(row => {
+      if (tableFilters.jobType !== "ALL" && (row.jobType || "") !== tableFilters.jobType) return false;
+      if (tableFilters.divisionNo !== "ALL" && (row.divisionNo || "") !== tableFilters.divisionNo) return false;
+      if (tableFilters.status !== "ALL" && (row.status || "Draft") !== tableFilters.status) return false;
+
+      if (!s) return true;
+
+      // Search across EVERY visible column, not just a hardcoded subset.
+      const divisionLabel = row.divisionNo
+        ? `${row.divisionNo} ${divisionNoToName[row.divisionNo] || ""}`
+        : "";
+      const hay = [
+        row.id,
+        row.jobType,
+        row.divisionNo,
+        divisionLabel,
+        row.jobwbs || row.jobWBS,
+        row.reservationNo,
+        row.customerName,
+        row.enteredBy,
+        row.requestedBy,
+        row.vehicleNo,
+        row.sapIssueLineNo,
+        row.requestDate,
+        row.requestTime,
+        row.status,
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+
       return hay.includes(s);
     });
-  }, [rows, search]);
+  }, [rows, tableFilters, divisionNoToName]);
 
-  const tableTitle = effectiveIsSummary ? "All Documents" : `${effectiveType} Documents`;
+  const hasActiveTableFilters =
+    tableFilters.search.trim() !== "" ||
+    tableFilters.jobType !== "ALL" ||
+    tableFilters.divisionNo !== "ALL" ||
+    tableFilters.status !== "ALL";
 
   return (
     <div className="docf-page">
@@ -245,7 +307,9 @@ const DocumentForm = ({ selectedType }) => {
         <form onSubmit={handleSubmit} className="docf-form">
           <div className="docf-grid">
 
-            {/* Division — FIRST, drives Job Type + Entered By below */}
+            {/* Division — FIRST, drives Job Type + Entered By below.
+                Options now come from the real Division master (fetchDivisions),
+                value = divisionNo (the code), label shows both code + name. */}
             <div className="docf-field">
               <label>Division</label>
               <select
@@ -253,11 +317,13 @@ const DocumentForm = ({ selectedType }) => {
                 value={formData.divisionNo}
                 onChange={handleDivisionChange}
                 className="docf-input"
-                disabled={jobCategoriesLoading}
+                disabled={divisionsLoading}
               >
                 <option value="">-- Select Division --</option>
-                {divisionOptions.map(name => (
-                  <option key={name} value={name}>{name}</option>
+                {divisions.map(d => (
+                  <option key={d.id ?? d.divisionNo} value={d.divisionNo}>
+                    {d.divisionNo} — {d.divisionName}
+                  </option>
                 ))}
               </select>
             </div>
@@ -404,12 +470,57 @@ const DocumentForm = ({ selectedType }) => {
       <div className="docf-card">
         <div className="docf-table-header">
           <h3 className="docf-table-title">
-            {tableTitle} ({filteredRows.length})
+            All Documents ({filteredRows.length}{filteredRows.length !== rows.length ? ` of ${rows.length}` : ""})
           </h3>
+        </div>
+
+        {/* Independent table filter bar — NOT connected to the form above.
+            Table always loads ALL documents; this bar just narrows what's shown. */}
+        <div className="docf-table-filterbar">
           <input
-            type="text" className="docf-search" placeholder="Search WBS / reservation / customer / id…"
-            value={search} onChange={e => setSearch(e.target.value)}
+            type="text"
+            className="docf-search"
+            placeholder="Search any column (id, WBS, reservation, customer, entered by, vehicle...)"
+            value={tableFilters.search}
+            onChange={e => handleTableFilterChange("search", e.target.value)}
           />
+
+          <select
+            className="docf-input docf-table-filter-select"
+            value={tableFilters.jobType}
+            onChange={e => handleTableFilterChange("jobType", e.target.value)}
+          >
+            <option value="ALL">All Job Types</option>
+            {rowJobTypeOptions.map(t => <option key={t} value={t}>{t}</option>)}
+          </select>
+
+          <select
+            className="docf-input docf-table-filter-select"
+            value={tableFilters.divisionNo}
+            onChange={e => handleTableFilterChange("divisionNo", e.target.value)}
+          >
+            <option value="ALL">All Divisions</option>
+            {divisions.map(d => (
+              <option key={d.id ?? d.divisionNo} value={d.divisionNo}>
+                {d.divisionNo} — {d.divisionName}
+              </option>
+            ))}
+          </select>
+
+          <select
+            className="docf-input docf-table-filter-select"
+            value={tableFilters.status}
+            onChange={e => handleTableFilterChange("status", e.target.value)}
+          >
+            <option value="ALL">All Statuses</option>
+            {rowStatusOptions.map(s => <option key={s} value={s}>{s}</option>)}
+          </select>
+
+          {hasActiveTableFilters && (
+            <button type="button" className="docf-btn docf-btn-ghost" onClick={clearTableFilters}>
+              ✕ Clear filters
+            </button>
+          )}
         </div>
 
         {rowsLoading && <div className="docf-status-text">Loading…</div>}
@@ -438,12 +549,12 @@ const DocumentForm = ({ selectedType }) => {
               </thead>
               <tbody>
                 {filteredRows.length === 0 ? (
-                  <tr><td colSpan={14} className="docf-empty-row">No documents yet</td></tr>
+                  <tr><td colSpan={14} className="docf-empty-row">No documents match this filter</td></tr>
                 ) : filteredRows.map(row => (
                   <tr key={row.id}>
                     <td>{row.id}</td>
                     <td>{row.jobType}</td>
-                    <td>{row.divisionNo || "—"}</td>
+                    <td>{row.divisionNo ? `${row.divisionNo} — ${divisionNoToName[row.divisionNo] || ""}` : "—"}</td>
                     <td>{row.jobwbs || row.jobWBS || "—"}</td>
                     <td>{row.reservationNo || "—"}</td>
                     <td>{row.customerName || "—"}</td>
