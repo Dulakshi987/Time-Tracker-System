@@ -30,4 +30,7 @@ public class FileNumberSetup {
 
     @Column(name = "created_at")
     private LocalDateTime createdAt = LocalDateTime.now();
+
+    @Column(name = "division_no")
+    private String divisionNo;
 }

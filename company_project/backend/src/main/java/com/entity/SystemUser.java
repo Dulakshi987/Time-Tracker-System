@@ -33,6 +33,9 @@ public class SystemUser {
     @Column(name = "password_hash")
     private String passwordHash;
 
+    @Column(name = "division_no")
+    private String divisionNo;
+
     @Column(name = "created_by")
     private String createdBy;
 

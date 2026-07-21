@@ -25,6 +25,9 @@ public class PrintOperator {
     @Column(name = "operator_nic_name")
     private String operatorNicName;
 
+    @Column(name = "division_no")
+    private String divisionNo;
+
     @Column(name = "created_by")
     private String createdBy;
 

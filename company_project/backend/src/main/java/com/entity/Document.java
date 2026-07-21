@@ -84,7 +84,9 @@ public class Document {
     @Column(name = "vehicle_no")
     private String vehicleNo;
 
-    
+    @Column(name = "division_no")
+    private String divisionNo;
+
     // ── optional — new field ──
     @Column(name = "sap_issue_line_no")
     private String sapIssueLineNo;
