@@ -26,7 +26,7 @@ const emptyForm = (jobType) => ({
   requestedBy: "",
   vehicleNo: "",
   sapIssueLineNo: "",
-  divisionNo: "", // NEW: division selected for this document
+  divisionNo: "",
   requestDate: getCurrentDate(),
   requestTime: getCurrentTime(),
   status: "Draft",
@@ -76,9 +76,9 @@ const DocumentForm = ({ selectedType }) => {
       .finally(() => setEnteredByLoading(false));
   }, []);
 
-  // NEW: unique list of divisions derived from job categories, for the
-  // Division dropdown. Adjust `c.divisionName` below if your job category
-  // objects use a different field name (e.g. c.divisionNo).
+  // Unique list of divisions, derived from job categories — this drives
+  // the FIRST dropdown now. Adjust c.divisionName below if your job
+  // category objects use a different field name.
   const divisionOptions = useMemo(() => {
     const seen = new Set();
     const list = [];
@@ -92,19 +92,38 @@ const DocumentForm = ({ selectedType }) => {
     return list;
   }, [jobCategories]);
 
-  // Auto-suggest division when Job Type changes — only for a NEW document
-  // (not while editing an existing row, so we don't clobber its saved value).
-  useEffect(() => {
-    if (isSummary || editingId) return;
-    const match = jobCategories.find(
-      c => (c.categoryName || "").toLowerCase() === (formData.jobType || "").toLowerCase()
+  // Job Types filtered down to the selected Division. When no division is
+  // selected yet, show nothing (forces the user to pick a division first).
+  const filteredJobTypes = useMemo(() => {
+    if (!formData.divisionNo) return [];
+    return jobCategories.filter(
+      c => (c.divisionName || c.divisionNo) === formData.divisionNo
     );
-    if (match) {
-      const name = match.divisionName || match.divisionNo;
-      if (name) setFormData(prev => ({ ...prev, divisionNo: name }));
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [formData.jobType, isSummary, jobCategories, editingId]);
+  }, [jobCategories, formData.divisionNo]);
+
+  // Entered By people filtered down to the selected Division.
+  // NOTE: assumes each entry in enteredByOptions carries a division field
+  // (divisionName or divisionNo) coming from the Admin → Document/Print By
+  // master setup. If your API doesn't return that field yet, add it there
+  // first — otherwise this filter will always come back empty.
+  const filteredEnteredBy = useMemo(() => {
+    if (!formData.divisionNo) return [];
+    return enteredByOptions.filter(
+      u => (u.divisionName || u.divisionNo) === formData.divisionNo
+    );
+  }, [enteredByOptions, formData.divisionNo]);
+
+  // When Division changes, reset Job Type and Entered By since the old
+  // selections may no longer belong to the newly selected division.
+  const handleDivisionChange = (e) => {
+    const newDivision = e.target.value;
+    setFormData(prev => ({
+      ...prev,
+      divisionNo: newDivision,
+      jobType: "",
+      enteredBy: "",
+    }));
+  };
 
   const effectiveType = formData.jobType || safeSelectedType;
   const effectiveIsSummary = !formData.jobType && isSummary;
@@ -130,6 +149,11 @@ const DocumentForm = ({ selectedType }) => {
   const handleSubmit = async (e) => {
     e.preventDefault();
 
+    if (!formData.divisionNo) {
+      setSaveMsg({ type: "error", text: "Please select a Division before saving." });
+      return;
+    }
+
     if (!formData.jobType) {
       setSaveMsg({ type: "error", text: "Please select a Job Type before saving." });
       return;
@@ -141,7 +165,7 @@ const DocumentForm = ({ selectedType }) => {
     const payload = {
       ...formData,
       jobType: formData.jobType,
-      divisionNo: formData.divisionNo, // NEW: send selected division to backend
+      divisionNo: formData.divisionNo,
       status: editingId ? formData.status : "Print Pending",
     };
 
@@ -174,7 +198,7 @@ const DocumentForm = ({ selectedType }) => {
       requestedBy: row.requestedBy || "",
       vehicleNo: row.vehicleNo || "",
       sapIssueLineNo: row.sapIssueLineNo || "",
-      divisionNo: row.divisionNo || "", // NEW: load saved division for edit
+      divisionNo: row.divisionNo || "",
       requestDate: row.requestDate || getCurrentDate(),
       requestTime: row.requestTime || getCurrentTime(),
       status: row.status || "Draft",
@@ -221,6 +245,23 @@ const DocumentForm = ({ selectedType }) => {
         <form onSubmit={handleSubmit} className="docf-form">
           <div className="docf-grid">
 
+            {/* Division — FIRST, drives Job Type + Entered By below */}
+            <div className="docf-field">
+              <label>Division</label>
+              <select
+                name="divisionNo"
+                value={formData.divisionNo}
+                onChange={handleDivisionChange}
+                className="docf-input"
+                disabled={jobCategoriesLoading}
+              >
+                <option value="">-- Select Division --</option>
+                {divisionOptions.map(name => (
+                  <option key={name} value={name}>{name}</option>
+                ))}
+              </select>
+            </div>
+
             <div className="docf-field">
               <label>Job Type</label>
               <select
@@ -228,36 +269,18 @@ const DocumentForm = ({ selectedType }) => {
                 value={formData.jobType}
                 onChange={handleChange}
                 className="docf-input"
-                disabled={jobCategoriesLoading}
+                disabled={jobCategoriesLoading || !formData.divisionNo}
               >
-                <option value="">-- Select Job Type --</option>
-                {formData.jobType && !jobCategories.some(c => c.categoryName === formData.jobType) && (
+                <option value="">
+                  {formData.divisionNo ? "-- Select Job Type --" : "-- Select Division first --"}
+                </option>
+                {formData.jobType && !filteredJobTypes.some(c => c.categoryName === formData.jobType) && (
                   <option value={formData.jobType}>{formData.jobType}</option>
                 )}
-                {jobCategories.map(cat => (
+                {filteredJobTypes.map(cat => (
                   <option key={cat.id} value={cat.categoryName}>
                     {cat.categoryName}
                   </option>
-                ))}
-              </select>
-            </div>
-
-            {/* NEW: Division dropdown */}
-            <div className="docf-field">
-              <label>Division</label>
-              <select
-                name="divisionNo"
-                value={formData.divisionNo}
-                onChange={handleChange}
-                className="docf-input"
-                disabled={jobCategoriesLoading}
-              >
-                <option value="">-- Select Division --</option>
-                {formData.divisionNo && !divisionOptions.includes(formData.divisionNo) && (
-                  <option value={formData.divisionNo}>{formData.divisionNo}</option>
-                )}
-                {divisionOptions.map(name => (
-                  <option key={name} value={name}>{name}</option>
                 ))}
               </select>
             </div>
@@ -293,13 +316,15 @@ const DocumentForm = ({ selectedType }) => {
                 value={formData.enteredBy}
                 onChange={handleChange}
                 className="docf-input"
-                disabled={enteredByLoading}
+                disabled={enteredByLoading || !formData.divisionNo}
               >
-                <option value="">-- Select Entered By --</option>
-                {formData.enteredBy && !enteredByOptions.some(u => (u.name || u.fullName || u.operatorName) === formData.enteredBy) && (
+                <option value="">
+                  {formData.divisionNo ? "-- Select Entered By --" : "-- Select Division first --"}
+                </option>
+                {formData.enteredBy && !filteredEnteredBy.some(u => (u.name || u.fullName || u.operatorName) === formData.enteredBy) && (
                   <option value={formData.enteredBy}>{formData.enteredBy}</option>
                 )}
-                {enteredByOptions.map(u => {
+                {filteredEnteredBy.map(u => {
                   const label = u.name || u.fullName || u.operatorName || "";
                   return (
                     <option key={u.id} value={label}>

@@ -43,9 +43,8 @@ public class ExcelController {
 
         // HEADER ROW — order must match ExcelHelper.excelToDocuments()
         Row row = sheet.createRow(0);
-
-        row.createCell(0).setCellValue("Job Type");
-        row.createCell(1).setCellValue("Division");
+        row.createCell(0).setCellValue("Division");
+        row.createCell(1).setCellValue("Job Type");
         row.createCell(2).setCellValue("Job WBS");
         row.createCell(3).setCellValue("Reservation No");
         row.createCell(4).setCellValue("Customer Name");

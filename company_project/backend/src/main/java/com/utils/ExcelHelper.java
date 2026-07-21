@@ -46,11 +46,13 @@ public class ExcelHelper {
                 // Entered By, Requested By, Vehicle No, SAP Issue Line No,
                 // Request Date, Request Time
 
-                // COLUMN 0 — Job Type
+                // COLUMN 0 — Division
+                doc.setDivisionNo(getCellValue(row.getCell(1)));
+
+                // COLUMN 1 — Job Type
                 doc.setJobType(getCellValue(row.getCell(0)));
 
-                // COLUMN 1 — Division
-                doc.setDivisionNo(getCellValue(row.getCell(1)));
+            
 
                 // COLUMN 2 — Job WBS
                 doc.setJobWBS(getCellValue(row.getCell(2)));
