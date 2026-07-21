@@ -8,7 +8,7 @@ import IssuPrint         from "../Issue_Pick_Portal/IssuePickForm";
 import IssueCheckForm    from "../Issue_Check_Portal/IssueCheckForm";
 import IssueDeliveryForm from "../Issue_Delivery_Portal/IssueDeliveryForm";
 import ConfirmPortal     from "../Confirm_Portal/ConfirmPortal";
-import DocumentForm      from "../Documents_Portal/DocumentForm"; 
+import DocumentForm      from "../Documents_Portal/DocumentForm";
 // NOTE: AdminConfigCenter (old "usersetup" page) removed — replaced by
 // MasterSetupPanel below, which now lives inside this same file and saves
 // everything straight to the database through AdminSetupController.
@@ -132,6 +132,16 @@ function docOperators(doc) {
     doc.requestedBy, doc.enteredBy, doc.printedBy, doc.PrintHandedOverBy,
     doc.printHandedOverBy, doc.pickedBy, doc.checkedBy, doc.deliveredBy,
   ].filter(Boolean);
+}
+
+// Division filter — a document "belongs" to a division if ANY operator
+// who touched it (printer, picker, checker, deliverer) is registered under
+// that division in Master Setup. operatorDivisionMap is name -> divisionNo,
+// built once by merging the 4 operator master tables.
+function docMatchesDivision(doc, divisionNo, operatorDivisionMap) {
+  if (!divisionNo || divisionNo === "ALL") return true;
+  const names = [doc.printedBy, doc.pickedBy, doc.checkedBy, doc.deliveredBy].filter(Boolean);
+  return names.some(n => operatorDivisionMap[n] === divisionNo);
 }
 
 // ── Aggregation ────────────────────────────────────────────────────────────
@@ -291,9 +301,6 @@ function useTick(intervalMs = 1000) {
 }
 
 // ── Icon set ─────────────────────────────────────────────────────────────
-// Minimal, single-weight line icons (no emoji) so the sidebar and the
-// Master Setup tab row read as one deliberate icon language instead of a
-// mix of platform emoji glyphs.
 
 const ICON_PROPS = {
   width: 17, height: 17, viewBox: "0 0 24 24", fill: "none",
@@ -304,9 +311,6 @@ const Icon = {
   dashboard: (p) => (
     <svg {...ICON_PROPS} {...p}><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg>
   ),
-  // Sidebar item "DocumentForm" (key: docentry) uses this icon — was
-  // previously missing, which crashed the Sidebar render with
-  // "Element type is invalid ... got: undefined".
   docentry: (p) => (
     <svg {...ICON_PROPS} {...p}>
       <path d="M7 3h7l4 4v14H7z"/>
@@ -363,8 +367,6 @@ const Icon = {
 };
 
 // ── Sidebar ──────────────────────────────────────────────────────────────
-// "System Config" and "User & Division Setup" removed — replaced by the
-// single "Master Setup" entry, which contains all 10 buttons in one row.
 
 const NAV_ITEMS = [
   { key: "dashboard",   label: "Dashboard",       icon: Icon.dashboard },
@@ -401,7 +403,7 @@ function Sidebar({ active, onSelect, open, onClose }) {
   );
 }
 
-// ── Filter bar ── (unchanged)
+// ── Filter bar ── (now includes a Division filter) ────────────────────────
 
 const RANGE_OPTIONS = [
   { key: "TODAY", label: "Today" },
@@ -411,7 +413,11 @@ const RANGE_OPTIONS = [
   { key: "CUSTOM", label: "Custom" },
 ];
 
-function FilterBar({ range, setRange, fromDate, setFromDate, toDate, setToDate, operator, setOperator, operators }) {
+function FilterBar({
+  range, setRange, fromDate, setFromDate, toDate, setToDate,
+  operator, setOperator, operators,
+  division, setDivision, divisions,
+}) {
   return (
     <div className="adm-filterbar">
       {RANGE_OPTIONS.map(opt => (
@@ -436,6 +442,15 @@ function FilterBar({ range, setRange, fromDate, setFromDate, toDate, setToDate, 
         <option value="ALL">All Operators</option>
         {operators.map(o => <option key={o} value={o}>{o}</option>)}
       </select>
+
+      <select className="adm-operator-select" value={division} onChange={e => setDivision(e.target.value)}>
+        <option value="ALL">All Divisions</option>
+        {divisions.map(d => (
+          <option key={d.id ?? d.divisionNo} value={d.divisionNo}>
+            {d.divisionNo} — {d.divisionName}
+          </option>
+        ))}
+      </select>
     </div>
   );
 }
@@ -444,7 +459,6 @@ function FilterBar({ range, setRange, fromDate, setFromDate, toDate, setToDate, 
 // ── MASTER SETUP PANEL — the 10 buttons in one row, all saving to the DB ──
 // ═══════════════════════════════════════════════════════════════════════
 
-// One shared fetch helper for every master-data endpoint.
 async function apiGet(path) {
   const res = await fetch(`${SETUP_API}${path}`);
   if (!res.ok) throw new Error(`GET ${path} failed: ${res.status}`);
@@ -487,8 +501,8 @@ const SETUP_TABS = [
 ];
 
 // Configuration for the 5 identical "name master" panels (Picker, Print/
-// Document, Check, Delivery, Filed) — same UI, different endpoint/table,
-// exactly as requested ("me pick,print,check,delvery,filing forms same UI").
+// Document, Check, Delivery, Filed) — same UI, different endpoint/table.
+// Each now also carries a Division (divisionNo), saved to the same table.
 const OPERATOR_PANEL_CONFIG = {
   picker: {
     path: "/pickers", nameField: "pickerName", nicField: "nic", nicNameField: "pickerNicName",
@@ -578,7 +592,7 @@ function StaffPanel() {
   );
 }
 
-// ── 2) User Accounts panel (dropdown of staff + login + hashed password + forgot password) ──
+// ── 2) User Accounts panel ──────────────────────────────────────────────
 function UserAccountsPanel() {
   const [staffOptions, setStaffOptions] = useState([]);
   const [rows, setRows] = useState([]);
@@ -701,27 +715,46 @@ function DivisionPanel() {
   );
 }
 
-// ── Generic "operator" master panel — reused for Picker / Print / Check / Delivery / Filed ──
+// ── Generic "operator" master panel — reused for Picker / Print / Check /
+// Delivery / Filed. Now includes a Division dropdown (divisionNo), sourced
+// from the Division master table, and saved onto the same operator row. ──
 function OperatorPanel({ tabKey }) {
   const cfg = OPERATOR_PANEL_CONFIG[tabKey];
   const TabIcon = SETUP_TABS.find(t => t.key === tabKey)?.icon || Icon.staff;
   const [rows, setRows] = useState([]);
-  const [form, setForm] = useState({ name: "", nic: "", nicName: "" });
+  const [divisions, setDivisions] = useState([]);
+  const [form, setForm] = useState({ name: "", nic: "", nicName: "", divisionNo: "" });
   const [editId, setEditId] = useState(null);
   const [err, setErr] = useState(null);
 
-  const load = useCallback(() => { apiGet(cfg.path).then(setRows).catch(e => setErr(e.message)); }, [cfg.path]);
+  const load = useCallback(() => {
+    apiGet(cfg.path).then(setRows).catch(e => setErr(e.message));
+    apiGet("/divisions").then(setDivisions).catch(() => {});
+  }, [cfg.path]);
   useEffect(() => { load(); const id = setInterval(load, AUTO_REFRESH); return () => clearInterval(id); }, [load]);
+
+  // divisionNo -> divisionName, so the table can show both together.
+  const divisionNameByNo = useMemo(() => {
+    const map = {};
+    divisions.forEach(d => { map[d.divisionNo] = d.divisionName; });
+    return map;
+  }, [divisions]);
 
   const submit = async () => {
     try {
       const body = {
-        [cfg.nameField]: form.name, [cfg.nicField]: form.nic, [cfg.nicNameField]: form.nicName, createdBy: "admin",
+        [cfg.nameField]: form.name, [cfg.nicField]: form.nic, [cfg.nicNameField]: form.nicName,
+        divisionNo: form.divisionNo, createdBy: "admin",
       };
       if (editId) await apiPut(`${cfg.path}/${editId}`, body); else await apiPost(cfg.path, body);
-      setForm({ name: "", nic: "", nicName: "" }); setEditId(null); load();
+      setForm({ name: "", nic: "", nicName: "", divisionNo: "" }); setEditId(null); load();
     } catch (e) { setErr(e.message); }
   };
+
+  const displayRows = rows.map(r => ({
+    ...r,
+    divisionLabel: r.divisionNo ? `${r.divisionNo} — ${divisionNameByNo[r.divisionNo] || ""}` : "—",
+  }));
 
   return (
     <div>
@@ -731,15 +764,26 @@ function OperatorPanel({ tabKey }) {
         <input className="adm-config-input" placeholder={cfg.nameLabel} value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} />
         <input className="adm-config-input" placeholder="NIC" value={form.nic} onChange={e => setForm({ ...form, nic: e.target.value })} />
         <input className="adm-config-input" placeholder={cfg.nicNameLabel} value={form.nicName} onChange={e => setForm({ ...form, nicName: e.target.value })} />
+        <select className="adm-operator-select" value={form.divisionNo} onChange={e => setForm({ ...form, divisionNo: e.target.value })}>
+          <option value="">Select division…</option>
+          {divisions.map(d => (
+            <option key={d.id ?? d.divisionNo} value={d.divisionNo}>
+              {d.divisionNo} — {d.divisionName}
+            </option>
+          ))}
+        </select>
       </div>
       <div className="adm-setup-form-row">
         <button className="adm-config-add-btn" onClick={submit}>{editId ? "Update" : "+ Create"}</button>
-        {editId && <button className="adm-xl-clear-btn" onClick={() => { setEditId(null); setForm({ name: "", nic: "", nicName: "" }); }}>Cancel</button>}
+        {editId && <button className="adm-xl-clear-btn" onClick={() => { setEditId(null); setForm({ name: "", nic: "", nicName: "", divisionNo: "" }); }}>Cancel</button>}
       </div>
       <SetupTable
-        rows={rows}
-        cols={[{ key: "id", label: "ID" }, { key: cfg.nameField, label: cfg.nameLabel }, { key: cfg.nicField, label: "NIC" }, { key: cfg.nicNameField, label: cfg.nicNameLabel }, { key: "createdBy", label: "Created By" }]}
-        onEdit={r => { setEditId(r.id); setForm({ name: r[cfg.nameField] || "", nic: r[cfg.nicField] || "", nicName: r[cfg.nicNameField] || "" }); }}
+        rows={displayRows}
+        cols={[
+          { key: "id", label: "ID" }, { key: cfg.nameField, label: cfg.nameLabel }, { key: cfg.nicField, label: "NIC" },
+          { key: cfg.nicNameField, label: cfg.nicNameLabel }, { key: "divisionLabel", label: "Division" }, { key: "createdBy", label: "Created By" },
+        ]}
+        onEdit={r => { setEditId(r.id); setForm({ name: r[cfg.nameField] || "", nic: r[cfg.nicField] || "", nicName: r[cfg.nicNameField] || "", divisionNo: r.divisionNo || "" }); }}
         onDelete={id => apiDelete(`${cfg.path}/${id}`).then(load)}
       />
     </div>
@@ -960,7 +1004,7 @@ function NotificationPanel({ documents }) {
   );
 }
 
-// ── Report panel (unchanged from previous version) ───────────────────────
+// ── Report panel ──────────────────────────────────────────────────────────
 
 function exportJobTypeReport(rows, totalCount) {
   const data = [
@@ -1168,6 +1212,12 @@ export default function AdminDashboard() {
   const [toDate, setToDate]     = useState("");
   const [operator, setOperator] = useState("ALL");
 
+  // ── Division filter state ────────────────────────────────────────────
+  const [division, setDivision] = useState("ALL");
+  const [divisionsList, setDivisionsList] = useState([]);
+  // name -> divisionNo, merged from the 4 operator master tables
+  const [operatorDivisionMap, setOperatorDivisionMap] = useState({});
+
   const [jobTypes, setJobTypes] = useState(loadJobTypes());
 
   const fetchDocuments = useCallback(async (silent = false) => {
@@ -1185,11 +1235,46 @@ export default function AdminDashboard() {
     }
   }, []);
 
+  // Divisions for the FilterBar dropdown.
+  const fetchDivisions = useCallback(async () => {
+    try {
+      const list = await apiGet("/divisions");
+      setDivisionsList(list);
+    } catch (e) { /* non-fatal — filter just shows no divisions */ }
+  }, []);
+
+  // Build the name -> divisionNo lookup by merging Picker, Print, Check,
+  // and Delivery operator master tables (same name across roles keeps
+  // whichever division was fetched last — flag to us if that ever matters).
+  const fetchOperatorDivisions = useCallback(async () => {
+    try {
+      const [pickers, printOps, checkOps, deliveryOps] = await Promise.all([
+        apiGet("/pickers").catch(() => []),
+        apiGet("/print-operators").catch(() => []),
+        apiGet("/check-operators").catch(() => []),
+        apiGet("/delivery-operators").catch(() => []),
+      ]);
+      const map = {};
+      pickers.forEach(p => { if (p.pickerName && p.divisionNo) map[p.pickerName] = p.divisionNo; });
+      printOps.forEach(p => { if (p.operatorName && p.divisionNo) map[p.operatorName] = p.divisionNo; });
+      checkOps.forEach(p => { if (p.operatorName && p.divisionNo) map[p.operatorName] = p.divisionNo; });
+      deliveryOps.forEach(p => { if (p.operatorName && p.divisionNo) map[p.operatorName] = p.divisionNo; });
+      setOperatorDivisionMap(map);
+    } catch (e) { /* non-fatal */ }
+  }, []);
+
   useEffect(() => { fetchDocuments(false); }, [fetchDocuments]);
   useEffect(() => {
     const id = setInterval(() => fetchDocuments(true), AUTO_REFRESH);
     return () => clearInterval(id);
   }, [fetchDocuments]);
+
+  useEffect(() => {
+    fetchDivisions();
+    fetchOperatorDivisions();
+    const id = setInterval(() => { fetchDivisions(); fetchOperatorDivisions(); }, AUTO_REFRESH * 5);
+    return () => clearInterval(id);
+  }, [fetchDivisions, fetchOperatorDivisions]);
 
   const operators = useMemo(() => {
     const set = new Set();
@@ -1201,9 +1286,10 @@ export default function AdminDashboard() {
     return documents.filter(d => {
       if (!inRange(d, range, fromDate, toDate)) return false;
       if (operator !== "ALL" && !docOperators(d).includes(operator)) return false;
+      if (!docMatchesDivision(d, division, operatorDivisionMap)) return false;
       return true;
     });
-  }, [documents, range, fromDate, toDate, operator]);
+  }, [documents, range, fromDate, toDate, operator, division, operatorDivisionMap]);
 
   const activeLabel = NAV_ITEMS.find(n => n.key === activeView)?.label || "Dashboard";
 
@@ -1236,6 +1322,8 @@ export default function AdminDashboard() {
               toDate={toDate} setToDate={setToDate}
               operator={operator} setOperator={setOperator}
               operators={operators}
+              division={division} setDivision={setDivision}
+              divisions={divisionsList}
             />
 
             {loading && <div className="adm-loading">Loading dashboard…</div>}
