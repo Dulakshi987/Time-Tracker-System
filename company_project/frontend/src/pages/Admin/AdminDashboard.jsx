@@ -438,10 +438,10 @@ function FilterBar({
         </>
       )}
 
-      <select className="adm-operator-select" value={operator} onChange={e => setOperator(e.target.value)}>
+      {/* <select className="adm-operator-select" value={operator} onChange={e => setOperator(e.target.value)}>
         <option value="ALL">All Operators</option>
         {operators.map(o => <option key={o} value={o}>{o}</option>)}
-      </select>
+      </select> */}
 
       <select className="adm-operator-select" value={division} onChange={e => setDivision(e.target.value)}>
         <option value="ALL">All Divisions</option>

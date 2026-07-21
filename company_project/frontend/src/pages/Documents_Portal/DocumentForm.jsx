@@ -7,10 +7,6 @@ import {
   fetchDocumentsByType,
   fetchAllDocuments,
   fetchJobCategories,
-  // NOTE: adjust this import to match whatever function your api.js actually
-  // exports for the Admin → "Document/Print By" list (name + NIC). I've
-  // named it fetchEnteredByUsers below — rename this import (and the call
-  // site further down) to match your real service function/endpoint.
   fetchEnteredByUsers,
 } from "../../services/Documents_Portal/api";
 import "./DocumentsForm.css";
@@ -30,32 +26,22 @@ const emptyForm = (jobType) => ({
   requestedBy: "",
   vehicleNo: "",
   sapIssueLineNo: "",
+  divisionNo: "", // NEW: division selected for this document
   requestDate: getCurrentDate(),
   requestTime: getCurrentTime(),
   status: "Draft",
 });
 
 const DocumentForm = ({ selectedType }) => {
-  // Guard against the parent not passing selectedType yet (undefined/null on
-  // first render, before Sidebar's category fetch resolves). Falling back to
-  // "Summary" avoids calling fetchDocumentsByType(undefined), which is what
-  // was causing "undefined Documents (0)" / "No documents yet" even though
-  // rows exist in the DB.
   const safeSelectedType = selectedType || "Summary";
   const isSummary = safeSelectedType === "Summary" || safeSelectedType === "All";
 
   const [formData, setFormData] = useState(emptyForm(isSummary ? "" : safeSelectedType));
   const [editingId, setEditingId] = useState(null);
 
-  const [division, setDivision] = useState(null);
-
-  // Full list of job categories from Admin → Master Setup → Job Category,
-  // used to populate the Job Type dropdown.
   const [jobCategories, setJobCategories] = useState([]);
   const [jobCategoriesLoading, setJobCategoriesLoading] = useState(true);
 
-  // "Entered By" people, set up in Admin → Master Setup → Document/Print By
-  // (name + NIC). Used to populate the Entered By dropdown.
   const [enteredByOptions, setEnteredByOptions] = useState([]);
   const [enteredByLoading, setEnteredByLoading] = useState(true);
 
@@ -67,8 +53,6 @@ const DocumentForm = ({ selectedType }) => {
   const [saving, setSaving] = useState(false);
   const [saveMsg, setSaveMsg] = useState(null);
 
-  // Reset the form (and cancel any in-progress edit) whenever the
-  // selected job category changes.
   useEffect(() => {
     setFormData(emptyForm(isSummary ? "" : safeSelectedType));
     setEditingId(null);
@@ -76,7 +60,6 @@ const DocumentForm = ({ selectedType }) => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [safeSelectedType]);
 
-  // Load all job categories once, for the Job Type dropdown.
   useEffect(() => {
     setJobCategoriesLoading(true);
     fetchJobCategories()
@@ -85,9 +68,6 @@ const DocumentForm = ({ selectedType }) => {
       .finally(() => setJobCategoriesLoading(false));
   }, []);
 
-  // Load the "Document/Print By" people list once, for the Entered By
-  // dropdown. Rename fetchEnteredByUsers (import + here) to your real
-  // service function if it's called something else.
   useEffect(() => {
     setEnteredByLoading(true);
     fetchEnteredByUsers()
@@ -96,25 +76,39 @@ const DocumentForm = ({ selectedType }) => {
       .finally(() => setEnteredByLoading(false));
   }, []);
 
-  // Look up which division the currently selected job type belongs to.
+  // NEW: unique list of divisions derived from job categories, for the
+  // Division dropdown. Adjust `c.divisionName` below if your job category
+  // objects use a different field name (e.g. c.divisionNo).
+  const divisionOptions = useMemo(() => {
+    const seen = new Set();
+    const list = [];
+    jobCategories.forEach(c => {
+      const name = c.divisionName || c.divisionNo;
+      if (name && !seen.has(name)) {
+        seen.add(name);
+        list.push(name);
+      }
+    });
+    return list;
+  }, [jobCategories]);
+
+  // Auto-suggest division when Job Type changes — only for a NEW document
+  // (not while editing an existing row, so we don't clobber its saved value).
   useEffect(() => {
-    if (isSummary) { setDivision(null); return; }
+    if (isSummary || editingId) return;
     const match = jobCategories.find(
       c => (c.categoryName || "").toLowerCase() === (formData.jobType || "").toLowerCase()
     );
-    setDivision(match ? match.divisionName : null);
-  }, [formData.jobType, isSummary, jobCategories]);
+    if (match) {
+      const name = match.divisionName || match.divisionNo;
+      if (name) setFormData(prev => ({ ...prev, divisionNo: name }));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [formData.jobType, isSummary, jobCategories, editingId]);
 
-  // Which type actually drives the table: the form's own Job Type dropdown
-  // takes priority (so picking a type there filters the table below), and
-  // only falls back to the sidebar's selectedType/Summary when the dropdown
-  // is empty.
   const effectiveType = formData.jobType || safeSelectedType;
   const effectiveIsSummary = !formData.jobType && isSummary;
 
-  // Load the table of existing documents for the effective job type
-  // (or every document, when nothing specific is selected). Guarded so it
-  // never fires with an invalid/undefined type.
   const loadRows = useCallback(() => {
     setRowsLoading(true);
     const req = effectiveIsSummary
@@ -146,9 +140,8 @@ const DocumentForm = ({ selectedType }) => {
 
     const payload = {
       ...formData,
-      // Always send whatever is actually selected in the Job Type dropdown,
-      // not the sidebar's (possibly stale/undefined) selectedType.
       jobType: formData.jobType,
+      divisionNo: formData.divisionNo, // NEW: send selected division to backend
       status: editingId ? formData.status : "Print Pending",
     };
 
@@ -181,6 +174,7 @@ const DocumentForm = ({ selectedType }) => {
       requestedBy: row.requestedBy || "",
       vehicleNo: row.vehicleNo || "",
       sapIssueLineNo: row.sapIssueLineNo || "",
+      divisionNo: row.divisionNo || "", // NEW: load saved division for edit
       requestDate: row.requestDate || getCurrentDate(),
       requestTime: row.requestTime || getCurrentTime(),
       status: row.status || "Draft",
@@ -203,8 +197,6 @@ const DocumentForm = ({ selectedType }) => {
     }
   };
 
-
-
   const filteredRows = useMemo(() => {
     if (!search.trim()) return rows;
     const s = search.trim().toLowerCase();
@@ -218,156 +210,171 @@ const DocumentForm = ({ selectedType }) => {
 
   return (
     <div className="docf-page">
-
       <div className="docf-card">
-          <div className="docf-card-header">
-            <div>
-              <h2 className="docf-title">{isSummary ? "Document" : `${safeSelectedType} Document`}</h2>
-              {division && <div className="docf-division-pill">Division: {division}</div>}
+        <div className="docf-card-header">
+          <div>
+            <h2 className="docf-title">{isSummary ? "Document" : `${safeSelectedType} Document`}</h2>
+          </div>
+          <ExcelUpload onUploaded={loadRows} />
+        </div>
+
+        <form onSubmit={handleSubmit} className="docf-form">
+          <div className="docf-grid">
+
+            <div className="docf-field">
+              <label>Job Type</label>
+              <select
+                name="jobType"
+                value={formData.jobType}
+                onChange={handleChange}
+                className="docf-input"
+                disabled={jobCategoriesLoading}
+              >
+                <option value="">-- Select Job Type --</option>
+                {formData.jobType && !jobCategories.some(c => c.categoryName === formData.jobType) && (
+                  <option value={formData.jobType}>{formData.jobType}</option>
+                )}
+                {jobCategories.map(cat => (
+                  <option key={cat.id} value={cat.categoryName}>
+                    {cat.categoryName}
+                  </option>
+                ))}
+              </select>
             </div>
 
-            <ExcelUpload onUploaded={loadRows} />
+            {/* NEW: Division dropdown */}
+            <div className="docf-field">
+              <label>Division</label>
+              <select
+                name="divisionNo"
+                value={formData.divisionNo}
+                onChange={handleChange}
+                className="docf-input"
+                disabled={jobCategoriesLoading}
+              >
+                <option value="">-- Select Division --</option>
+                {formData.divisionNo && !divisionOptions.includes(formData.divisionNo) && (
+                  <option value={formData.divisionNo}>{formData.divisionNo}</option>
+                )}
+                {divisionOptions.map(name => (
+                  <option key={name} value={name}>{name}</option>
+                ))}
+              </select>
+            </div>
+
+            <div className="docf-field">
+              <label>Job WBS</label>
+              <input
+                type="text" name="jobWBS" placeholder="Job WBS"
+                value={formData.jobWBS} onChange={handleChange} className="docf-input"
+              />
+            </div>
+
+            <div className="docf-field">
+              <label>Reservation No</label>
+              <input
+                type="text" name="reservationNo" placeholder="Reservation No"
+                value={formData.reservationNo} onChange={handleChange} className="docf-input"
+              />
+            </div>
+
+            <div className="docf-field">
+              <label>Customer Name</label>
+              <input
+                type="text" name="customerName" placeholder="Customer Name"
+                value={formData.customerName} onChange={handleChange} className="docf-input"
+              />
+            </div>
+
+            <div className="docf-field">
+              <label>Entered By</label>
+              <select
+                name="enteredBy"
+                value={formData.enteredBy}
+                onChange={handleChange}
+                className="docf-input"
+                disabled={enteredByLoading}
+              >
+                <option value="">-- Select Entered By --</option>
+                {formData.enteredBy && !enteredByOptions.some(u => (u.name || u.fullName || u.operatorName) === formData.enteredBy) && (
+                  <option value={formData.enteredBy}>{formData.enteredBy}</option>
+                )}
+                {enteredByOptions.map(u => {
+                  const label = u.name || u.fullName || u.operatorName || "";
+                  return (
+                    <option key={u.id} value={label}>
+                      {label}{u.nic ? ` — ${u.nic}` : ""}
+                    </option>
+                  );
+                })}
+              </select>
+            </div>
+
+            <div className="docf-field">
+              <label>Requested By</label>
+              <input
+                type="text" name="requestedBy" placeholder="Requested By"
+                value={formData.requestedBy} onChange={handleChange} className="docf-input"
+              />
+            </div>
+
+            <div className="docf-field">
+              <label>Request Vehicle No <span className="docf-optional">(optional)</span></label>
+              <input
+                type="text" name="vehicleNo" placeholder="Vehicle No"
+                value={formData.vehicleNo} onChange={handleChange} className="docf-input"
+              />
+            </div>
+
+            <div className="docf-field">
+              <label>SAP Issue Line No <span className="docf-optional">(optional)</span></label>
+              <input
+                type="text" name="sapIssueLineNo" placeholder="SAP Issue Line No"
+                value={formData.sapIssueLineNo} onChange={handleChange} className="docf-input"
+              />
+            </div>
+
+            <div className="docf-field">
+              <label>Request Date</label>
+              <input
+                type="date" name="requestDate"
+                value={formData.requestDate} onChange={handleChange} className="docf-input"
+              />
+            </div>
+
+            <div className="docf-field">
+              <label>Request Time</label>
+              <input
+                type="time" name="requestTime"
+                value={formData.requestTime} onChange={handleChange} className="docf-input"
+              />
+            </div>
+
+            <div className="docf-field">
+              <label>Status</label>
+              <input type="text" value={formData.status} readOnly className="docf-input docf-input-readonly docf-status-input" />
+            </div>
+
           </div>
 
-          <form onSubmit={handleSubmit} className="docf-form">
-            <div className="docf-grid">
-
-              <div className="docf-field">
-                <label>Job Type</label>
-                <select
-                  name="jobType"
-                  value={formData.jobType}
-                  onChange={handleChange}
-                  className="docf-input"
-                  disabled={jobCategoriesLoading}
-                >
-                  <option value="">-- Select Job Type --</option>
-                  {/* keep current value selectable even if it's not (yet) in the fetched list */}
-                  {formData.jobType && !jobCategories.some(c => c.categoryName === formData.jobType) && (
-                    <option value={formData.jobType}>{formData.jobType}</option>
-                  )}
-                  {jobCategories.map(cat => (
-                    <option key={cat.id} value={cat.categoryName}>
-                      {cat.categoryName}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="docf-field">
-                <label>Job WBS</label>
-                <input
-                  type="text" name="jobWBS" placeholder="Job WBS"
-                  value={formData.jobWBS} onChange={handleChange} className="docf-input"
-                />
-              </div>
-
-              <div className="docf-field">
-                <label>Reservation No</label>
-                <input
-                  type="text" name="reservationNo" placeholder="Reservation No"
-                  value={formData.reservationNo} onChange={handleChange} className="docf-input"
-                />
-              </div>
-
-              <div className="docf-field">
-                <label>Customer Name</label>
-                <input
-                  type="text" name="customerName" placeholder="Customer Name"
-                  value={formData.customerName} onChange={handleChange} className="docf-input"
-                />
-              </div>
-
-              <div className="docf-field">
-                <label>Entered By</label>
-                <select
-                  name="enteredBy"
-                  value={formData.enteredBy}
-                  onChange={handleChange}
-                  className="docf-input"
-                  disabled={enteredByLoading}
-                >
-                  <option value="">-- Select Entered By --</option>
-                  {/* keep current value selectable even if it's not (yet) in the fetched list */}
-                  {formData.enteredBy && !enteredByOptions.some(u => (u.name || u.fullName || u.operatorName) === formData.enteredBy) && (
-                    <option value={formData.enteredBy}>{formData.enteredBy}</option>
-                  )}
-                  {enteredByOptions.map(u => {
-                    const label = u.name || u.fullName || u.operatorName || "";
-                    return (
-                      <option key={u.id} value={label}>
-                        {label}{u.nic ? ` — ${u.nic}` : ""}
-                      </option>
-                    );
-                  })}
-                </select>
-              </div>
-
-              <div className="docf-field">
-                <label>Requested By</label>
-                <input
-                  type="text" name="requestedBy" placeholder="Requested By"
-                  value={formData.requestedBy} onChange={handleChange} className="docf-input"
-                />
-              </div>
-
-              <div className="docf-field">
-                <label>Request Vehicle No <span className="docf-optional">(optional)</span></label>
-                <input
-                  type="text" name="vehicleNo" placeholder="Vehicle No"
-                  value={formData.vehicleNo} onChange={handleChange} className="docf-input"
-                />
-              </div>
-
-              <div className="docf-field">
-                <label>SAP Issue Line No <span className="docf-optional">(optional)</span></label>
-                <input
-                  type="text" name="sapIssueLineNo" placeholder="SAP Issue Line No"
-                  value={formData.sapIssueLineNo} onChange={handleChange} className="docf-input"
-                />
-              </div>
-
-              <div className="docf-field">
-                <label>Request Date</label>
-                <input
-                  type="date" name="requestDate"
-                  value={formData.requestDate} onChange={handleChange} className="docf-input"
-                />
-              </div>
-
-              <div className="docf-field">
-                <label>Request Time</label>
-                <input
-                  type="time" name="requestTime"
-                  value={formData.requestTime} onChange={handleChange} className="docf-input"
-                />
-              </div>
-
-              <div className="docf-field">
-                <label>Status</label>
-                <input type="text" value={formData.status} readOnly className="docf-input docf-input-readonly docf-status-input" />
-              </div>
-
+          {saveMsg && (
+            <div className={`docf-message ${saveMsg.type === "error" ? "error" : "ok"}`}>
+              {saveMsg.text}
             </div>
+          )}
 
-            {saveMsg && (
-              <div className={`docf-message ${saveMsg.type === "error" ? "error" : "ok"}`}>
-                {saveMsg.text}
-              </div>
-            )}
-
-            <div className="docf-form-actions">
-              <button type="submit" className="docf-btn docf-btn-primary" disabled={saving}>
-                {saving ? "Saving…" : editingId ? "Update Document" : "Save Document"}
+          <div className="docf-form-actions">
+            <button type="submit" className="docf-btn docf-btn-primary" disabled={saving}>
+              {saving ? "Saving…" : editingId ? "Update Document" : "Save Document"}
+            </button>
+            {editingId && (
+              <button type="button" className="docf-btn docf-btn-ghost" onClick={cancelEdit}>
+                Cancel Edit
               </button>
-              {editingId && (
-                <button type="button" className="docf-btn docf-btn-ghost" onClick={cancelEdit}>
-                  Cancel Edit
-                </button>
-              )}
-            </div>
-          </form>
-        </div>
+            )}
+          </div>
+        </form>
+      </div>
 
       <div className="docf-card">
         <div className="docf-table-header">
@@ -390,6 +397,7 @@ const DocumentForm = ({ selectedType }) => {
                 <tr>
                   <th>ID</th>
                   <th>Job Type</th>
+                  <th>Division</th>
                   <th>WBS</th>
                   <th>Reservation No</th>
                   <th>Customer</th>
@@ -405,11 +413,12 @@ const DocumentForm = ({ selectedType }) => {
               </thead>
               <tbody>
                 {filteredRows.length === 0 ? (
-                  <tr><td colSpan={13} className="docf-empty-row">No documents yet</td></tr>
+                  <tr><td colSpan={14} className="docf-empty-row">No documents yet</td></tr>
                 ) : filteredRows.map(row => (
                   <tr key={row.id}>
                     <td>{row.id}</td>
                     <td>{row.jobType}</td>
+                    <td>{row.divisionNo || "—"}</td>
                     <td>{row.jobwbs || row.jobWBS || "—"}</td>
                     <td>{row.reservationNo || "—"}</td>
                     <td>{row.customerName || "—"}</td>

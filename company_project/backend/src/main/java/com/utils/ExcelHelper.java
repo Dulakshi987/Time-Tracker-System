@@ -15,6 +15,13 @@ import java.util.List;
 
 public class ExcelHelper {
 
+    // Reused for every cell so the value comes back exactly as Excel
+    // displays it — this is what fixes both the "Requested By becomes a
+    // number" issue and the "Request Time comes out wrong" issue, since it
+    // respects whatever format (Text / Number / Time / Date) is applied to
+    // the cell instead of us guessing based on cell.getCellType().
+    private static final DataFormatter FORMATTER = new DataFormatter();
+
     public static List<Document> excelToDocuments(
             InputStream is
     ) {
@@ -34,6 +41,11 @@ public class ExcelHelper {
 
                 // SKIP HEADER
                 if (row.getRowNum() == 0) {
+                    continue;
+                }
+
+                // skip fully blank rows (common at the end of a sheet)
+                if (isRowEmpty(row)) {
                     continue;
                 }
 
@@ -65,6 +77,9 @@ public class ExcelHelper {
                 );
 
                 // COLUMN 5 — Requested By
+                // Force-read as text via DataFormatter so a numeric-looking
+                // value (e.g. a phone number or NIC) never gets mangled
+                // into scientific notation or loses leading zeros.
                 doc.setRequestedBy(
                         getCellValue(row.getCell(5))
                 );
@@ -87,7 +102,9 @@ public class ExcelHelper {
                 );
 
                 doc.setRequestTime(
-                        LocalTime.now().toString()
+                        LocalTime.now()
+                                .toString()
+                                .substring(0, 5) // trim to HH:mm, matching the <input type="time"> field in the form
                 );
 
                 doc.setStatus("Print Pending");
@@ -106,34 +123,27 @@ public class ExcelHelper {
     }
 
     // ==================================
-    // HANDLE ALL CELL TYPES
+    // HANDLE ALL CELL TYPES — via DataFormatter, so every cell (STRING,
+    // NUMERIC, DATE, BOOLEAN, FORMULA, BLANK) comes back as the text a
+    // human would actually see in Excel, not a re-derived Java value.
     // ==================================
 
-    private static String getCellValue(
-            Cell cell
-    ) {
-
+    private static String getCellValue(Cell cell) {
         if (cell == null) {
             return "";
         }
+        return FORMATTER.formatCellValue(cell).trim();
+    }
 
-        switch (cell.getCellType()) {
-
-            case STRING:
-                return cell.getStringCellValue();
-
-            case NUMERIC:
-                return String.valueOf(
-                        (long) cell.getNumericCellValue()
-                );
-
-            case BOOLEAN:
-                return String.valueOf(
-                        cell.getBooleanCellValue()
-                );
-
-            default:
-                return "";
+    private static boolean isRowEmpty(Row row) {
+        for (int c = row.getFirstCellNum(); c < row.getLastCellNum(); c++) {
+            Cell cell = row.getCell(c);
+            if (cell != null
+                    && cell.getCellType() != CellType.BLANK
+                    && !getCellValue(cell).isEmpty()) {
+                return false;
+            }
         }
+        return true;
     }
 }
