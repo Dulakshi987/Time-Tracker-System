@@ -105,6 +105,7 @@ public class AdminSetupService {
         existing.setPickerName(p.getPickerName());
         existing.setNic(p.getNic());
         existing.setPickerNicName(p.getPickerNicName());
+        existing.setDivisionNo(p.getDivisionNo());
         return pickerRepo.save(existing);
     }
     public void deletePicker(Long id) { pickerRepo.deleteById(id); }
@@ -117,6 +118,7 @@ public class AdminSetupService {
         existing.setOperatorName(p.getOperatorName());
         existing.setNic(p.getNic());
         existing.setOperatorNicName(p.getOperatorNicName());
+        existing.setDivisionNo(p.getDivisionNo());
         return printRepo.save(existing);
     }
     public void deletePrintOperator(Long id) { printRepo.deleteById(id); }
@@ -129,6 +131,7 @@ public class AdminSetupService {
         existing.setOperatorName(c.getOperatorName());
         existing.setNic(c.getNic());
         existing.setOperatorNicName(c.getOperatorNicName());
+        existing.setDivisionNo(c.getDivisionNo());
         return checkRepo.save(existing);
     }
     public void deleteCheckOperator(Long id) { checkRepo.deleteById(id); }
@@ -141,6 +144,7 @@ public class AdminSetupService {
         existing.setOperatorName(d.getOperatorName());
         existing.setNic(d.getNic());
         existing.setOperatorNicName(d.getOperatorNicName());
+        existing.setDivisionNo(d.getDivisionNo());
         return deliveryRepo.save(existing);
     }
     public void deleteDeliveryOperator(Long id) { deliveryRepo.deleteById(id); }
@@ -153,6 +157,7 @@ public class AdminSetupService {
         existing.setOperatorName(f.getOperatorName());
         existing.setNic(f.getNic());
         existing.setOperatorNicName(f.getOperatorNicName());
+        existing.setDivisionNo(f.getDivisionNo());
         return fileOperatorRepo.save(existing);
     }
     public void deleteFileOperator(Long id) { fileOperatorRepo.deleteById(id); }

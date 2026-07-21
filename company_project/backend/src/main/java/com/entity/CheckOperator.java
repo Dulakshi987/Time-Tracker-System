@@ -27,6 +27,9 @@ public class CheckOperator {
     @Column(name = "created_by")
     private String createdBy;
 
+    @Column(name = "division_no")
+    private String divisionNo;
+
     @Column(name = "created_at")
     private LocalDateTime createdAt = LocalDateTime.now();
 }
