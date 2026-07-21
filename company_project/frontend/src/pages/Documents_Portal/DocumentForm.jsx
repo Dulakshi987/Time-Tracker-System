@@ -387,11 +387,13 @@ const DocumentForm = ({ selectedType }) => {
                 <option value="">
                   {formData.divisionNo ? "-- Select Entered By --" : "-- Select Division first --"}
                 </option>
-                {formData.enteredBy && !filteredEnteredBy.some(u => (u.name || u.fullName || u.operatorName) === formData.enteredBy) && (
+                {formData.enteredBy && !filteredEnteredBy.some(u => (u.operatorNicName || u.name || u.fullName || u.operatorName) === formData.enteredBy) && (
                   <option value={formData.enteredBy}>{formData.enteredBy}</option>
                 )}
                 {filteredEnteredBy.map(u => {
-                  const label = u.name || u.fullName || u.operatorName || "";
+                  // Document/Print operators master: show the NIC Name
+                  // (operatorNicName), not the plain operator name.
+                  const label = u.operatorNicName || u.name || u.fullName || u.operatorName || "";
                   return (
                     <option key={u.id} value={label}>
                       {label}{u.nic ? ` — ${u.nic}` : ""}
