@@ -47,10 +47,10 @@ public class ExcelHelper {
                 // Request Date, Request Time
 
                 // COLUMN 0 — Division
-                doc.setDivisionNo(getCellValue(row.getCell(1)));
+                doc.setDivisionNo(getCellValue(row.getCell(0)));
 
                 // COLUMN 1 — Job Type
-                doc.setJobType(getCellValue(row.getCell(0)));
+                doc.setJobType(getCellValue(row.getCell(1)));
 
             
 
