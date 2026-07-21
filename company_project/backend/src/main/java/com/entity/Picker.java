@@ -25,6 +25,9 @@ public class Picker {
     @Column(name = "picker_nic_name")
     private String pickerNicName;
 
+    @Column(name = "division_no")
+    private String divisionNo;
+
     @Column(name = "created_by")
     private String createdBy;
 
