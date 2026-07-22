@@ -35,4 +35,5 @@ public class PrintOperator {
     private LocalDateTime createdAt = LocalDateTime.now();
 }
 
-interface PrintOperatorRepository extends JpaRepository<PrintOperator, Long> {}
+interface PrintOperatorRepository extends JpaRepository<PrintOperator, Long> {
+}

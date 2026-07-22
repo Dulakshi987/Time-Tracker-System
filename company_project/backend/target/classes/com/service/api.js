@@ -51,6 +51,13 @@ export const fetchDocumentsByType = (type) =>
 export const fetchJobCategories = () =>
   API.get("/admin-setup/job-categories");
 
+
+// ================= DIVISIONS (Admin → Master Setup → Division) =================
+// Matches AdminSetupController: @GetMapping("/divisions") under /api/admin-setup
+// This is what drives DocumentForm.jsx's Division dropdown (divisionNo/divisionName).
+export const fetchDivisions = () =>
+  API.get("/admin-setup/divisions");
+
 // ================= ENTERED BY (Admin → Master Setup → Print / Document Operator) =================
 // This is the "Document/Print By" list you described — it matches the
 // "Print / Document Operator" section in AdminSetupController:
