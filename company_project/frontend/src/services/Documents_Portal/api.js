@@ -57,3 +57,8 @@ export const fetchJobCategories = () =>
 // @GetMapping("/print-operators") under /api/admin-setup
 export const fetchEnteredByUsers = () =>
   API.get("/admin-setup/print-operators");
+
+// ================= ENTERED BY — DIVISION FILTERED (PrintOperator table) =================
+// baseURL already ends in /api, so path here must NOT repeat /api.
+export const fetchPrintOperatorsByDivision = (divisionNo) =>
+  API.get(`/print-operators/by-division/${divisionNo}`);

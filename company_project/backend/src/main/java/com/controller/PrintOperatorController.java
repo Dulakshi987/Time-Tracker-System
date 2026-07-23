@@ -10,7 +10,7 @@ import java.util.List;
 
 @RestController
 @RequestMapping("/api/print-operators")
-@CrossOrigin(origins = "http://localhost:5173")
+@CrossOrigin(origins = "https://logitrack-warehouse-system.netlify.app/")
 public class PrintOperatorController {
 
     @Autowired
