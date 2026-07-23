@@ -9,8 +9,11 @@ import java.io.InputStream;
 
 import java.time.LocalDate;
 import java.time.LocalTime;
+import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 
 public class ExcelHelper {
@@ -18,6 +21,17 @@ public class ExcelHelper {
     // Reused for every cell so the value comes back exactly as Excel
     // displays it, regardless of underlying cell type.
     private static final DataFormatter FORMATTER = new DataFormatter();
+
+    // Formats we'll try when the date arrives as plain text instead of
+    // a real Excel date value.
+    private static final List<DateTimeFormatter> DATE_INPUT_FORMATS = Arrays.asList(
+            DateTimeFormatter.ofPattern("yyyy-MM-dd"),
+            DateTimeFormatter.ofPattern("dd/MM/yyyy"),
+            DateTimeFormatter.ofPattern("MM/dd/yyyy"),
+            DateTimeFormatter.ofPattern("dd-MM-yyyy"),
+            DateTimeFormatter.ofPattern("d/M/yyyy"),
+            DateTimeFormatter.ofPattern("M/d/yyyy")
+    );
 
     public static List<Document> excelToDocuments(InputStream is) {
 
@@ -42,7 +56,7 @@ public class ExcelHelper {
                 Document doc = new Document();
 
                 // Column order — must match the template header order:
-                // Job Type, Division, Job WBS, Reservation No, Customer Name,
+                // Division, Job Type, Job WBS, Reservation No, Customer Name,
                 // Entered By, Requested By, Vehicle No, SAP Issue Line No,
                 // Request Date, Request Time
 
@@ -51,8 +65,6 @@ public class ExcelHelper {
 
                 // COLUMN 1 — Job Type
                 doc.setJobType(getCellValue(row.getCell(1)));
-
-            
 
                 // COLUMN 2 — Job WBS
                 doc.setJobWBS(getCellValue(row.getCell(2)));
@@ -76,10 +88,9 @@ public class ExcelHelper {
                 doc.setSapIssueLineNo(getCellValue(row.getCell(8)));
 
                 // COLUMN 9 & 10 — Request Date / Request Time from the
-                // sheet itself. If you'd rather always stamp "now" instead
-                // of trusting the sheet, swap these two lines back to
-                // LocalDate.now()/LocalTime.now() as before.
-                String excelDate = getCellValue(row.getCell(9));
+                // sheet itself. Date is always normalized to yyyy-MM-dd
+                // regardless of how it was typed/formatted in Excel.
+                String excelDate = getDateCellValue(row.getCell(9));
                 String excelTime = getCellValue(row.getCell(10));
 
                 doc.setRequestDate(
@@ -110,6 +121,48 @@ public class ExcelHelper {
             return "";
         }
         return FORMATTER.formatCellValue(cell).trim();
+    }
+
+    /**
+     * Always returns the date as yyyy-MM-dd (e.g. 2026-07-23), no matter
+     * what format the Excel cell was typed in, or how it displays.
+     *
+     * - If the cell is a real Excel date (numeric + date-formatted),
+     *   we read it directly as a date — Excel's display format
+     *   (dd/MM/yyyy, MM-dd-yyyy, etc.) is irrelevant here.
+     * - If the cell is plain text (e.g. someone typed "23/07/2026"),
+     *   we try a list of common formats until one parses successfully.
+     * - If nothing matches, we return the raw text so the bad row is
+     *   visible instead of silently becoming today's date.
+     */
+    private static String getDateCellValue(Cell cell) {
+        if (cell == null) {
+            return "";
+        }
+
+        // Case 1: Excel stored it as a real date value
+        if (cell.getCellType() == CellType.NUMERIC && DateUtil.isCellDateFormatted(cell)) {
+            LocalDate date = cell.getLocalDateTimeCellValue().toLocalDate();
+            return date.format(DateTimeFormatter.ISO_LOCAL_DATE); // yyyy-MM-dd
+        }
+
+        // Case 2: it's plain text — try known formats one by one
+        String raw = FORMATTER.formatCellValue(cell).trim();
+        if (raw.isEmpty()) {
+            return "";
+        }
+
+        for (DateTimeFormatter fmt : DATE_INPUT_FORMATS) {
+            try {
+                LocalDate parsed = LocalDate.parse(raw, fmt);
+                return parsed.format(DateTimeFormatter.ISO_LOCAL_DATE);
+            } catch (DateTimeParseException ignored) {
+                // try the next format
+            }
+        }
+
+        // Couldn't understand it — return as-is so it's visible for correction
+        return raw;
     }
 
     private static boolean isRowEmpty(Row row) {
