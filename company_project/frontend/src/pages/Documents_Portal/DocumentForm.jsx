@@ -463,16 +463,16 @@ const DocumentForm = ({ selectedType }) => {
             onChange={e => handleTableFilterChange("search", e.target.value)}
           />
 
-          <select
+          {/* <select
             className="docf-input docf-table-filter-select"
             value={tableFilters.jobType}
             onChange={e => handleTableFilterChange("jobType", e.target.value)}
           >
             <option value="ALL">All Job Types</option>
             {rowJobTypeOptions.map(t => <option key={t} value={t}>{t}</option>)}
-          </select>
+          </select> */}
 
-          <select
+          {/* <select
             className="docf-input docf-table-filter-select"
             value={tableFilters.divisionNo}
             onChange={e => handleTableFilterChange("divisionNo", e.target.value)}
@@ -483,16 +483,16 @@ const DocumentForm = ({ selectedType }) => {
                 {d.divisionNo} — {d.divisionName}
               </option>
             ))}
-          </select>
+          </select> */}
 
-          <select
+          {/* <select
             className="docf-input docf-table-filter-select"
             value={tableFilters.status}
             onChange={e => handleTableFilterChange("status", e.target.value)}
           >
             <option value="ALL">All Statuses</option>
             {rowStatusOptions.map(s => <option key={s} value={s}>{s}</option>)}
-          </select>
+          </select> */}
 
           {hasActiveTableFilters && (
             <button type="button" className="docf-btn docf-btn-ghost" onClick={clearTableFilters}>
