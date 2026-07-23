@@ -298,3 +298,22 @@
 @media (max-width: 420px) {
   .docf-title { font-size: 1rem; }
 }
+.docf-time-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.docf-time-now-btn {
+  white-space: nowrap;
+  padding: 8px 12px;
+}
+
+.docf-time-digital {
+  display: block;
+  margin-top: 4px;
+  font-family: "Courier New", monospace;
+  font-size: 13px;
+  letter-spacing: 1px;
+  color: #555;
+}
