@@ -59,6 +59,7 @@ public class ExcelController {
         CellStyle textStyle = workbook.createCellStyle();
         DataFormat format = workbook.createDataFormat();
         textStyle.setDataFormat(format.getFormat("@"));
+        sheet.setDefaultColumnStyle(1, textStyle);
         sheet.setDefaultColumnStyle(5, textStyle); // Entered By
         sheet.setDefaultColumnStyle(6, textStyle); // Requested By
 

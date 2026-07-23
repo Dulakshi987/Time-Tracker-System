@@ -64,3 +64,6 @@ export const fetchDivisions = () =>
 // @GetMapping("/print-operators") under /api/admin-setup
 export const fetchEnteredByUsers = () =>
   API.get("/admin-setup/print-operators");
+
+export const fetchPrintOperatorsByDivision = (divisionNo) =>
+  api.get(`/api/print-operators/by-division/${divisionNo}`);

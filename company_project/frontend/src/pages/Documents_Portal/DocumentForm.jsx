@@ -6,10 +6,9 @@ import {
   deleteDocument,
   fetchAllDocuments,
   fetchJobCategories,
-  fetchEnteredByUsers,
-  fetchDivisions, // <-- NEW: must exist in services/Documents_Portal/api.js
-                  //     (see note at bottom of this file / chat message)
-} from "../../services/Documents_Portal/api";
+  fetchPrintOperatorsByDivision, // <-- Division-wise print operator (NIC name) fetch
+  fetchDivisions,
+} from "../../services/api";
 import "./DocumentsForm.css";
 
 const getCurrentDate = () => new Date().toISOString().split("T")[0];
@@ -30,7 +29,7 @@ const emptyForm = (jobType) => ({
   divisionNo: "", // holds the DIVISION CODE (e.g. "D01"), not the name
   requestDate: getCurrentDate(),
   requestTime: getCurrentTime(),
-  status: "Draft",
+  status: "Not Started", // no Division selected yet
 });
 
 // Table-side filters live completely separately from the form's filters.
@@ -93,13 +92,21 @@ const DocumentForm = ({ selectedType }) => {
       .finally(() => setJobCategoriesLoading(false));
   }, []);
 
+  // Entered By dropdown — division-scoped. The moment a Division is
+  // selected, fetch ONLY the print operators (NIC names) belonging to
+  // that division straight from the backend. No client-side filtering
+  // needed since the API already scopes it.
   useEffect(() => {
+    if (!formData.divisionNo) {
+      setEnteredByOptions([]);
+      return;
+    }
     setEnteredByLoading(true);
-    fetchEnteredByUsers()
+    fetchPrintOperatorsByDivision(formData.divisionNo)
       .then(res => setEnteredByOptions(res.data || []))
       .catch(() => setEnteredByOptions([]))
       .finally(() => setEnteredByLoading(false));
-  }, []);
+  }, [formData.divisionNo]);
 
   // divisionNo -> divisionName lookup, needed because Job Categories are
   // stored against divisionName (not divisionNo).
@@ -118,16 +125,14 @@ const DocumentForm = ({ selectedType }) => {
     return jobCategories.filter(c => c.divisionName === divisionName);
   }, [jobCategories, formData.divisionNo, divisionNoToName]);
 
-  // Entered By people filtered down to the selected Division.
-  // Print / Document operators (Master Setup) store divisionNo directly,
-  // so this is now a direct code-to-code match — no more name-vs-code bug.
-  const filteredEnteredBy = useMemo(() => {
-    if (!formData.divisionNo) return [];
-    return enteredByOptions.filter(u => u.divisionNo === formData.divisionNo);
-  }, [enteredByOptions, formData.divisionNo]);
+  // Already scoped by the backend call above — kept as its own name so
+  // the JSX below doesn't need to change.
+  const filteredEnteredBy = enteredByOptions;
 
   // When Division changes, reset Job Type and Entered By since the old
   // selections may no longer belong to the newly selected division.
+  // Status also moves out of "Not Started" the moment a division is
+  // picked, so the row visibly shows work has begun.
   const handleDivisionChange = (e) => {
     const newDivision = e.target.value;
     setFormData(prev => ({
@@ -135,6 +140,7 @@ const DocumentForm = ({ selectedType }) => {
       divisionNo: newDivision,
       jobType: "",
       enteredBy: "",
+      status: newDivision ? "Document Entry Pending" : "Not Started",
     }));
   };
 
@@ -375,6 +381,9 @@ const DocumentForm = ({ selectedType }) => {
               />
             </div>
 
+            {/* Entered By — scoped to the selected Division. Options are
+                PrintOperator NIC names (operatorNicName), fetched fresh
+                every time the Division changes (see effect above). */}
             <div className="docf-field">
               <label>Entered By</label>
               <select
@@ -391,7 +400,7 @@ const DocumentForm = ({ selectedType }) => {
                   <option value={formData.enteredBy}>{formData.enteredBy}</option>
                 )}
                 {filteredEnteredBy.map(u => {
-                  // Document/Print operators master: show the NIC Name
+                  // Print operators master: show the NIC Name
                   // (operatorNicName), not the plain operator name.
                   const label = u.operatorNicName || u.name || u.fullName || u.operatorName || "";
                   return (
@@ -435,12 +444,33 @@ const DocumentForm = ({ selectedType }) => {
               />
             </div>
 
+            {/* Request Time — the <input type="time"> value is always a
+                24-hour "HH:mm" digital string under the hood regardless
+                of the browser's own AM/PM display. The row below just
+                makes that digital value visible, plus a quick "Now"
+                shortcut. */}
             <div className="docf-field">
               <label>Request Time</label>
-              <input
-                type="time" name="requestTime"
-                value={formData.requestTime} onChange={handleChange} className="docf-input"
-              />
+              <div className="docf-time-row">
+                <input
+                  type="time"
+                  name="requestTime"
+                  step="60"
+                  value={formData.requestTime}
+                  onChange={handleChange}
+                  className="docf-input"
+                />
+                <button
+                  type="button"
+                  className="docf-btn docf-btn-ghost docf-time-now-btn"
+                  onClick={() =>
+                    setFormData(prev => ({ ...prev, requestTime: getCurrentTime() }))
+                  }
+                >
+                  Now
+                </button>
+              </div>
+              <span className="docf-time-digital">{formData.requestTime || "--:--"}</span>
             </div>
 
             <div className="docf-field">
