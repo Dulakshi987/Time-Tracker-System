@@ -8,7 +8,7 @@ import {
   fetchJobCategories,
   fetchPrintOperatorsByDivision,
   fetchDivisions,
-} from "../../service/api";
+} from "../../services/api";
 import "./DocumentsForm.css";
 
 const getCurrentDate = () => new Date().toISOString().split("T")[0];
