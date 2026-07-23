@@ -3,6 +3,7 @@ package com.controller.Documents_Portal;
 import com.entity.Document;
 import com.repository.DocumentRepository;
 import com.utils.ExcelHelper;
+import com.utils.ExcelHelper.ExcelUploadResult;
 
 import jakarta.servlet.http.HttpServletResponse;
 
@@ -20,6 +21,7 @@ import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 
 import java.io.InputStream;
 import java.util.List;
+import java.util.Map;
 
 @RestController
 @RequestMapping("/api/excel")
@@ -88,13 +90,41 @@ public class ExcelController {
 
             InputStream is = file.getInputStream();
 
-            List<Document> docs = ExcelHelper.excelToDocuments(is);
+            ExcelUploadResult result = ExcelHelper.excelToDocuments(is);
 
-            System.out.println("TOTAL DOCS = " + docs.size());
+            List<Document> docs = result.getDocuments();
+            List<String> errors = result.getErrors();
+
+            System.out.println("VALID DOCS = " + docs.size());
+            System.out.println("ROW ERRORS = " + errors.size());
+
+            // Reject the whole file if ANY row failed validation (e.g. a
+            // Reservation No that isn't exactly 8 digits). This forces the
+            // user to fix the Excel file and re-upload, rather than
+            // silently saving only the good rows.
+            if (!errors.isEmpty()) {
+                return ResponseEntity.badRequest().body(
+                        Map.of(
+                                "message", "Excel upload failed validation. Please fix the errors below and re-upload.",
+                                "errors", errors
+                        )
+                );
+            }
+
+            if (docs.isEmpty()) {
+                return ResponseEntity.badRequest().body(
+                        Map.of("message", "No valid rows found in the uploaded file.")
+                );
+            }
 
             repository.saveAll(docs);
 
-            return ResponseEntity.ok("Excel Uploaded Successfully");
+            return ResponseEntity.ok(
+                    Map.of(
+                            "message", "Excel Uploaded Successfully",
+                            "count", docs.size()
+                    )
+            );
 
         } catch (Exception e) {
             e.printStackTrace();

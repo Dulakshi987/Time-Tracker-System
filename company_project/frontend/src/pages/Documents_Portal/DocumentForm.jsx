@@ -17,6 +17,11 @@ const getCurrentTime = () => {
   return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 };
 
+// Reservation No must be exactly 8 digits, numbers only
+const RESERVATION_NO_LENGTH = 8;
+const isValidReservationNo = (value) =>
+  new RegExp(`^\\d{${RESERVATION_NO_LENGTH}}$`).test(value || "");
+
 const emptyForm = (jobType) => ({
   jobType: jobType || "",
   jobWBS: "",
@@ -63,10 +68,14 @@ const DocumentForm = ({ selectedType }) => {
   const [saving, setSaving] = useState(false);
   const [saveMsg, setSaveMsg] = useState(null);
 
+  // field-level validation errors
+  const [fieldErrors, setFieldErrors] = useState({});
+
   useEffect(() => {
     setFormData(emptyForm(isSummary ? "" : safeSelectedType));
     setEditingId(null);
     setSaveMsg(null);
+    setFieldErrors({});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [safeSelectedType]);
 
@@ -134,7 +143,39 @@ const DocumentForm = ({ selectedType }) => {
   useEffect(() => { loadRows(); }, [loadRows]);
 
   const handleChange = (e) => {
-    setFormData(prev => ({ ...prev, [e.target.name]: e.target.value }));
+    const { name, value } = e.target;
+
+    // Reservation No: allow digits only, max 8 characters
+    if (name === "reservationNo") {
+      const digitsOnly = value.replace(/\D/g, "").slice(0, RESERVATION_NO_LENGTH);
+      setFormData(prev => ({ ...prev, reservationNo: digitsOnly }));
+
+      setFieldErrors(prev => {
+        const next = { ...prev };
+        if (digitsOnly.length === 0) {
+          delete next.reservationNo; // don't show error while empty/untouched
+        } else if (!isValidReservationNo(digitsOnly)) {
+          next.reservationNo = `Reservation No must be exactly ${RESERVATION_NO_LENGTH} digits.`;
+        } else {
+          delete next.reservationNo;
+        }
+        return next;
+      });
+      return;
+    }
+
+    setFormData(prev => ({ ...prev, [name]: value }));
+  };
+
+  const validateForm = () => {
+    const errors = {};
+
+    if (formData.reservationNo && !isValidReservationNo(formData.reservationNo)) {
+      errors.reservationNo = `Reservation No must be exactly ${RESERVATION_NO_LENGTH} digits (numbers only).`;
+    }
+
+    setFieldErrors(errors);
+    return Object.keys(errors).length === 0;
   };
 
   const handleSubmit = async (e) => {
@@ -147,6 +188,16 @@ const DocumentForm = ({ selectedType }) => {
 
     if (!formData.jobType) {
       setSaveMsg({ type: "error", text: "Please select a Job Type before saving." });
+      return;
+    }
+
+    if (formData.reservationNo && !isValidReservationNo(formData.reservationNo)) {
+      setSaveMsg({ type: "error", text: `Reservation No must be exactly ${RESERVATION_NO_LENGTH} digits (numbers only).` });
+      return;
+    }
+
+    if (!validateForm()) {
+      setSaveMsg({ type: "error", text: "Please fix the highlighted fields before saving." });
       return;
     }
 
@@ -170,6 +221,7 @@ const DocumentForm = ({ selectedType }) => {
       }
       setFormData(emptyForm(isSummary ? "" : safeSelectedType));
       setEditingId(null);
+      setFieldErrors({});
       loadRows();
     } catch (error) {
       setSaveMsg({ type: "error", text: error?.response?.data || error.message || "Save failed" });
@@ -180,6 +232,7 @@ const DocumentForm = ({ selectedType }) => {
 
   const startEdit = (row) => {
     setEditingId(row.id);
+    setFieldErrors({});
     setFormData({
       jobType: row.jobType || safeSelectedType,
       jobWBS: row.jobwbs || row.jobWBS || "",
@@ -199,6 +252,7 @@ const DocumentForm = ({ selectedType }) => {
 
   const cancelEdit = () => {
     setEditingId(null);
+    setFieldErrors({});
     setFormData(emptyForm(isSummary ? "" : safeSelectedType));
   };
 
@@ -338,9 +392,19 @@ const DocumentForm = ({ selectedType }) => {
             <div className="docf-field">
               <label>Reservation No</label>
               <input
-                type="text" name="reservationNo" placeholder="Reservation No"
-                value={formData.reservationNo} onChange={handleChange} className="docf-input"
+                type="text"
+                name="reservationNo"
+                placeholder="8 digit Reservation No"
+                value={formData.reservationNo}
+                onChange={handleChange}
+                className={`docf-input ${fieldErrors.reservationNo ? "docf-input-error" : ""}`}
+                inputMode="numeric"
+                pattern="\d*"
+                maxLength={RESERVATION_NO_LENGTH}
               />
+              {fieldErrors.reservationNo && (
+                <span className="docf-field-error">{fieldErrors.reservationNo}</span>
+              )}
             </div>
 
             <div className="docf-field">
@@ -462,37 +526,6 @@ const DocumentForm = ({ selectedType }) => {
             value={tableFilters.search}
             onChange={e => handleTableFilterChange("search", e.target.value)}
           />
-
-          {/* <select
-            className="docf-input docf-table-filter-select"
-            value={tableFilters.jobType}
-            onChange={e => handleTableFilterChange("jobType", e.target.value)}
-          >
-            <option value="ALL">All Job Types</option>
-            {rowJobTypeOptions.map(t => <option key={t} value={t}>{t}</option>)}
-          </select> */}
-
-          {/* <select
-            className="docf-input docf-table-filter-select"
-            value={tableFilters.divisionNo}
-            onChange={e => handleTableFilterChange("divisionNo", e.target.value)}
-          >
-            <option value="ALL">All Divisions</option>
-            {divisions.map(d => (
-              <option key={d.id ?? d.divisionNo} value={d.divisionNo}>
-                {d.divisionNo} — {d.divisionName}
-              </option>
-            ))}
-          </select> */}
-
-          {/* <select
-            className="docf-input docf-table-filter-select"
-            value={tableFilters.status}
-            onChange={e => handleTableFilterChange("status", e.target.value)}
-          >
-            <option value="ALL">All Statuses</option>
-            {rowStatusOptions.map(s => <option key={s} value={s}>{s}</option>)}
-          </select> */}
 
           {hasActiveTableFilters && (
             <button type="button" className="docf-btn docf-btn-ghost" onClick={clearTableFilters}>

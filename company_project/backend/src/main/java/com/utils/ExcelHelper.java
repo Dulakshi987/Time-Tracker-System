@@ -15,12 +15,19 @@ import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.regex.Pattern;
 
 public class ExcelHelper {
 
     // Reused for every cell so the value comes back exactly as Excel
     // displays it, regardless of underlying cell type.
     private static final DataFormatter FORMATTER = new DataFormatter();
+
+    // Reservation No must be exactly 8 digits, numbers only
+    // (kept in sync with the frontend validation in DocumentForm.jsx)
+    private static final int RESERVATION_NO_LENGTH = 8;
+    private static final Pattern RESERVATION_NO_PATTERN =
+            Pattern.compile("^\\d{" + RESERVATION_NO_LENGTH + "}$");
 
     // Formats we'll try when the date arrives as plain text instead of
     // a real Excel date value.
@@ -44,9 +51,38 @@ public class ExcelHelper {
             DateTimeFormatter.ofPattern("hh:mm:ss a")
     );
 
-    public static List<Document> excelToDocuments(InputStream is) {
+    /**
+     * Result wrapper: holds the documents that passed validation AND the
+     * list of row-level errors (if any) so the caller can decide what to
+     * do (reject the whole batch, save only the valid ones, show the
+     * errors to the user, etc).
+     */
+    public static class ExcelUploadResult {
+        private final List<Document> documents;
+        private final List<String> errors;
+
+        public ExcelUploadResult(List<Document> documents, List<String> errors) {
+            this.documents = documents;
+            this.errors = errors;
+        }
+
+        public List<Document> getDocuments() {
+            return documents;
+        }
+
+        public List<String> getErrors() {
+            return errors;
+        }
+
+        public boolean hasErrors() {
+            return errors != null && !errors.isEmpty();
+        }
+    }
+
+    public static ExcelUploadResult excelToDocuments(InputStream is) {
 
         List<Document> docs = new ArrayList<>();
+        List<String> errors = new ArrayList<>();
 
         try {
             Workbook workbook = new XSSFWorkbook(is);
@@ -61,6 +97,23 @@ public class ExcelHelper {
 
                 // skip fully blank rows
                 if (isRowEmpty(row)) {
+                    continue;
+                }
+
+                // Excel rows are 0-indexed and row 0 is the header, so the
+                // row number a human sees in Excel is getRowNum() + 1.
+                int excelRowNumber = row.getRowNum() + 1;
+
+                // COLUMN 3 — Reservation No (validated BEFORE building the Document)
+                String reservationNo = getCellValue(row.getCell(3));
+
+                if (!isValidReservationNo(reservationNo)) {
+                    errors.add(
+                            "Row " + excelRowNumber + ": Reservation No must be exactly "
+                                    + RESERVATION_NO_LENGTH + " digits (numbers only). Found: \""
+                                    + reservationNo + "\""
+                    );
+                    // skip building/adding this row — it failed validation
                     continue;
                 }
 
@@ -80,8 +133,8 @@ public class ExcelHelper {
                 // COLUMN 2 — Job WBS
                 doc.setJobWBS(getCellValue(row.getCell(2)));
 
-                // COLUMN 3 — Reservation No
-                doc.setReservationNo(getCellValue(row.getCell(3)));
+                // COLUMN 3 — Reservation No (already validated above)
+                doc.setReservationNo(reservationNo);
 
                 // COLUMN 4 — Customer Name
                 doc.setCustomerName(getCellValue(row.getCell(4)));
@@ -124,9 +177,18 @@ public class ExcelHelper {
 
         } catch (Exception e) {
             e.printStackTrace();
+            errors.add("Failed to read Excel file: " + e.getMessage());
         }
 
-        return docs;
+        return new ExcelUploadResult(docs, errors);
+    }
+
+    /**
+     * Reservation No must be exactly 8 digits, numbers only.
+     * Kept as its own method so it stays consistent everywhere it's used.
+     */
+    private static boolean isValidReservationNo(String value) {
+        return value != null && RESERVATION_NO_PATTERN.matcher(value).matches();
     }
 
     private static String getCellValue(Cell cell) {
