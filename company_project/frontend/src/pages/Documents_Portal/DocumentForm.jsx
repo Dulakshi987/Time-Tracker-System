@@ -411,26 +411,14 @@ const DocumentForm = ({ selectedType }) => {
 
             <div className="docf-field">
               <label>Request Time</label>
-              <div className="docf-time-row">
-                <input
-                  type="time"
-                  name="requestTime"
-                  step="60"
-                  value={formData.requestTime}
-                  onChange={handleChange}
-                  className="docf-input"
-                />
-                <button
-                  type="button"
-                  className="docf-btn docf-btn-ghost docf-time-now-btn"
-                  onClick={() =>
-                    setFormData(prev => ({ ...prev, requestTime: getCurrentTime() }))
-                  }
-                >
-                  Now
-                </button>
-              </div>
-              <span className="docf-time-digital">{formData.requestTime || "--:--"}</span>
+              <input
+                type="time"
+                name="requestTime"
+                step="60"
+                value={formData.requestTime}
+                onChange={handleChange}
+                className="docf-input"
+              />
             </div>
 
             <div className="docf-field">
