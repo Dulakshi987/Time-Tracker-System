@@ -6,9 +6,9 @@ import {
   deleteDocument,
   fetchAllDocuments,
   fetchJobCategories,
-  fetchPrintOperatorsByDivision, // <-- Division-wise print operator (NIC name) fetch
+  fetchPrintOperatorsByDivision,
   fetchDivisions,
-} from "../../services/api";
+} from "../../service/api";
 import "./DocumentsForm.css";
 
 const getCurrentDate = () => new Date().toISOString().split("T")[0];
@@ -26,13 +26,12 @@ const emptyForm = (jobType) => ({
   requestedBy: "",
   vehicleNo: "",
   sapIssueLineNo: "",
-  divisionNo: "", // holds the DIVISION CODE (e.g. "D01"), not the name
+  divisionNo: "",
   requestDate: getCurrentDate(),
   requestTime: getCurrentTime(),
-  status: "Not Started", // no Division selected yet
+  status: "Not Started",
 });
 
-// Table-side filters live completely separately from the form's filters.
 const emptyTableFilters = () => ({
   search: "",
   jobType: "ALL",
@@ -47,8 +46,7 @@ const DocumentForm = ({ selectedType }) => {
   const [formData, setFormData] = useState(emptyForm(isSummary ? "" : safeSelectedType));
   const [editingId, setEditingId] = useState(null);
 
-  // ── Master data ─────────────────────────────────────────────────────
-  const [divisions, setDivisions] = useState([]); // [{ id, divisionNo, divisionName, ... }]
+  const [divisions, setDivisions] = useState([]);
   const [divisionsLoading, setDivisionsLoading] = useState(true);
 
   const [jobCategories, setJobCategories] = useState([]);
@@ -57,7 +55,6 @@ const DocumentForm = ({ selectedType }) => {
   const [enteredByOptions, setEnteredByOptions] = useState([]);
   const [enteredByLoading, setEnteredByLoading] = useState(true);
 
-  // ── Table (always shows ALL documents; filtered independently below) ─
   const [rows, setRows] = useState([]);
   const [rowsLoading, setRowsLoading] = useState(true);
   const [rowsError, setRowsError] = useState(null);
@@ -73,9 +70,6 @@ const DocumentForm = ({ selectedType }) => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [safeSelectedType]);
 
-  // Real Division master list — this is the single source of truth for
-  // "which division is this", using divisionNo (the code) as the key,
-  // exactly the way Master Setup / print-operators store it.
   useEffect(() => {
     setDivisionsLoading(true);
     fetchDivisions()
@@ -92,10 +86,6 @@ const DocumentForm = ({ selectedType }) => {
       .finally(() => setJobCategoriesLoading(false));
   }, []);
 
-  // Entered By dropdown — division-scoped. The moment a Division is
-  // selected, fetch ONLY the print operators (NIC names) belonging to
-  // that division straight from the backend. No client-side filtering
-  // needed since the API already scopes it.
   useEffect(() => {
     if (!formData.divisionNo) {
       setEnteredByOptions([]);
@@ -108,31 +98,20 @@ const DocumentForm = ({ selectedType }) => {
       .finally(() => setEnteredByLoading(false));
   }, [formData.divisionNo]);
 
-  // divisionNo -> divisionName lookup, needed because Job Categories are
-  // stored against divisionName (not divisionNo).
   const divisionNoToName = useMemo(() => {
     const map = {};
     divisions.forEach(d => { map[d.divisionNo] = d.divisionName; });
     return map;
   }, [divisions]);
 
-  // Job Types filtered down to the selected Division.
-  // Job Categories store divisionName, so we translate the selected
-  // divisionNo -> divisionName before comparing.
   const filteredJobTypes = useMemo(() => {
     if (!formData.divisionNo) return [];
     const divisionName = divisionNoToName[formData.divisionNo];
     return jobCategories.filter(c => c.divisionName === divisionName);
   }, [jobCategories, formData.divisionNo, divisionNoToName]);
 
-  // Already scoped by the backend call above — kept as its own name so
-  // the JSX below doesn't need to change.
   const filteredEnteredBy = enteredByOptions;
 
-  // When Division changes, reset Job Type and Entered By since the old
-  // selections may no longer belong to the newly selected division.
-  // Status also moves out of "Not Started" the moment a division is
-  // picked, so the row visibly shows work has begun.
   const handleDivisionChange = (e) => {
     const newDivision = e.target.value;
     setFormData(prev => ({
@@ -144,9 +123,6 @@ const DocumentForm = ({ selectedType }) => {
     }));
   };
 
-  // ── Table always loads ALL documents. It is no longer tied to the form's
-  //    division/job-type selection — filtering the visible rows is done
-  //    entirely by the filter bar above the table (tableFilters). ─────────
   const loadRows = useCallback(() => {
     setRowsLoading(true);
     fetchAllDocuments()
@@ -236,7 +212,6 @@ const DocumentForm = ({ selectedType }) => {
     }
   };
 
-  // ── Table filter bar options (derived from whatever rows exist) ──────
   const rowJobTypeOptions = useMemo(() => {
     const set = new Set();
     rows.forEach(r => { if (r.jobType) set.add(r.jobType); });
@@ -255,7 +230,6 @@ const DocumentForm = ({ selectedType }) => {
 
   const clearTableFilters = () => setTableFilters(emptyTableFilters());
 
-  // Search + per-column filters, applied on top of "all documents".
   const filteredRows = useMemo(() => {
     const s = tableFilters.search.trim().toLowerCase();
 
@@ -266,7 +240,6 @@ const DocumentForm = ({ selectedType }) => {
 
       if (!s) return true;
 
-      // Search across EVERY visible column, not just a hardcoded subset.
       const divisionLabel = row.divisionNo
         ? `${row.divisionNo} ${divisionNoToName[row.divisionNo] || ""}`
         : "";
@@ -313,9 +286,6 @@ const DocumentForm = ({ selectedType }) => {
         <form onSubmit={handleSubmit} className="docf-form">
           <div className="docf-grid">
 
-            {/* Division — FIRST, drives Job Type + Entered By below.
-                Options now come from the real Division master (fetchDivisions),
-                value = divisionNo (the code), label shows both code + name. */}
             <div className="docf-field">
               <label>Division</label>
               <select
@@ -381,9 +351,6 @@ const DocumentForm = ({ selectedType }) => {
               />
             </div>
 
-            {/* Entered By — scoped to the selected Division. Options are
-                PrintOperator NIC names (operatorNicName), fetched fresh
-                every time the Division changes (see effect above). */}
             <div className="docf-field">
               <label>Entered By</label>
               <select
@@ -400,8 +367,6 @@ const DocumentForm = ({ selectedType }) => {
                   <option value={formData.enteredBy}>{formData.enteredBy}</option>
                 )}
                 {filteredEnteredBy.map(u => {
-                  // Print operators master: show the NIC Name
-                  // (operatorNicName), not the plain operator name.
                   const label = u.operatorNicName || u.name || u.fullName || u.operatorName || "";
                   return (
                     <option key={u.id} value={label}>
@@ -444,11 +409,6 @@ const DocumentForm = ({ selectedType }) => {
               />
             </div>
 
-            {/* Request Time — the <input type="time"> value is always a
-                24-hour "HH:mm" digital string under the hood regardless
-                of the browser's own AM/PM display. The row below just
-                makes that digital value visible, plus a quick "Now"
-                shortcut. */}
             <div className="docf-field">
               <label>Request Time</label>
               <div className="docf-time-row">
@@ -506,8 +466,6 @@ const DocumentForm = ({ selectedType }) => {
           </h3>
         </div>
 
-        {/* Independent table filter bar — NOT connected to the form above.
-            Table always loads ALL documents; this bar just narrows what's shown. */}
         <div className="docf-table-filterbar">
           <input
             type="text"
