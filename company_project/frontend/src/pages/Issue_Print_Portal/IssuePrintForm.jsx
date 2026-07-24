@@ -16,6 +16,10 @@ const HOLD_REASONS = [
   "Other",
 ];
 
+// Document Number rule: numbers only, max 10 digits
+const DOC_NO_MAX_LENGTH = 10;
+const isValidDocumentNo = (value) => /^\d{1,10}$/.test(value || "");
+
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
 function formatDate(d) { return d || "—"; }
@@ -168,31 +172,51 @@ function HoldPopup({ onConfirm, onCancel, printOperators }) {
   );
 }
 
-// ── Print Done Popup ───────────────────────────────────────────────────────
-function PrintDonePopup({ onConfirm, onCancel, printOperators }) {
-  const [documentNo, setDocumentNo] = useState("");
-  const [printedBy, setPrintedBy] = useState("");
-  const canConfirm = documentNo.trim().length > 0 && !!printedBy;
+// ── Print Done Popup (also used for Edit of a completed document) ──────────
+function PrintDonePopup({ onConfirm, onCancel, printOperators, initialDocumentNo, initialPrintedBy, isEdit }) {
+  const [documentNo, setDocumentNo] = useState(initialDocumentNo || "");
+  const [printedBy, setPrintedBy] = useState(initialPrintedBy || "");
+  const [docNoError, setDocNoError] = useState("");
+
+  const canConfirm = isValidDocumentNo(documentNo) && !!printedBy;
+
+  const handleDocumentNoChange = (e) => {
+    // numbers only, max 10 digits
+    const digitsOnly = e.target.value.replace(/\D/g, "").slice(0, DOC_NO_MAX_LENGTH);
+    setDocumentNo(digitsOnly);
+
+    if (digitsOnly.length === 0) {
+      setDocNoError("");
+    } else if (!isValidDocumentNo(digitsOnly)) {
+      setDocNoError(`Document Number must be numbers only (max ${DOC_NO_MAX_LENGTH} digits).`);
+    } else {
+      setDocNoError("");
+    }
+  };
 
   return (
     <div className="ip-popup-overlay">
       <div className="ip-popup">
         <div className="ip-popup-head">
-          <span>🖨️ Print Done</span>
+          <span>🖨️ {isEdit ? "Edit Print Details" : "Print Done"}</span>
           <button className="ip-popup-close" onClick={onCancel}>✕</button>
         </div>
         <p className="ip-popup-sub">Enter document number and printer</p>
 
         <div className="ip-popup-field">
-          <span className="ip-popup-label">Document Number</span>
+          <span className="ip-popup-label">Document Number (numbers only, max {DOC_NO_MAX_LENGTH} digits)</span>
           <input
-            className="ip-popup-text-input"
+            className={`ip-popup-text-input ${docNoError ? "ip-input-error" : ""}`}
             type="text"
+            inputMode="numeric"
+            pattern="\d*"
+            maxLength={DOC_NO_MAX_LENGTH}
             placeholder="Enter document number..."
             value={documentNo}
-            onChange={e => setDocumentNo(e.target.value)}
+            onChange={handleDocumentNoChange}
             autoFocus
           />
+          {docNoError && <span className="ip-field-error">{docNoError}</span>}
         </div>
 
         <span className="ip-popup-label">Printed By</span>
@@ -203,9 +227,9 @@ function PrintDonePopup({ onConfirm, onCancel, printOperators }) {
           <button
             className="ip-btn ip-btn-done"
             disabled={!canConfirm}
-            onClick={() => onConfirm(documentNo.trim(), printedBy)}
+            onClick={() => onConfirm(documentNo, printedBy)}
           >
-            ✅ Print Done
+            {isEdit ? "✅ Save Changes" : "✅ Print Done"}
           </button>
         </div>
       </div>
@@ -214,7 +238,7 @@ function PrintDonePopup({ onConfirm, onCancel, printOperators }) {
 }
 
 // ── Document Card ──────────────────────────────────────────────────────────
-function DocumentCard({ doc, requestId, onStart, onHold, onEnd }) {
+function DocumentCard({ doc, requestId, onStart, onHold, onEnd, onEdit, onDelete }) {
   const sc = statusClass(doc.printStatus);
   const jColor = jobTypeColor(doc.jobType);
   const isPending = sc === "pending";
@@ -279,15 +303,28 @@ function DocumentCard({ doc, requestId, onStart, onHold, onEnd }) {
       </div>
 
       <div className="ip-card-foot">
-        <button className="ip-btn ip-btn-start" disabled={!canStart} onClick={() => onStart(doc.id)}>
-          {isOnHold ? "▶ Resume" : "▶ Start"}
-        </button>
-        <button className="ip-btn ip-btn-hold" disabled={!canHold} onClick={() => onHold(doc.id)}>
-          ⏸ Hold
-        </button>
-        <button className="ip-btn ip-btn-end" disabled={!canEnd} onClick={() => onEnd(doc.id)}>
-          ■ End
-        </button>
+        {isDone ? (
+          <>
+            <button className="ip-btn ip-btn-edit" onClick={() => onEdit(doc)}>
+              ✎ Edit
+            </button>
+            <button className="ip-btn ip-btn-delete" onClick={() => onDelete(doc.id)}>
+              🗑 Delete
+            </button>
+          </>
+        ) : (
+          <>
+            <button className="ip-btn ip-btn-start" disabled={!canStart} onClick={() => onStart(doc.id)}>
+              {isOnHold ? "▶ Resume" : "▶ Start"}
+            </button>
+            <button className="ip-btn ip-btn-hold" disabled={!canHold} onClick={() => onHold(doc.id)}>
+              ⏸ Hold
+            </button>
+            <button className="ip-btn ip-btn-end" disabled={!canEnd} onClick={() => onEnd(doc.id)}>
+              ■ End
+            </button>
+          </>
+        )}
       </div>
     </div>
   );
@@ -307,6 +344,7 @@ export default function IssuPrinFormt() {
 
   const [activePopup, setActivePopup] = useState(null);
   const [activeId, setActiveId] = useState(null);
+  const [editValues, setEditValues] = useState({ documentNo: "", printedBy: "" });
 
   const fetchDocuments = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
@@ -354,6 +392,7 @@ export default function IssuPrinFormt() {
   const closePopup = () => {
     setActivePopup(null);
     setActiveId(null);
+    setEditValues({ documentNo: "", printedBy: "" });
   };
 
   const handleStart = async (id) => {
@@ -364,7 +403,33 @@ export default function IssuPrinFormt() {
   };
 
   const handleHoldClick = (id) => { setActiveId(id); setActivePopup("hold"); };
-  const handleEndClick = (id) => { setActiveId(id); setActivePopup("end"); };
+  const handleEndClick = (id) => {
+    setActiveId(id);
+    setEditValues({ documentNo: "", printedBy: "" });
+    setActivePopup("end");
+  };
+
+  // Edit — reopens the same popup pre-filled with the completed document's values
+  const handleEditClick = (doc) => {
+    setActiveId(doc.id);
+    setEditValues({
+      documentNo: doc.printDocumentNo || "",
+      printedBy: doc.printedBy || "",
+    });
+    setActivePopup("end");
+  };
+
+  // Delete — removes the document entirely
+  const handleDeleteClick = async (id) => {
+    if (!window.confirm("Delete this document permanently? This cannot be undone.")) return;
+    try {
+      const res = await fetch(`${API_BASE}/${id}`, { method: "DELETE" });
+      if (!res.ok) throw new Error(`Server error: ${res.status}`);
+      fetchDocuments(true);
+    } catch (err) {
+      alert("Delete failed: " + err.message);
+    }
+  };
 
   const handleHoldConfirm = async (holdReason, heldBy) => {
     const id = activeId;
@@ -423,6 +488,9 @@ export default function IssuPrinFormt() {
   const onHold = documents.filter(d => statusClass(d.printStatus) === "onhold").length;
   const completed = documents.filter(d => statusClass(d.printStatus) === "completed").length;
 
+  // clicking a stat chip filters the grid by that status (Total clears the filter)
+  const handleStatClick = (statusValue) => setFilterStatus(statusValue);
+
   return (
     <div className="ip-page">
       {activePopup === "hold" && (
@@ -437,6 +505,9 @@ export default function IssuPrinFormt() {
           onConfirm={handlePrintDoneConfirm}
           onCancel={closePopup}
           printOperators={printOperators}
+          initialDocumentNo={editValues.documentNo}
+          initialPrintedBy={editValues.printedBy}
+          isEdit={!!editValues.documentNo || !!editValues.printedBy}
         />
       )}
 
@@ -485,13 +556,43 @@ export default function IssuPrinFormt() {
         </select>
       </div>
 
-      {/* Stats */}
+      {/* Stats — now clickable, each filters the grid by that status */}
       <div className="ip-stats">
-        <div className="ip-stat-chip blue">Total <strong>{total}</strong></div>
-        <div className="ip-stat-chip"><strong style={{ color: "#b45309" }}>{pending}</strong> Pending</div>
-        <div className="ip-stat-chip"><strong style={{ color: "#1d4ed8" }}>{inProg}</strong> In Progress</div>
-        <div className="ip-stat-chip"><strong style={{ color: "#c2410c" }}>{onHold}</strong> On Hold</div>
-        <div className="ip-stat-chip green">Completed <strong>{completed}</strong></div>
+        <button
+          type="button"
+          className={`ip-stat-chip blue ip-stat-chip-clickable ${filterStatus === "ALL" ? "active" : ""}`}
+          onClick={() => handleStatClick("ALL")}
+        >
+          Total <strong>{total}</strong>
+        </button>
+        <button
+          type="button"
+          className={`ip-stat-chip ip-stat-chip-clickable ${filterStatus === "pending" ? "active" : ""}`}
+          onClick={() => handleStatClick("pending")}
+        >
+          <strong style={{ color: "#b45309" }}>{pending}</strong> Pending
+        </button>
+        <button
+          type="button"
+          className={`ip-stat-chip ip-stat-chip-clickable ${filterStatus === "inprogress" ? "active" : ""}`}
+          onClick={() => handleStatClick("inprogress")}
+        >
+          <strong style={{ color: "#1d4ed8" }}>{inProg}</strong> In Progress
+        </button>
+        <button
+          type="button"
+          className={`ip-stat-chip ip-stat-chip-clickable ${filterStatus === "onhold" ? "active" : ""}`}
+          onClick={() => handleStatClick("onhold")}
+        >
+          <strong style={{ color: "#c2410c" }}>{onHold}</strong> On Hold
+        </button>
+        <button
+          type="button"
+          className={`ip-stat-chip green ip-stat-chip-clickable ${filterStatus === "completed" ? "active" : ""}`}
+          onClick={() => handleStatClick("completed")}
+        >
+          Completed <strong>{completed}</strong>
+        </button>
       </div>
 
       {error && (
@@ -521,6 +622,8 @@ export default function IssuPrinFormt() {
               onStart={handleStart}
               onHold={handleHoldClick}
               onEnd={handleEndClick}
+              onEdit={handleEditClick}
+              onDelete={handleDeleteClick}
             />
           ))
         )}
