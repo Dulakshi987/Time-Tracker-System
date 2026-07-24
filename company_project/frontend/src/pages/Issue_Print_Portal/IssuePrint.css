@@ -98,6 +98,23 @@ body{
     font-size:20px;
 }
 
+/* Stat chips as clickable filter buttons */
+.ip-stat-chip-clickable{
+    cursor:pointer;
+    border:2px solid transparent;
+    font:inherit;
+    transition:.2s;
+}
+
+.ip-stat-chip-clickable:hover{
+    transform:translateY(-2px);
+}
+
+.ip-stat-chip-clickable.active{
+    border-color:#1d4ed8 !important;
+    box-shadow:0 0 0 3px rgba(29,78,216,0.15) !important;
+}
+
 /* Grid */
 
 .ip-grid{
@@ -229,6 +246,11 @@ body{
     opacity:.9;
 }
 
+.ip-btn:disabled{
+    opacity:.4;
+    cursor:not-allowed;
+}
+
 .ip-btn-start{
     background:#0d6efd;
 }
@@ -246,6 +268,33 @@ body{
     background:white;
     color:#0d6efd;
     border:2px solid #0d6efd;
+}
+
+/* Edit / Delete (completed documents) */
+
+.ip-btn-edit{
+    background:#eff6ff;
+    color:#1d4ed8;
+    border:1px solid #bfdbfe;
+}
+
+.ip-btn-delete{
+    background:#fef2f2;
+    color:#b91c1c;
+    border:1px solid #fecaca;
+}
+
+/* Form validation error states */
+
+.ip-input-error{
+    border-color:#e53935 !important;
+}
+
+.ip-field-error{
+    color:#e53935;
+    font-size:12px;
+    margin-top:4px;
+    display:block;
 }
 
 /* Badge */
@@ -440,7 +489,9 @@ body{
     background:#ffffff !important;
 }
 
-/* EVERYTHING inside cards black */
+/* Text inside cards: dark by default — but badges are excluded
+   below via a higher-specificity rule so their white text isn't
+   forced back to dark. */
 
 .ip-card *,
 .ip-card-head *,
@@ -679,4 +730,47 @@ body{
 .ip-header .ip-btn-outline:hover{
 
     background:#dbeafe !important;
+}
+
+/* =====================================================
+   FIX: STATUS BADGES WERE LOSING THEIR BACKGROUND COLOR
+   (the "EVERYTHING inside cards black/white" rules above
+   were competing with the badge colors). These rules are
+   placed last and use extra selector weight so they always
+   win, no matter what gets added above in the future.
+   ===================================================== */
+
+.ip-card-head .ip-badge,
+.ip-card .ip-badge{
+    color:#ffffff !important;
+    border:none !important;
+    opacity:1 !important;
+}
+
+.ip-card-head .ip-badge.pending,
+.ip-card .ip-badge.pending{
+    background:#f59e0b !important;
+    background-color:#f59e0b !important;
+    color:#ffffff !important;
+}
+
+.ip-card-head .ip-badge.inprogress,
+.ip-card .ip-badge.inprogress{
+    background:#2563eb !important;
+    background-color:#2563eb !important;
+    color:#ffffff !important;
+}
+
+.ip-card-head .ip-badge.onhold,
+.ip-card .ip-badge.onhold{
+    background:#ea580c !important;
+    background-color:#ea580c !important;
+    color:#ffffff !important;
+}
+
+.ip-card-head .ip-badge.completed,
+.ip-card .ip-badge.completed{
+    background:#16a34a !important;
+    background-color:#16a34a !important;
+    color:#ffffff !important;
 }
