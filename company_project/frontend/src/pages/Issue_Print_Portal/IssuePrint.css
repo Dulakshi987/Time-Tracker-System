@@ -104,6 +104,10 @@ body{
     border:2px solid transparent;
     font:inherit;
     transition:.2s;
+    -webkit-appearance:none;
+    appearance:none;
+    outline:none;
+    font-family:inherit;
 }
 
 .ip-stat-chip-clickable:hover{
@@ -773,4 +777,37 @@ body{
     background:#16a34a !important;
     background-color:#16a34a !important;
     color:#ffffff !important;
+}
+
+/* =====================================================
+   FIX: EDIT / DELETE BUTTONS WERE FORCED TO WHITE TEXT
+   (the ".ip-card .ip-btn{color:white !important;}" rule
+   above applies to every button in the card, including
+   these two, which have light backgrounds — making the
+   text invisible). Overriding here with matching/higher
+   specificity so these two keep their intended colors.
+   ===================================================== */
+
+.ip-card-foot .ip-btn.ip-btn-edit,
+.ip-card .ip-btn.ip-btn-edit{
+    background:#eff6ff !important;
+    background-color:#eff6ff !important;
+    color:#1d4ed8 !important;
+    border:1px solid #bfdbfe !important;
+}
+
+.ip-card-foot .ip-btn.ip-btn-delete,
+.ip-card .ip-btn.ip-btn-delete{
+    background:#fef2f2 !important;
+    background-color:#fef2f2 !important;
+    color:#b91c1c !important;
+    border:1px solid #fecaca !important;
+}
+
+.ip-card-foot .ip-btn.ip-btn-edit:hover{
+    background:#dbeafe !important;
+}
+
+.ip-card-foot .ip-btn.ip-btn-delete:hover{
+    background:#fee2e2 !important;
 }
