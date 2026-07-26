@@ -743,9 +743,9 @@ body {
 }
 
 .ip-error-chip {
-  background: rgba(239, 68, 68, 0.15);
+  background: rgba(235, 4, 4, 0.15);
   border: 1px solid rgba(239, 68, 68, 0.4);
-  color: #fca5a5;
+  color: #080808;
   border-radius: 8px;
   padding: 6px 12px;
   font-size: 0.78rem;
