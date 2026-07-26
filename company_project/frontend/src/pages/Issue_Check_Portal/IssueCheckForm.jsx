@@ -116,6 +116,42 @@ function statusLabel(s) {
   return { pending: "Pending", inprogress: "In Progress", onhold: "On Hold", completed: "Check Done" }[c];
 }
 
+// Parses the reason-wise SKU/Qty groups saved by the Hold popup.
+// New format: "Reason::sku1,sku2||Reason2::sku3"  (self-labelled groups,
+// one group per picking-error reason, each with its own SKU/Qty list).
+// Falls back to the old flat format (single reason, single SKU/Qty list)
+// for records saved before this change.
+function parsePickingErrorGroups(doc) {
+  const sku = doc.wrongMaterialSku || "";
+  const qty = doc.wrongMaterialQty || "";
+  if (!sku && !qty) return [];
+
+  if (!sku.includes("::")) {
+    return [{
+      reason: doc.pickingErrorReason || "",
+      skus: sku.split(/[;,]/).map(s => s.trim()).filter(Boolean),
+      qtys: qty.split(/[;,]/).map(s => s.trim()).filter(Boolean),
+    }];
+  }
+
+  const parseField = (field) =>
+    field.split("||").map(g => g.trim()).filter(Boolean).map(g => {
+      const idx = g.indexOf("::");
+      const label = idx >= 0 ? g.slice(0, idx).trim() : "";
+      const list = idx >= 0 ? g.slice(idx + 2) : g;
+      return { label, items: list.split(",").map(s => s.trim()).filter(Boolean) };
+    });
+
+  const skuGroups = parseField(sku);
+  const qtyGroups = parseField(qty);
+
+  return skuGroups.map((g, i) => ({
+    reason: g.label,
+    skus: g.items,
+    qtys: (qtyGroups[i] && qtyGroups[i].items) || [],
+  }));
+}
+
 // ── Generic Person Picker — division scoped, mirrors Pick Portal exactly ───
 // Only names that exist in the Check Operators master table AND belong to
 // the current document's Division can be selected. No "Other" free text.
@@ -145,15 +181,18 @@ function PersonPicker({ value, onChange, people, loading }) {
 }
 
 // ── Popup: Hold + Picking Error (Held By, division scoped) ──────────────────
+// Each error-creating reason (Shortage / Collected Different Material) keeps
+// its OWN set of SKU/Qty rows, since the materials involved can differ
+// between reasons. Rows are keyed by reason key in `materialsByReason` and
+// packed into self-labelled groups on confirm:
+//   "Material Shortage::SKU1,SKU2||Collected Different Material::SKU3"
+// so each reason's materials stay tied together after saving to the DB
+// (pickingErrorReason / wrongMaterialSku / wrongMaterialQty columns).
 
 function HoldPopup({ people, peopleLoading, onConfirm, onCancel }) {
   const [heldBy, setHeldBy] = useState("");
-  // Multi-select — several reasons can be picked at once (e.g. Shortage AND
-  // Collected Different Material together). "NONE" is exclusive with the
-  // real reasons: picking it clears any other selection, and picking any
-  // real reason clears "NONE".
   const [pickingErrorKeys, setPickingErrorKeys] = useState([]);
-  const [materials, setMaterials] = useState([{ sku: "", qty: "" }]);
+  const [materialsByReason, setMaterialsByReason] = useState({});
 
   const toggleReasonKey = (key) => {
     setPickingErrorKeys(prev => {
@@ -165,33 +204,79 @@ function HoldPopup({ people, peopleLoading, onConfirm, onCancel }) {
         ? withoutNone.filter(k => k !== key)
         : [...withoutNone, key];
     });
+
+    const reasonDef = PICKING_ERROR_REASONS.find(r => r.key === key);
+    if (reasonDef && reasonDef.createsError) {
+      setMaterialsByReason(prev => {
+        const wasSelected = pickingErrorKeys.includes(key);
+        const next = { ...prev };
+        if (wasSelected) {
+          delete next[key];
+        } else {
+          next[key] = next[key] || [{ sku: "", qty: "" }];
+        }
+        return next;
+      });
+    }
   };
 
   const selectedReasons = PICKING_ERROR_REASONS.filter(r => pickingErrorKeys.includes(r.key));
-  const needsDetails = selectedReasons.some(r => r.createsError);
+  const errorReasons = selectedReasons.filter(r => r.createsError);
+  const needsDetails = errorReasons.length > 0;
 
-  const addMaterialRow    = () => setMaterials(prev => [...prev, { sku: "", qty: "" }]);
-  const removeMaterialRow = (idx) => setMaterials(prev => prev.filter((_, i) => i !== idx));
-  const updateMaterialRow = (idx, field, value) =>
-    setMaterials(prev => prev.map((m, i) => (i === idx ? { ...m, [field]: value } : m)));
+  const addMaterialRow = (key) =>
+    setMaterialsByReason(prev => ({
+      ...prev,
+      [key]: [...(prev[key] || [{ sku: "", qty: "" }]), { sku: "", qty: "" }],
+    }));
 
-  const filledMaterials = materials.filter(m => m.sku.trim().length > 0 && m.qty.trim().length > 0);
-  const invalidSkuMaterials = filledMaterials.filter(m => m.sku.trim().length > SKU_MAX_LENGTH);
+  const removeMaterialRow = (key, idx) =>
+    setMaterialsByReason(prev => ({
+      ...prev,
+      [key]: (prev[key] || []).filter((_, i) => i !== idx),
+    }));
+
+  const updateMaterialRow = (key, idx, field, value) =>
+    setMaterialsByReason(prev => ({
+      ...prev,
+      [key]: (prev[key] || []).map((m, i) => (i === idx ? { ...m, [field]: value } : m)),
+    }));
+
+  const filledFor = (key) => (materialsByReason[key] || []).filter(m => m.sku.trim().length > 0 && m.qty.trim().length > 0);
+  const invalidSkuFor = (key) => filledFor(key).filter(m => m.sku.trim().length > SKU_MAX_LENGTH);
+
+  const allDetailsOk = errorReasons.every(
+    r => filledFor(r.key).length > 0 && invalidSkuFor(r.key).length === 0
+  );
 
   const canConfirm =
     !!heldBy &&
     pickingErrorKeys.length > 0 &&
-    (!needsDetails || (filledMaterials.length > 0 && invalidSkuMaterials.length === 0));
+    (!needsDetails || allDetailsOk);
 
   const handleConfirm = () => {
     const hasWrongMaterial = needsDetails ? "YES" : "NO";
-    const skuJoined = needsDetails ? filledMaterials.map(m => m.sku.trim()).join("; ") : "";
-    const qtyJoined = needsDetails ? filledMaterials.map(m => m.qty.trim()).join("; ") : "";
+
     // Multiple selected reasons are combined into one string for the DB —
     // same field, just a comma-joined list when more than one is picked.
     const reasonJoined = pickingErrorKeys.includes("NONE")
       ? ""
       : selectedReasons.map(r => r.label).join(", ");
+
+    // Self-labelled groups so each reason's SKU/Qty stays tied together —
+    // "Reason::sku1,sku2||Reason2::sku3" — parsed back out by
+    // parsePickingErrorGroups() wherever this is displayed.
+    const skuJoined = needsDetails
+      ? errorReasons
+          .map(r => `${r.label}::${filledFor(r.key).map(m => m.sku.trim()).join(",")}`)
+          .join("||")
+      : "";
+    const qtyJoined = needsDetails
+      ? errorReasons
+          .map(r => `${r.label}::${filledFor(r.key).map(m => m.qty.trim()).join(",")}`)
+          .join("||")
+      : "";
+
     onConfirm(heldBy, hasWrongMaterial, skuJoined, qtyJoined, reasonJoined);
   };
 
@@ -224,62 +309,65 @@ function HoldPopup({ people, peopleLoading, onConfirm, onCancel }) {
           </button>
         </div>
 
-        {needsDetails && (
-          <div style={{ marginBottom: 16 }}>
-            <span className="ip-popup-label">Wrong Material(s)</span>
+        {errorReasons.map(r => {
+          const rows = materialsByReason[r.key] || [{ sku: "", qty: "" }];
+          return (
+            <div key={r.key} style={{ marginBottom: 16 }}>
+              <span className="ip-popup-label">⚠️ {r.label} — Wrong Material(s)</span>
 
-            {materials.map((m, idx) => {
-              const skuTrimmed = m.sku.trim();
-              const skuTooLong = skuTrimmed.length > SKU_MAX_LENGTH;
-              return (
-                <div key={idx} style={{ marginTop: 8 }}>
-                  <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                    <input
-                      className="ip-popup-text-input"
-                      type="text"
-                      placeholder="SKU / Description (max 8 characters)"
-                      value={m.sku}
-                      maxLength={SKU_MAX_LENGTH}
-                      onChange={e => updateMaterialRow(idx, "sku", e.target.value)}
-                      style={{ flex: 2, borderColor: skuTooLong ? "#ef4444" : undefined }}
-                    />
-                    <input
-                      className="ip-popup-text-input"
-                      type="text"
-                      placeholder="Quantity"
-                      value={m.qty}
-                      onChange={e => updateMaterialRow(idx, "qty", e.target.value)}
-                      style={{ flex: 1 }}
-                    />
-                    {materials.length > 1 && (
-                      <button
-                        className="ip-btn ip-btn-outline"
-                        style={{ padding: "6px 10px", flex: "unset" }}
-                        onClick={() => removeMaterialRow(idx)}
-                        aria-label="Remove row"
-                      >
-                        ✕
-                      </button>
+              {rows.map((m, idx) => {
+                const skuTrimmed = m.sku.trim();
+                const skuTooLong = skuTrimmed.length > SKU_MAX_LENGTH;
+                return (
+                  <div key={idx} style={{ marginTop: 8 }}>
+                    <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                      <input
+                        className="ip-popup-text-input"
+                        type="text"
+                        placeholder="SKU / Description (max 8 characters)"
+                        value={m.sku}
+                        maxLength={SKU_MAX_LENGTH}
+                        onChange={e => updateMaterialRow(r.key, idx, "sku", e.target.value)}
+                        style={{ flex: 2, borderColor: skuTooLong ? "#ef4444" : undefined }}
+                      />
+                      <input
+                        className="ip-popup-text-input"
+                        type="text"
+                        placeholder="Quantity"
+                        value={m.qty}
+                        onChange={e => updateMaterialRow(r.key, idx, "qty", e.target.value)}
+                        style={{ flex: 1 }}
+                      />
+                      {rows.length > 1 && (
+                        <button
+                          className="ip-btn ip-btn-outline"
+                          style={{ padding: "6px 10px", flex: "unset" }}
+                          onClick={() => removeMaterialRow(r.key, idx)}
+                          aria-label="Remove row"
+                        >
+                          ✕
+                        </button>
+                      )}
+                    </div>
+                    {skuTooLong && (
+                      <div style={{ color: "#ef4444", fontSize: "0.72rem", marginTop: 4 }}>
+                        SKU / Description must be at most {SKU_MAX_LENGTH} characters ({skuTrimmed.length}/{SKU_MAX_LENGTH})
+                      </div>
                     )}
                   </div>
-                  {skuTooLong && (
-                    <div style={{ color: "#ef4444", fontSize: "0.72rem", marginTop: 4 }}>
-                      SKU / Description must be at most {SKU_MAX_LENGTH} characters ({skuTrimmed.length}/{SKU_MAX_LENGTH})
-                    </div>
-                  )}
-                </div>
-              );
-            })}
+                );
+              })}
 
-            <button
-              className="ip-btn ip-btn-outline"
-              style={{ marginTop: 10, padding: "6px 14px", flex: "unset" }}
-              onClick={addMaterialRow}
-            >
-              + Add Material
-            </button>
-          </div>
-        )}
+              <button
+                className="ip-btn ip-btn-outline"
+                style={{ marginTop: 10, padding: "6px 14px", flex: "unset" }}
+                onClick={() => addMaterialRow(r.key)}
+              >
+                + Add Material for {r.label}
+              </button>
+            </div>
+          );
+        })}
 
         <span className="ip-popup-label">Held By</span>
         <PersonPicker value={heldBy} onChange={setHeldBy} people={people} loading={peopleLoading} />
@@ -443,34 +531,43 @@ function ViewDetailsPopup({ doc, requestId, divisionLabel, onClose }) {
           </>
         )}
 
-        {/* Picking Error — Reason, SKU and Quantity are always grouped
-            together here, whether the error is still pending Emergency
-            Pick or has already been resolved. */}
-        {isFlagged && (
-          <>
-            <div
-              style={{
-                marginBottom: 6, fontSize: "0.78rem", fontWeight: 700,
-                color: doc.emergencyPickResolved ? "#34d399" : "#ef4444",
-              }}
-            >
-              {doc.emergencyPickResolved ? "✅ Picking Error — Resolved" : "🚨 Picking Error — Pending"}
-            </div>
-            <div
-              className="ip-hold-box"
-              style={{
-                marginBottom: 14,
-                border: `1px solid ${doc.emergencyPickResolved ? "#34d399" : "#ef4444"}`,
-                background: doc.emergencyPickResolved ? "rgba(52,211,153,0.08)" : "rgba(239,68,68,0.08)",
-              }}
-            >
-              {row("Reason", doc.pickingErrorReason)}
-              {row("SKU / Description", doc.wrongMaterialSku)}
-              {row("Quantity", doc.wrongMaterialQty)}
-              {row("Re-picked By", doc.emergencyPickResolvedBy && `👤 ${doc.emergencyPickResolvedBy}`)}
-            </div>
-          </>
-        )}
+        {/* Picking Error — each reason (Shortage / Collected Different
+            Material) is shown as its own group with its own SKU + Quantity,
+            whether the error is still pending Emergency Pick or resolved. */}
+        {isFlagged && (() => {
+          const groups = parsePickingErrorGroups(doc);
+          return (
+            <>
+              <div
+                style={{
+                  marginBottom: 6, fontSize: "0.78rem", fontWeight: 700,
+                  color: doc.emergencyPickResolved ? "#34d399" : "#ef4444",
+                }}
+              >
+                {doc.emergencyPickResolved ? "✅ Picking Error — Resolved" : "🚨 Picking Error — Pending"}
+              </div>
+              <div
+                className="ip-hold-box"
+                style={{
+                  marginBottom: 14,
+                  border: `1px solid ${doc.emergencyPickResolved ? "#34d399" : "#ef4444"}`,
+                  background: doc.emergencyPickResolved ? "rgba(52,211,153,0.08)" : "rgba(239,68,68,0.08)",
+                }}
+              >
+                {groups.map((g, i) => (
+                  <div key={i} style={{ marginBottom: i === groups.length - 1 ? 0 : 10 }}>
+                    <div style={{ fontWeight: 700, marginBottom: 4, fontSize: "0.8rem" }}>
+                      ⚠️ {g.reason || "Reason"}
+                    </div>
+                    {row("SKU / Description", g.skus.join(", ") || "—")}
+                    {row("Quantity", g.qtys.join(", ") || "—")}
+                  </div>
+                ))}
+                {row("Re-picked By", doc.emergencyPickResolvedBy && `👤 ${doc.emergencyPickResolvedBy}`)}
+              </div>
+            </>
+          );
+        })()}
 
         <div className="ip-popup-foot">
           <button className="ip-btn ip-btn-outline" onClick={onClose}>Close</button>
@@ -683,16 +780,26 @@ function DocumentCard({
           </div>
         )}
 
+        {/* Wrong-material box — each reason (Shortage / Collected Different
+            Material) shown as its own group, with its own SKU + Qty, font
+            kept small to match the rest of the card's stat text. */}
         {isFlagged && (
           <div className="ip-wrong-material-box">
-            <div className="ip-wrong-material-row">
-              <span>{hasResolvedError ? "✅ Emergency Pick Done" : "⚠️ " + (doc.pickingErrorReason || "Wrong Material")}</span>
-              <span>{doc.wrongMaterialSku || "—"}</span>
-            </div>
-            <div className="ip-wrong-material-row">
-              <span>Quantity</span>
-              <span>{doc.wrongMaterialQty || "—"}</span>
-            </div>
+            {parsePickingErrorGroups(doc).map((g, i) => (
+              <div key={i} style={{ marginBottom: 6, fontSize: "0.72rem" }}>
+                <div className="ip-wrong-material-row" style={{ fontWeight: 700 }}>
+                  <span>{hasResolvedError ? "✅ Emergency Pick Done" : "⚠️ " + (g.reason || "Wrong Material")}</span>
+                </div>
+                <div className="ip-wrong-material-row">
+                  <span>SKU / Description</span>
+                  <span>{g.skus.join(", ") || "—"}</span>
+                </div>
+                <div className="ip-wrong-material-row">
+                  <span>Quantity</span>
+                  <span>{g.qtys.join(", ") || "—"}</span>
+                </div>
+              </div>
+            ))}
             {hasResolvedError && (
               <div className="ip-wrong-material-row">
                 <span>Re-picked By</span>

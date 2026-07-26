@@ -101,6 +101,42 @@ function statusLabel(s) {
   }[c];
 }
 
+// Parses the reason-wise SKU/Qty groups saved by the Check Portal's Hold
+// popup. New format: "Reason::sku1,sku2||Reason2::sku3" (self-labelled
+// groups, one per picking-error reason, each with its own SKU/Qty list).
+// Falls back to the old flat format (single reason, single SKU/Qty list)
+// for records saved before this change.
+function parsePickingErrorGroups(doc) {
+  const sku = doc.wrongMaterialSku || "";
+  const qty = doc.wrongMaterialQty || "";
+  if (!sku && !qty) return [];
+
+  if (!sku.includes("::")) {
+    return [{
+      reason: doc.pickingErrorReason || "",
+      skus: sku.split(/[;,]/).map(s => s.trim()).filter(Boolean),
+      qtys: qty.split(/[;,]/).map(s => s.trim()).filter(Boolean),
+    }];
+  }
+
+  const parseField = (field) =>
+    field.split("||").map(g => g.trim()).filter(Boolean).map(g => {
+      const idx = g.indexOf("::");
+      const label = idx >= 0 ? g.slice(0, idx).trim() : "";
+      const list = idx >= 0 ? g.slice(idx + 2) : g;
+      return { label, items: list.split(",").map(s => s.trim()).filter(Boolean) };
+    });
+
+  const skuGroups = parseField(sku);
+  const qtyGroups = parseField(qty);
+
+  return skuGroups.map((g, i) => ({
+    reason: g.label,
+    skus: g.items,
+    qtys: (qtyGroups[i] && qtyGroups[i].items) || [],
+  }));
+}
+
 // ── Person Picker (division-scoped — Only Master Data, no "Other") ─────────
 // Mirrors the Print Portal's PersonPicker exactly: the `people` list handed
 // in is already filtered down to whichever Division the current document
@@ -250,8 +286,12 @@ function PickedByPopup({ onConfirm, onCancel, pickers, pickersLoading }) {
 }
 
 // ── Popup: Emergency Pick Done (re-pick after Check reported an error) ──────
+// Every picking-error reason logged by the Check Portal is shown here as its
+// own group with its own SKU + Quantity, so the person knows exactly what to
+// re-pick before they confirm and pick their name below.
 function EmergencyPickDonePopup({ doc, onConfirm, onCancel, pickers, pickersLoading }) {
   const [resolvedBy, setResolvedBy] = useState("");
+  const groups = parsePickingErrorGroups(doc);
 
   return (
     <div className="ip-popup-overlay">
@@ -262,31 +302,31 @@ function EmergencyPickDonePopup({ doc, onConfirm, onCancel, pickers, pickersLoad
         </div>
         <p className="ip-popup-sub">Select who re-picked the correct material</p>
 
-        {/* Reason + SKU + Qty reported by Check Portal — shown here so the
-            picker knows exactly what to re-pick before confirming. */}
-        <div
-          style={{
-            marginBottom: 16,
-            background: "rgba(239,68,68,0.08)",
-            border: "1px solid #ef4444",
-            borderLeft: "4px solid #ef4444",
-            borderRadius: 10,
-            padding: 15,
-          }}
-        >
-          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
-            <span style={{ color: "#ef4444", fontWeight: 700 }}>⚠️ Reason</span>
-            <span>{doc?.pickingErrorReason || "—"}</span>
+        {groups.map((g, i) => (
+          <div
+            key={i}
+            style={{
+              marginBottom: 10,
+              background: "rgba(239,68,68,0.08)",
+              border: "1px solid #ef4444",
+              borderLeft: "4px solid #ef4444",
+              borderRadius: 10,
+              padding: 15,
+            }}
+          >
+            <div style={{ color: "#ef4444", fontWeight: 700, marginBottom: 8 }}>
+              ⚠️ {g.reason || "Reason"}
+            </div>
+            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
+              <span style={{ fontWeight: 600 }}>SKU / Description</span>
+              <span>{g.skus.join(", ") || "—"}</span>
+            </div>
+            <div style={{ display: "flex", justifyContent: "space-between" }}>
+              <span style={{ fontWeight: 600 }}>Quantity</span>
+              <span>{g.qtys.join(", ") || "—"}</span>
+            </div>
           </div>
-          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
-            <span style={{ color: "#ef4444", fontWeight: 700 }}>SKU / Description</span>
-            <span>{doc?.wrongMaterialSku || "—"}</span>
-          </div>
-          <div style={{ display: "flex", justifyContent: "space-between" }}>
-            <span style={{ color: "#ef4444", fontWeight: 700 }}>Quantity</span>
-            <span>{doc?.wrongMaterialQty || "—"}</span>
-          </div>
-        </div>
+        ))}
 
         <span className="ip-popup-label">Re-picked By</span>
         <PersonPicker value={resolvedBy} onChange={setResolvedBy} people={pickers} loading={pickersLoading} />
@@ -416,40 +456,50 @@ function ViewDetailsPopup({ doc, requestId, divisionLabel, onClose }) {
           {row("Print Duration", `⏱ ${formatDuration(doc.printDurationSeconds)}`)}
         </div>
 
-        {/* Picking error section — Reason is now always shown alongside
-            SKU / Qty, both while pending AND after it's been resolved, so
+        {/* Picking error section — each reason (Shortage / Collected
+            Different Material) shown as its own group with its own SKU +
+            Quantity, both while pending AND after it's been resolved, so
             the full picture stays visible in the history. */}
-        {isFlagged && (
-          <>
-            <div
-              style={{
-                marginBottom: 6, fontSize: "0.78rem", fontWeight: 700,
-                color: doc.emergencyPickResolved ? "#16a34a" : "#ef4444",
-              }}
-            >
-              {doc.emergencyPickResolved
-                ? "✅ Picking Error — Resolved"
-                : "🚨 Check Portal — Wrong Material Reported"}
-            </div>
-            <div
-              className="ip-hold-box"
-              style={{
-                marginBottom: 14,
-                border: `1px solid ${doc.emergencyPickResolved ? "#16a34a" : "#ef4444"}`,
-                background: doc.emergencyPickResolved
-                  ? "rgba(22,163,74,0.08)"
-                  : "rgba(239,68,68,0.08)",
-              }}
-            >
-              {row("Checked By", doc.checkedBy && `👤 ${doc.checkedBy}`)}
-              {row("Reason", doc.pickingErrorReason)}
-              {row("Wrong SKU / Description", doc.wrongMaterialSku)}
-              {row("Quantity", doc.wrongMaterialQty)}
-              {doc.emergencyPickResolved &&
-                row("Re-picked By", doc.emergencyPickResolvedBy && `👤 ${doc.emergencyPickResolvedBy}`)}
-            </div>
-          </>
-        )}
+        {isFlagged && (() => {
+          const groups = parsePickingErrorGroups(doc);
+          return (
+            <>
+              <div
+                style={{
+                  marginBottom: 6, fontSize: "0.78rem", fontWeight: 700,
+                  color: doc.emergencyPickResolved ? "#16a34a" : "#ef4444",
+                }}
+              >
+                {doc.emergencyPickResolved
+                  ? "✅ Picking Error — Resolved"
+                  : "🚨 Check Portal — Wrong Material Reported"}
+              </div>
+              <div
+                className="ip-hold-box"
+                style={{
+                  marginBottom: 14,
+                  border: `1px solid ${doc.emergencyPickResolved ? "#16a34a" : "#ef4444"}`,
+                  background: doc.emergencyPickResolved
+                    ? "rgba(22,163,74,0.08)"
+                    : "rgba(239,68,68,0.08)",
+                }}
+              >
+                {row("Checked By", doc.checkedBy && `👤 ${doc.checkedBy}`)}
+                {groups.map((g, i) => (
+                  <div key={i} style={{ marginTop: 8 }}>
+                    <div style={{ fontWeight: 700, marginBottom: 4, fontSize: "0.8rem" }}>
+                      ⚠️ {g.reason || "Reason"}
+                    </div>
+                    {row("Wrong SKU / Description", g.skus.join(", ") || "—")}
+                    {row("Quantity", g.qtys.join(", ") || "—")}
+                  </div>
+                ))}
+                {doc.emergencyPickResolved &&
+                  row("Re-picked By", doc.emergencyPickResolvedBy && `👤 ${doc.emergencyPickResolvedBy}`)}
+              </div>
+            </>
+          );
+        })()}
 
         <div className="ip-popup-foot">
           <button className="ip-btn ip-btn-outline" onClick={onClose}>Close</button>
@@ -531,12 +581,24 @@ function DocumentCard({
     (doc.hasWrongMaterial || "").toUpperCase() === "YES" && !doc.emergencyPickResolved;
 
   const cardClassName = `ip-card status-${sc}${hasCheckError ? " ip-card-emergency" : ""}`;
+
+  // Hard red border + tinted background on the card itself whenever there's
+  // an unresolved picking error — set inline so it doesn't depend on a CSS
+  // class being present/loaded.
+  const cardBorderStyle = hasCheckError
+    ? {
+        border: "2px solid #ef4444",
+        boxShadow: "0 0 0 1px rgba(239,68,68,0.35), 0 0 16px rgba(239,68,68,0.25)",
+        background: "rgba(239,68,68,0.05)",
+      }
+    : undefined;
+
   const jumpStyle = jumpHighlighted
     ? { outline: "3px solid #facc15", outlineOffset: 2, transition: "outline-color 0.3s ease" }
     : undefined;
 
   return (
-    <div ref={cardRef} className={cardClassName} style={jumpStyle}>
+    <div ref={cardRef} className={cardClassName} style={{ ...cardBorderStyle, ...jumpStyle }}>
       {hasCheckError && (
         <div className="ip-emergency-banner">
           🚨 EMERGENCY PICK ERROR — Wrong Material Found at Check
@@ -611,9 +673,10 @@ function DocumentCard({
           </div>
         )}
 
-        {/* Picking error details — Reason + SKU + Qty reported by Check
-            Portal, shown right above the Emergency Pick Done button so the
-            picker sees exactly what to re-pick before clicking it. */}
+        {/* Picking error details — every reason logged by Check Portal shown
+            as its own small group (Reason + SKU + Qty), right above the
+            Emergency Pick Done button, font kept small to match the card's
+            other stat text. */}
         {hasCheckError && (
           <div
             style={{
@@ -622,21 +685,24 @@ function DocumentCard({
               border: "1px solid #ef4444",
               borderLeft: "4px solid #ef4444",
               borderRadius: 10,
-              padding: 15,
+              padding: 12,
             }}
           >
-            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
-              <span style={{ color: "#ef4444", fontWeight: 700 }}>⚠️ Reason</span>
-              <span>{doc.pickingErrorReason || "—"}</span>
-            </div>
-            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
-              <span style={{ color: "#ef4444", fontWeight: 700 }}>SKU / Description</span>
-              <span>{doc.wrongMaterialSku || "—"}</span>
-            </div>
-            <div style={{ display: "flex", justifyContent: "space-between" }}>
-              <span style={{ color: "#ef4444", fontWeight: 700 }}>Quantity</span>
-              <span>{doc.wrongMaterialQty || "—"}</span>
-            </div>
+            {parsePickingErrorGroups(doc).map((g, i) => (
+              <div key={i} style={{ marginBottom: 8, fontSize: "0.72rem" }}>
+                <div style={{ color: "#ef4444", fontWeight: 700, marginBottom: 4 }}>
+                  ⚠️ {g.reason || "Reason"}
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between" }}>
+                  <span>SKU / Description</span>
+                  <span>{g.skus.join(", ") || "—"}</span>
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between" }}>
+                  <span>Quantity</span>
+                  <span>{g.qtys.join(", ") || "—"}</span>
+                </div>
+              </div>
+            ))}
           </div>
         )}
       </div>
@@ -673,10 +739,22 @@ function DocumentCard({
             </button>
           </>
         )}
+        {/* Emergency Pick Done button — always shown below the normal
+            action row when there's an unresolved picking error, hard red
+            background + darker red border so it's unmistakable. Clicking it
+            opens EmergencyPickDonePopup where the reasons/materials are
+            shown again before picking who re-picked. */}
         {hasCheckError && (
           <button
             className="ip-btn ip-btn-emergency"
-            style={{ background: "#ef4444", color: "#ffffff", border: "none", fontWeight: 700 }}
+            style={{
+              background: "#ef4444",
+              color: "#ffffff",
+              border: "2px solid #b91c1c",
+              fontWeight: 700,
+              width: "100%",
+              marginTop: 8,
+            }}
             onClick={() => onEmergencyDone(doc.id)}
           >
             🚨 Emergency Pick Done
@@ -1093,8 +1171,6 @@ export default function IssuPikFormt() {
               <span key={d.id} className="ip-error-chip">
                 {requestIdMap[d.id] || "—"} · Doc No: {d.printDocumentNo || "—"}
                 {d.pickingErrorReason ? ` · ${d.pickingErrorReason}` : ""}
-                {d.wrongMaterialSku ? ` · SKU: ${d.wrongMaterialSku}` : ""}
-                {d.wrongMaterialQty ? ` · Qty: ${d.wrongMaterialQty}` : ""}
               </span>
             ))}
           </div>

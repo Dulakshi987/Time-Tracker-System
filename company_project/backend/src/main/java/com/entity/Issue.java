@@ -209,6 +209,8 @@ public class Issue {
     @Column(name = "delivery_vehicle_no")
     private String deliveryVehicleNo;
 
+    @Column(name = "picking_error_reason")
+    private String pickingErrorReason;
 
     // ── Delivery Cancel fields ────────────────────────────────────────
     @Column(name = "delivery_cancel_reason")
