@@ -987,3 +987,59 @@
   border-top: 1px dashed #232848;
   padding-top: 8px;
 }
+
+/* ── Add / merge these into IssueDelivery.css ──────────────────────────── */
+/* I don't have your current .css file, so these are new rules to paste in —
+   they override the badge colors to the lighter/pastel look from your
+   screenshot (soft tinted background + solid-color text, pill shaped). */
+
+.ip-badge {
+  padding: 4px 12px;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  display: inline-block;
+}
+
+.ip-badge.completed {
+  background: rgba(52, 211, 153, 0.18);
+  color: #10b981;
+}
+
+.ip-badge.onhold {
+  background: rgba(251, 146, 60, 0.18);
+  color: #f97316;
+}
+
+.ip-badge.pending {
+  background: rgba(148, 163, 184, 0.2);
+  color: #64748b;
+}
+
+.ip-badge.inprogress {
+  background: rgba(59, 130, 246, 0.18);
+  color: #3b82f6;
+}
+
+.ip-badge.cancelled {
+  background: rgba(239, 68, 68, 0.18);
+  color: #ef4444;
+}
+
+/* ── New Handover mini-button (row Actions) ────────────────────────────── */
+.ip-mini-btn.ip-mini-handover {
+  background: rgba(167, 139, 250, 0.15);
+  color: #a78bfa;
+}
+
+.ip-mini-btn.ip-mini-handover.active {
+  background: #a78bfa;
+  color: #fff;
+}
+
+.ip-mini-btn.ip-mini-handover:disabled,
+.ip-mini-manage.ip-mini-delete:disabled,
+.ip-mini-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}

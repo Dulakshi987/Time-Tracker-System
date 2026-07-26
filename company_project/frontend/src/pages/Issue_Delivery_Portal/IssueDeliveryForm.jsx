@@ -363,6 +363,42 @@ function DeliveryDonePopup({ operatorNames, onConfirm, onCancel }) {
   );
 }
 
+// ── Popup: Handover (Handed Over By) ────────────────────────────────────────
+// A document can be handed over only while it hasn't been put on Hold or
+// Cancelled yet. Once confirmed, Delivered / Hold / Cancel and the Delete
+// button all lock for that row (see DocumentRow's isLocked).
+
+function HandoverPopup({ operatorNames, onConfirm, onCancel }) {
+  const [handoverBy, setHandoverBy] = useState("");
+  const canConfirm = !!handoverBy;
+
+  return (
+    <div className="ip-popup-overlay">
+      <div className="ip-popup">
+        <div className="ip-popup-head">
+          <span>🤝 Handover</span>
+          <button className="ip-popup-close" onClick={onCancel}>✕</button>
+        </div>
+        <p className="ip-popup-sub">Select who is handing over this document</p>
+
+        <span className="ip-popup-label">Handed Over By</span>
+        <PersonPicker value={handoverBy} onChange={setHandoverBy} options={operatorNames} />
+
+        <div className="ip-popup-foot">
+          <button className="ip-btn ip-btn-outline" onClick={onCancel}>Cancel</button>
+          <button
+            className="ip-btn ip-btn-done"
+            disabled={!canConfirm}
+            onClick={() => onConfirm(handoverBy)}
+          >
+            🤝 Confirm Handover
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Popup: Change (Request) Vehicle No ──────────────────────────────────────
 function ChangeVehiclePopup({ doc, mode, onConfirm, onCancel }) {
   const isDelivery = mode === "delivery";
@@ -598,6 +634,14 @@ function ViewDrawer({ doc, divisionLabel, onClose, onChangeVehicle }) {
             <DetailRow label="Delivery Confirm Time" value={formatDateTime(doc.deliveryConfirmTime)} />
           </Section>
 
+          {/* Handover info */}
+          {(doc.handoverBy || doc.handoverTime) && (
+            <Section icon="🤝" title="Handover" accent="delivery">
+              <DetailRow label="Handed Over By" value={doc.handoverBy} />
+              <DetailRow label="Handover Time" value={formatDateTime(doc.handoverTime)} />
+            </Section>
+          )}
+
           {/* Hold info */}
           {(sc === "onhold" || doc.deliveryHoldReason) && (
             <Section icon="⏸" title="Delivery Hold" accent="hold">
@@ -631,13 +675,20 @@ function ViewDrawer({ doc, divisionLabel, onClose, onChangeVehicle }) {
 }
 
 // ── Table Row ─────────────────────────────────────────────────────────────
-// Inline vehicle-edit icons were removed from the table cells — Change is
-// still available inside the View drawer. Edit (Held/Cancelled/Delivered By)
-// and Delete now live in their own "Manage" column, next to View.
+// Locking rule: once a document is Delivered, put On Hold, Cancelled, or
+// Handed Over, the Delivered / Hold / Cancel action buttons AND the Delete
+// button all lock (become non-clickable) for that row.
+// The Handover button itself is only clickable while the row is NOT on Hold,
+// NOT Cancelled, NOT already Delivered, and hasn't already been Handed Over —
+// i.e. only while the row is still "live".
 
-function DocumentRow({ doc, requestId, divisionLabel, onView, onDelivered, onHold, onCancelled, onEdit, onDelete }) {
-  const sc      = statusClass(doc.deliveryStatus);
-  const isFinal = sc === "completed"; // only locked once delivered — hold & cancel stay editable
+function DocumentRow({ doc, requestId, divisionLabel, onView, onDelivered, onHold, onCancelled, onHandover, onEdit, onDelete }) {
+  const sc = statusClass(doc.deliveryStatus);
+  const isHandedOver = !!doc.handoverBy;
+
+  const isLocked = sc === "completed" || sc === "onhold" || sc === "cancelled" || isHandedOver;
+  const canHandover = sc !== "onhold" && sc !== "cancelled" && sc !== "completed" && !isHandedOver;
+
   const pending = daysPending(doc);
   const isOverdue = pending !== null && pending > OVERDUE_DAYS && sc !== "completed";
 
@@ -672,14 +723,21 @@ function DocumentRow({ doc, requestId, divisionLabel, onView, onDelivered, onHol
       <td>
         <div className="ip-row-manage">
           <button className="ip-mini-manage ip-mini-edit" title="Edit" onClick={() => onEdit(doc)}>✎</button>
-          <button className="ip-mini-manage ip-mini-delete" title="Delete" onClick={() => onDelete(doc.id)}>🗑</button>
+          <button
+            className="ip-mini-manage ip-mini-delete"
+            title={isLocked ? "Locked — cannot delete after Hold/Cancel/Delivered/Handover" : "Delete"}
+            disabled={isLocked}
+            onClick={() => onDelete(doc.id)}
+          >
+            🗑
+          </button>
         </div>
       </td>
       <td>
         <div className="ip-row-actions">
           <button
             className={`ip-mini-btn ip-mini-end ${sc === "completed" ? "active" : ""}`}
-            disabled={isFinal}
+            disabled={isLocked}
             title="Delivered"
             onClick={() => onDelivered(doc.id)}
           >
@@ -687,7 +745,7 @@ function DocumentRow({ doc, requestId, divisionLabel, onView, onDelivered, onHol
           </button>
           <button
             className={`ip-mini-btn ip-mini-hold ${sc === "onhold" ? "active" : ""}`}
-            disabled={isFinal}
+            disabled={isLocked}
             title="Hold"
             onClick={() => onHold(doc.id)}
           >
@@ -695,11 +753,19 @@ function DocumentRow({ doc, requestId, divisionLabel, onView, onDelivered, onHol
           </button>
           <button
             className={`ip-mini-btn ip-mini-cancel ${sc === "cancelled" ? "active" : ""}`}
-            disabled={isFinal}
+            disabled={isLocked}
             title="Cancelled"
             onClick={() => onCancelled(doc.id)}
           >
             ✕
+          </button>
+          <button
+            className={`ip-mini-btn ip-mini-handover ${isHandedOver ? "active" : ""}`}
+            disabled={!canHandover}
+            title={isHandedOver ? `Handed over by ${doc.handoverBy}` : "Handover"}
+            onClick={() => onHandover(doc.id)}
+          >
+            🤝
           </button>
         </div>
       </td>
@@ -743,7 +809,7 @@ export default function IssueDeliveryForm() {
   // Delivery (DB), kept as raw records so they can be filtered by division.
   const deliveryOperators = useDeliveryOperators();
 
-  const [activePopup,  setActivePopup]  = useState(null); // "hold" | "delivered" | "cancel" | "vehicle" | "edit" | null
+  const [activePopup,  setActivePopup]  = useState(null); // "hold" | "delivered" | "cancel" | "handover" | "vehicle" | "edit" | null
   const [activeId,     setActiveId]     = useState(null);
   const [vehicleDoc,   setVehicleDoc]   = useState(null);
   const [vehicleMode,  setVehicleMode]  = useState("request"); // "request" | "delivery"
@@ -818,6 +884,7 @@ export default function IssueDeliveryForm() {
   const handleDeliveredClick = (id) => { setActiveId(id); setActivePopup("delivered"); };
   const handleHoldClick      = (id) => { setActiveId(id); setActivePopup("hold"); };
   const handleCancelClick    = (id) => { setActiveId(id); setActivePopup("cancel"); };
+  const handleHandoverClick  = (id) => { setActiveId(id); setActivePopup("handover"); };
   const handleChangeVehicle  = (doc, mode = "request") => { setVehicleDoc(doc); setVehicleMode(mode); setActivePopup("vehicle"); };
   const handleEditClick      = (doc) => { setActiveId(doc.id); setActivePopup("edit"); };
   const closePopup = () => { setActivePopup(null); setActiveId(null); setVehicleDoc(null); setVehicleMode("request"); };
@@ -868,6 +935,24 @@ export default function IssueDeliveryForm() {
       fetchDocuments(true);
     } catch (err) {
       alert("Cancel failed: " + err.message);
+    }
+  };
+
+  // Handover — locks Delivered/Hold/Cancel + Delete for this row once saved.
+  // NOTE: this calls PUT {API_BASE}/{id}/handover with { handoverBy }.
+  // Add this endpoint on the backend (mirroring /hold, /cancel, /end) so it
+  // persists doc.handoverBy / doc.handoverTime.
+  const handleHandoverConfirm = async (handoverBy) => {
+    closePopup();
+    try {
+      await fetch(`${API_BASE}/${activeId}/handover`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ handoverBy }),
+      });
+      fetchDocuments(true);
+    } catch (err) {
+      alert("Handover failed: " + err.message);
     }
   };
 
@@ -969,6 +1054,9 @@ export default function IssueDeliveryForm() {
       )}
       {activePopup === "cancel" && (
         <CancelPopup operatorNames={activeOperatorNames} onConfirm={handleCancelConfirm} onCancel={closePopup} />
+      )}
+      {activePopup === "handover" && (
+        <HandoverPopup operatorNames={activeOperatorNames} onConfirm={handleHandoverConfirm} onCancel={closePopup} />
       )}
       {activePopup === "edit" && (
         <EditPopup doc={activeDoc} operatorNames={activeOperatorNames} onConfirm={handleEditConfirm} onCancel={closePopup} />
@@ -1109,6 +1197,7 @@ export default function IssueDeliveryForm() {
                   onDelivered={handleDeliveredClick}
                   onHold={handleHoldClick}
                   onCancelled={handleCancelClick}
+                  onHandover={handleHandoverClick}
                   onEdit={handleEditClick}
                   onDelete={handleDelete}
                 />
