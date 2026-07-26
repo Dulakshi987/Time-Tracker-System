@@ -380,6 +380,8 @@ function ViewDetailsPopup({ doc, requestId, divisionLabel, onClose }) {
     </div>
   );
 
+  const isFlagged = (doc.hasWrongMaterial || "").toUpperCase() === "YES";
+
   return (
     <div className="ip-popup-overlay">
       <div className="ip-popup">
@@ -428,7 +430,9 @@ function ViewDetailsPopup({ doc, requestId, divisionLabel, onClose }) {
           {row("Pick Duration", `⏱ ${formatDuration(doc.pickDurationSeconds ?? doc.durationSeconds)}`)}
         </div>
 
-        {doc.pickingErrorReason && (doc.hasWrongMaterial || "").toUpperCase() !== "YES" && (
+        {/* Picking Note — logged for record-keeping only (e.g. "Material
+            Excess"), no SKU/Qty capture, so it stays a plain note. */}
+        {doc.pickingErrorReason && !isFlagged && (
           <>
             <div style={{ marginBottom: 6, fontSize: "0.78rem", fontWeight: 700, color: "#7c8db0" }}>
               ℹ️ Picking Note
@@ -439,7 +443,10 @@ function ViewDetailsPopup({ doc, requestId, divisionLabel, onClose }) {
           </>
         )}
 
-        {(doc.hasWrongMaterial || "").toUpperCase() === "YES" && (
+        {/* Picking Error — Reason, SKU and Quantity are always grouped
+            together here, whether the error is still pending Emergency
+            Pick or has already been resolved. */}
+        {isFlagged && (
           <>
             <div
               style={{
@@ -457,8 +464,8 @@ function ViewDetailsPopup({ doc, requestId, divisionLabel, onClose }) {
                 background: doc.emergencyPickResolved ? "rgba(52,211,153,0.08)" : "rgba(239,68,68,0.08)",
               }}
             >
-              {row("Error Type", doc.pickingErrorReason)}
-              {row("Wrong SKU / Description", doc.wrongMaterialSku)}
+              {row("Reason", doc.pickingErrorReason)}
+              {row("SKU / Description", doc.wrongMaterialSku)}
               {row("Quantity", doc.wrongMaterialQty)}
               {row("Re-picked By", doc.emergencyPickResolvedBy && `👤 ${doc.emergencyPickResolvedBy}`)}
             </div>

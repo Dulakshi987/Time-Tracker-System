@@ -250,7 +250,7 @@ function PickedByPopup({ onConfirm, onCancel, pickers, pickersLoading }) {
 }
 
 // ── Popup: Emergency Pick Done (re-pick after Check reported an error) ──────
-function EmergencyPickDonePopup({ onConfirm, onCancel, pickers, pickersLoading }) {
+function EmergencyPickDonePopup({ doc, onConfirm, onCancel, pickers, pickersLoading }) {
   const [resolvedBy, setResolvedBy] = useState("");
 
   return (
@@ -262,12 +262,40 @@ function EmergencyPickDonePopup({ onConfirm, onCancel, pickers, pickersLoading }
         </div>
         <p className="ip-popup-sub">Select who re-picked the correct material</p>
 
+        {/* Reason + SKU + Qty reported by Check Portal — shown here so the
+            picker knows exactly what to re-pick before confirming. */}
+        <div
+          style={{
+            marginBottom: 16,
+            background: "rgba(239,68,68,0.08)",
+            border: "1px solid #ef4444",
+            borderLeft: "4px solid #ef4444",
+            borderRadius: 10,
+            padding: 15,
+          }}
+        >
+          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
+            <span style={{ color: "#ef4444", fontWeight: 700 }}>⚠️ Reason</span>
+            <span>{doc?.pickingErrorReason || "—"}</span>
+          </div>
+          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
+            <span style={{ color: "#ef4444", fontWeight: 700 }}>SKU / Description</span>
+            <span>{doc?.wrongMaterialSku || "—"}</span>
+          </div>
+          <div style={{ display: "flex", justifyContent: "space-between" }}>
+            <span style={{ color: "#ef4444", fontWeight: 700 }}>Quantity</span>
+            <span>{doc?.wrongMaterialQty || "—"}</span>
+          </div>
+        </div>
+
+        <span className="ip-popup-label">Re-picked By</span>
         <PersonPicker value={resolvedBy} onChange={setResolvedBy} people={pickers} loading={pickersLoading} />
 
         <div className="ip-popup-foot" style={{ marginTop: 18 }}>
           <button className="ip-btn ip-btn-outline" onClick={onCancel}>Cancel</button>
           <button
             className="ip-btn ip-btn-done"
+            style={{ background: "#ef4444" }}
             disabled={!resolvedBy}
             onClick={() => onConfirm(resolvedBy)}
           >
@@ -325,6 +353,8 @@ function ViewDetailsPopup({ doc, requestId, divisionLabel, onClose }) {
       <span>{value ?? "—"}</span>
     </div>
   );
+
+  const isFlagged = (doc.hasWrongMaterial || "").toUpperCase() === "YES";
 
   return (
     <div className="ip-popup-overlay">
@@ -386,18 +416,37 @@ function ViewDetailsPopup({ doc, requestId, divisionLabel, onClose }) {
           {row("Print Duration", `⏱ ${formatDuration(doc.printDurationSeconds)}`)}
         </div>
 
-        {(doc.hasWrongMaterial || "").toUpperCase() === "YES" && !doc.emergencyPickResolved && (
+        {/* Picking error section — Reason is now always shown alongside
+            SKU / Qty, both while pending AND after it's been resolved, so
+            the full picture stays visible in the history. */}
+        {isFlagged && (
           <>
-            <div style={{ marginBottom: 6, fontSize: "0.78rem", color: "#ef4444", fontWeight: 700 }}>
-              🚨 Check Portal — Wrong Material Reported
+            <div
+              style={{
+                marginBottom: 6, fontSize: "0.78rem", fontWeight: 700,
+                color: doc.emergencyPickResolved ? "#16a34a" : "#ef4444",
+              }}
+            >
+              {doc.emergencyPickResolved
+                ? "✅ Picking Error — Resolved"
+                : "🚨 Check Portal — Wrong Material Reported"}
             </div>
             <div
               className="ip-hold-box"
-              style={{ marginBottom: 14, border: "1px solid #ef4444", background: "rgba(239,68,68,0.08)" }}
+              style={{
+                marginBottom: 14,
+                border: `1px solid ${doc.emergencyPickResolved ? "#16a34a" : "#ef4444"}`,
+                background: doc.emergencyPickResolved
+                  ? "rgba(22,163,74,0.08)"
+                  : "rgba(239,68,68,0.08)",
+              }}
             >
               {row("Checked By", doc.checkedBy && `👤 ${doc.checkedBy}`)}
+              {row("Reason", doc.pickingErrorReason)}
               {row("Wrong SKU / Description", doc.wrongMaterialSku)}
               {row("Quantity", doc.wrongMaterialQty)}
+              {doc.emergencyPickResolved &&
+                row("Re-picked By", doc.emergencyPickResolvedBy && `👤 ${doc.emergencyPickResolvedBy}`)}
             </div>
           </>
         )}
@@ -561,6 +610,35 @@ function DocumentCard({
             </div>
           </div>
         )}
+
+        {/* Picking error details — Reason + SKU + Qty reported by Check
+            Portal, shown right above the Emergency Pick Done button so the
+            picker sees exactly what to re-pick before clicking it. */}
+        {hasCheckError && (
+          <div
+            style={{
+              marginTop: 15,
+              background: "rgba(239,68,68,0.08)",
+              border: "1px solid #ef4444",
+              borderLeft: "4px solid #ef4444",
+              borderRadius: 10,
+              padding: 15,
+            }}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
+              <span style={{ color: "#ef4444", fontWeight: 700 }}>⚠️ Reason</span>
+              <span>{doc.pickingErrorReason || "—"}</span>
+            </div>
+            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
+              <span style={{ color: "#ef4444", fontWeight: 700 }}>SKU / Description</span>
+              <span>{doc.wrongMaterialSku || "—"}</span>
+            </div>
+            <div style={{ display: "flex", justifyContent: "space-between" }}>
+              <span style={{ color: "#ef4444", fontWeight: 700 }}>Quantity</span>
+              <span>{doc.wrongMaterialQty || "—"}</span>
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="ip-card-foot">
@@ -596,7 +674,11 @@ function DocumentCard({
           </>
         )}
         {hasCheckError && (
-          <button className="ip-btn ip-btn-emergency" onClick={() => onEmergencyDone(doc.id)}>
+          <button
+            className="ip-btn ip-btn-emergency"
+            style={{ background: "#ef4444", color: "#ffffff", border: "none", fontWeight: 700 }}
+            onClick={() => onEmergencyDone(doc.id)}
+          >
             🚨 Emergency Pick Done
           </button>
         )}
@@ -957,7 +1039,13 @@ export default function IssuPikFormt() {
         />
       )}
       {activePopup === "emergency" && (
-        <EmergencyPickDonePopup onConfirm={handleEmergencyConfirm} onCancel={closePopup} pickers={popupPickers} pickersLoading={popupPickersLoading} />
+        <EmergencyPickDonePopup
+          doc={activeDoc}
+          onConfirm={handleEmergencyConfirm}
+          onCancel={closePopup}
+          pickers={popupPickers}
+          pickersLoading={popupPickersLoading}
+        />
       )}
       {activePopup === "edit" && (
         <EditPopup
@@ -1004,6 +1092,9 @@ export default function IssuPikFormt() {
             {activeCheckErrorDocs.map(d => (
               <span key={d.id} className="ip-error-chip">
                 {requestIdMap[d.id] || "—"} · Doc No: {d.printDocumentNo || "—"}
+                {d.pickingErrorReason ? ` · ${d.pickingErrorReason}` : ""}
+                {d.wrongMaterialSku ? ` · SKU: ${d.wrongMaterialSku}` : ""}
+                {d.wrongMaterialQty ? ` · Qty: ${d.wrongMaterialQty}` : ""}
               </span>
             ))}
           </div>
