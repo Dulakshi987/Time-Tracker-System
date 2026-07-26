@@ -772,17 +772,33 @@ function DocumentRow({ doc, requestId, divisionLabel, onView, onDelivered, onHol
       </td>
       <td>
         <div className="ip-row-manage">
-          <button className="ip-mini-manage ip-mini-edit" title="Edit" onClick={() => onEdit(doc)}>✎</button>
+          <button
+            className="ip-mini-manage ip-mini-edit"
+            title="Edit"
+            onClick={() => onEdit(doc)}
+            style={{
+              backgroundColor: "#3b82f6",
+              color: "#eaf2ff",
+              borderColor: "#3b82f6",
+            }}
+          >
+            ✎
+          </button>
           <button
             className="ip-mini-manage ip-mini-delete"
             title={isLocked ? lockedTitle : "Delete"}
             disabled={isLocked}
             onClick={() => onDelete(doc.id)}
-            style={isLocked ? { opacity: 0.35, cursor: "not-allowed" } : { borderColor: "#ef4444", color: "#ef4444" }}
+            style={
+              isLocked
+                ? { opacity: 0.35, cursor: "not-allowed", backgroundColor: "#3a1010", color: "#ef4444", borderColor: "#ef4444" }
+                : { backgroundColor: "#ef4444", color: "#2a0a0a", borderColor: "#ef4444" }
+            }
           >
             🗑
           </button>
         </div>
+
       </td>
       <td>
         <div className="ip-row-actions">
