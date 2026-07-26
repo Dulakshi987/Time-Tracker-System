@@ -364,9 +364,9 @@ function DeliveryDonePopup({ operatorNames, onConfirm, onCancel }) {
 }
 
 // ── Popup: Handover (Handed Over By) ────────────────────────────────────────
-// A document can be handed over only while it hasn't been put on Hold or
-// Cancelled yet. Once confirmed, Delivered / Hold / Cancel and the Delete
-// button all lock for that row (see DocumentRow's isLocked).
+// A document can be handed over only while it is On Hold or Cancelled.
+// Once confirmed, Delivered / Hold / Cancel and the Delete button all lock
+// for that row (see DocumentRow's isLocked).
 
 function HandoverPopup({ operatorNames, onConfirm, onCancel }) {
   const [handoverBy, setHandoverBy] = useState("");
@@ -678,16 +678,21 @@ function ViewDrawer({ doc, divisionLabel, onClose, onChangeVehicle }) {
 // Locking rule: once a document is Delivered, put On Hold, Cancelled, or
 // Handed Over, the Delivered / Hold / Cancel action buttons AND the Delete
 // button all lock (become non-clickable) for that row.
-// Handover itself is only clickable while the row is NOT on Hold, NOT
-// Cancelled, NOT already Delivered, and hasn't already been Handed Over —
-// i.e. only while the row is still "live".
+//
+// Handover rule (UPDATED): Handover is only clickable while the row's
+// status is On Hold or Cancelled — and only if it hasn't already been
+// handed over. For every other status (Pending, In Progress, Delivered)
+// the Handover button stays disabled, while Hold / Cancel / Delivered
+// remain normally clickable.
 
 function DocumentRow({ doc, requestId, divisionLabel, onView, onDelivered, onHold, onCancelled, onHandover, onEdit, onDelete }) {
   const sc = statusClass(doc.deliveryStatus);
   const isHandedOver = !!doc.handoverBy;
 
   const isLocked = sc === "completed" || sc === "onhold" || sc === "cancelled" || isHandedOver;
-  const canHandover = sc !== "onhold" && sc !== "cancelled" && sc !== "completed" && !isHandedOver;
+
+  // Handover enabled ONLY when On Hold or Cancelled (and not already handed over).
+  const canHandover = (sc === "onhold" || sc === "cancelled") && !isHandedOver;
   const lockedTitle = "Locked — Hold / Cancelled / Delivered / Handed Over";
 
   const pending = daysPending(doc);
@@ -766,7 +771,11 @@ function DocumentRow({ doc, requestId, divisionLabel, onView, onDelivered, onHol
         <button
           className={`ip-mini-btn ip-mini-handover ip-mini-btn-standalone ${isHandedOver ? "active" : ""}`}
           disabled={!canHandover}
-          title={isHandedOver ? `Handed over by ${doc.handoverBy}` : (canHandover ? "Handover" : "Locked — cannot handover while On Hold / Cancelled / Delivered")}
+          title={
+            isHandedOver
+              ? `Handed over by ${doc.handoverBy}`
+              : (canHandover ? "Handover" : "Handover available only after Hold or Cancel")
+          }
           onClick={() => onHandover(doc.id)}
         >
           <span className="ip-handover-icon">🤝</span>
