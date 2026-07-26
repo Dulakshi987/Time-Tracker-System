@@ -1110,7 +1110,13 @@ function buildJobTypeCards(jobTypes, documents, divisions, operatorDivisionMap) 
   return cards;
 }
 
-function DashboardPanel({ documents, jobTypes, divisions, operatorDivisionMap }) {
+function DashboardPanel({ documents, jobTypes, divisions, operatorDivisionMap, division }) {
+  // When a specific division is selected in the filter bar, the job-type
+  // cards row should only show cards for that division — not every
+  // division's cards. "ALL" shows every division's cards as before.
+  const divisionsForCards = division && division !== "ALL"
+    ? divisions.filter(d => d.divisionNo === division)
+    : divisions;
   const print = portalCounts(documents, () => true, d => printStatusClass(d.printStatus));
   const pick = portalCounts(documents, d => !!d.printDocumentNo, d => pickStatusClass(d.status));
   const check = portalCounts(
@@ -1143,7 +1149,7 @@ function DashboardPanel({ documents, jobTypes, divisions, operatorDivisionMap })
       <SectionTitle>Total Jobs by Job Type</SectionTitle>
       <div className="adm-kpi-row adm-jobtype-grid">
         <KpiCard label="Total Jobs" value={documents.length} colorClass="accent" />
-        {buildJobTypeCards(jobTypes, documents, divisions, operatorDivisionMap).map(c => (
+        {buildJobTypeCards(jobTypes, documents, divisionsForCards, operatorDivisionMap).map(c => (
           <KpiCard key={c.key} label={c.label} value={c.value} />
         ))}
       </div>
@@ -1179,14 +1185,28 @@ function DashboardPanel({ documents, jobTypes, divisions, operatorDivisionMap })
 // ── Main ───────────────────────────────────────────────────────────────────
 
 export default function AdminDashboard() {
-  const [activeView, setActiveView] = useState("dashboard");
+  const ACTIVE_VIEW_KEY = "adm_active_view";
+  const [activeView, setActiveViewState] = useState(() => {
+    try {
+      const saved = localStorage.getItem(ACTIVE_VIEW_KEY);
+      if (saved && NAV_ITEMS.some(n => n.key === saved)) return saved;
+    } catch (e) { /* localStorage unavailable — fall back to default */ }
+    return "dashboard";
+  });
+  // Wraps setActiveView so every sidebar selection is also remembered —
+  // a page refresh (or reopening the tab) lands back on the same page
+  // instead of always redirecting to the Dashboard.
+  const setActiveView = useCallback((key) => {
+    setActiveViewState(key);
+    try { localStorage.setItem(ACTIVE_VIEW_KEY, key); } catch (e) { /* ignore */ }
+  }, []);
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   const [documents, setDocuments]   = useState([]);
   const [loading, setLoading]       = useState(true);
   const [error, setError]           = useState(null);
 
-  const [range, setRange]       = useState("30D");
+  const [range, setRange]       = useState("TODAY");
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate]     = useState("");
   const [operator, setOperator] = useState("ALL");
@@ -1332,6 +1352,7 @@ export default function AdminDashboard() {
                 jobTypes={jobTypes}
                 divisions={divisionsList}
                 operatorDivisionMap={operatorDivisionMap}
+                division={division}
               />
             )}
           </>
