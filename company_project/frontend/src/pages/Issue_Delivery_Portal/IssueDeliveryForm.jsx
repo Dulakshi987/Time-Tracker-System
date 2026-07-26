@@ -678,9 +678,10 @@ function ViewDrawer({ doc, divisionLabel, onClose, onChangeVehicle }) {
 // Locking rule: once a document is Delivered, put On Hold, Cancelled, or
 // Handed Over, the Delivered / Hold / Cancel action buttons AND the Delete
 // button all lock (become non-clickable) for that row.
-// The Handover button itself is only clickable while the row is NOT on Hold,
-// NOT Cancelled, NOT already Delivered, and hasn't already been Handed Over —
-// i.e. only while the row is still "live".
+// Handover lives in its own column (after Actions), separate from the
+// Delivered/Hold/Cancel cluster. It's only clickable while the row is NOT
+// on Hold, NOT Cancelled, NOT already Delivered, and hasn't already been
+// Handed Over — i.e. only while the row is still "live".
 
 function DocumentRow({ doc, requestId, divisionLabel, onView, onDelivered, onHold, onCancelled, onHandover, onEdit, onDelete }) {
   const sc = statusClass(doc.deliveryStatus);
@@ -759,15 +760,17 @@ function DocumentRow({ doc, requestId, divisionLabel, onView, onDelivered, onHol
           >
             ✕
           </button>
-          <button
-            className={`ip-mini-btn ip-mini-handover ${isHandedOver ? "active" : ""}`}
-            disabled={!canHandover}
-            title={isHandedOver ? `Handed over by ${doc.handoverBy}` : "Handover"}
-            onClick={() => onHandover(doc.id)}
-          >
-            🤝
-          </button>
         </div>
+      </td>
+      <td>
+        <button
+          className={`ip-mini-btn ip-mini-handover ip-mini-btn-standalone ${isHandedOver ? "active" : ""}`}
+          disabled={!canHandover}
+          title={isHandedOver ? `Handed over by ${doc.handoverBy}` : "Handover"}
+          onClick={() => onHandover(doc.id)}
+        >
+          🤝 {isHandedOver ? "Handed Over" : "Handover"}
+        </button>
       </td>
     </tr>
   );
@@ -775,7 +778,7 @@ function DocumentRow({ doc, requestId, divisionLabel, onView, onDelivered, onHol
 
 // ── Skeleton Row ─────────────────────────────────────────────────────────────
 
-const COLUMN_COUNT = 13;
+const COLUMN_COUNT = 14;
 
 function SkeletonRow() {
   return (
@@ -1168,6 +1171,7 @@ export default function IssueDeliveryForm() {
               <th>View</th>
               <th>Manage</th>
               <th>Actions</th>
+              <th>Handover</th>
             </tr>
           </thead>
           <tbody>
