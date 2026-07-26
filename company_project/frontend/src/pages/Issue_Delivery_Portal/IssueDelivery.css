@@ -1,136 +1,68 @@
-/* ─── Delivery Portal – Table View ───────────────────────────────────── */
+/* ─── IssuePrint Portal – Print Cart View ─────────────────────────── */
 
 :root {
-  --ip-bg:          #0f1724;
-  --ip-surface:     #1a2540;
-  --ip-surface2:    #243052;
+  --ip-bg:          #dddfe2;
+  --ip-surface:     #f1f3f7;
+  --ip-surface2:    #f1eeee;
   --ip-border:      #2e3f66;
   --ip-accent:      #3b82f6;
-  --ip-accent-soft: rgba(59, 130, 246, 0.15);
+  --ip-accent-soft: rgba(230, 233, 238, 0.15);
   --ip-green:       #22c55e;
   --ip-amber:       #f59e0b;
   --ip-orange:      #fb923c;
   --ip-red:         #ef4444;
-  --ip-purple:      #a855f7;
-  --ip-text:        #e2e8f0;
-  --ip-muted:       #7c8db0;
+  --ip-text:        #0c0d0e;
+  --ip-muted:       #080808;
   --ip-radius:      10px;
   --ip-shadow:      0 4px 20px rgba(0,0,0,0.35);
   --ip-font:        'Inter', 'Segoe UI', sans-serif;
 }
 
-* {
-  margin: 0;
-  padding: 0;
-  box-sizing: border-box;
-  font-family: var(--ip-font);
-}
-
-body { background: var(--ip-bg); }
-
 .ip-page {
   min-height: 100vh;
   background: var(--ip-bg);
+  font-family: var(--ip-font);
   color: var(--ip-text);
   padding: 28px 24px 48px;
   box-sizing: border-box;
 }
 
-/* ─── Header ──────────────────────────────────────────────────────── */
-
 .ip-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  background: var(--ip-surface);
-  border: 1px solid var(--ip-border);
-  border-radius: 14px;
-  padding: 18px 25px;
-  box-shadow: var(--ip-shadow);
-  margin-bottom: 24px;
+  margin-bottom: 28px;
   flex-wrap: wrap;
   gap: 12px;
 }
 
-.ip-header-left { display: flex; flex-direction: column; }
-
 .ip-header-left h1 {
-  font-size: 1.15rem;
-  font-weight: 800;
-  letter-spacing: 0.02em;
+  font-size: 1.45rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  margin: 0 0 2px;
   color: #fff;
-  text-transform: uppercase;
-  margin: 0;
-  line-height: 1.35;
 }
 
 .ip-header-left p {
   font-size: 0.82rem;
-  font-weight: 600;
-  letter-spacing: 0.03em;
   color: var(--ip-muted);
-  margin-top: 6px;
+  margin: 0;
 }
-
-.ip-header .ip-btn-outline {
-  width: 100px;
-  height: 34px;
-  padding: 0 !important;
-  font-size: 0.78rem;
-  font-weight: 700;
-  border-radius: 8px;
-  background: var(--ip-accent) !important;
-  color: #fff !important;
-  border: none !important;
-}
-
-.ip-header .ip-btn-outline:hover { background: #2563eb !important; }
-
-/* ─── Overdue banner ──────────────────────────────────────────────── */
-
-.ip-overdue-banner {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  background: rgba(239, 68, 68, 0.1);
-  border: 1px solid rgba(239, 68, 68, 0.4);
-  border-radius: 10px;
-  padding: 12px 18px;
-  margin-bottom: 20px;
-  font-size: 0.85rem;
-  color: #fca5a5;
-  flex-wrap: wrap;
-}
-
-.ip-overdue-banner-icon { color: var(--ip-red); font-size: 1.1rem; }
-
-.ip-overdue-banner strong { color: #fff; }
-
-.ip-overdue-banner-action {
-  margin-left: auto;
-  background: rgba(239, 68, 68, 0.2);
-  border: 1px solid var(--ip-red);
-  color: #fff;
-  border-radius: 6px;
-  padding: 6px 14px;
-  font-size: 0.78rem;
-  font-weight: 700;
-  cursor: pointer;
-}
-
-.ip-overdue-banner-action:hover { background: rgba(239, 68, 68, 0.3); }
-
-/* ─── Toolbar ─────────────────────────────────────────────────────── */
 
 .ip-toolbar {
   display: flex;
   gap: 10px;
-  margin-bottom: 20px;
+  margin-bottom: 22px;
   flex-wrap: wrap;
   align-items: center;
 }
 
-.ip-search-wrap { position: relative; flex: 1; min-width: 220px; }
+.ip-search-wrap {
+  position: relative;
+  flex: 1;
+  min-width: 200px;
+}
 
 .ip-search-icon {
   position: absolute;
@@ -151,6 +83,7 @@ body { background: var(--ip-bg); }
   padding: 9px 12px 9px 36px;
   font-size: 0.875rem;
   outline: none;
+  box-sizing: border-box;
   transition: border-color 0.2s;
 }
 
@@ -166,55 +99,37 @@ body { background: var(--ip-bg); }
   font-size: 0.875rem;
   outline: none;
   cursor: pointer;
+  transition: border-color 0.2s;
 }
 
 .ip-filter-select:focus { border-color: var(--ip-accent); }
 
-/* ─── Stats ───────────────────────────────────────────────────────── */
-
-.ip-stats { display: flex; gap: 14px; margin-bottom: 20px; flex-wrap: wrap; }
+.ip-stats {
+  display: flex;
+  gap: 14px;
+  margin-bottom: 22px;
+  flex-wrap: wrap;
+}
 
 .ip-stat-chip {
   background: var(--ip-surface);
   border: 1px solid var(--ip-border);
   border-radius: 20px;
-  padding: 8px 18px;
-  font-size: 0.85rem;
-  font-weight: 600;
-  color: var(--ip-muted);
+  padding: 5px 14px;
+  font-size: 0.78rem;
   display: flex;
   align-items: center;
   gap: 6px;
+  color: var(--ip-muted);
 }
 
-.ip-stat-chip strong { color: var(--ip-text); font-size: 1rem; }
-.ip-stat-chip.blue { border-color: var(--ip-accent); color: var(--ip-accent); }
-.ip-stat-chip.blue strong { color: var(--ip-accent); }
-.ip-stat-chip.green { border-color: var(--ip-green); color: var(--ip-green); }
-.ip-stat-chip.green strong { color: var(--ip-green); }
 
-/* ─── Error ───────────────────────────────────────────────────────── */
 
-.ip-error-inline {
-  background: rgba(239, 68, 68, 0.12);
-  border: 1px solid var(--ip-red);
-  border-radius: 8px;
-  padding: 12px 16px;
-  color: #fca5a5;
-  margin-bottom: 18px;
-  font-size: 0.85rem;
-}
+.ip-stat-chip strong { color: var(--ip-text); font-weight: 600; }
+.ip-stat-chip.green  strong { color: var(--ip-green); }
+.ip-stat-chip.blue   strong { color: var(--ip-accent); }
 
-.ip-error-inline button {
-  background: none;
-  border: none;
-  color: #60a5fa;
-  cursor: pointer;
-  text-decoration: underline;
-  font-size: 0.85rem;
-}
-
-/* ─── Table ───────────────────────────────────────────────────────── */
+/* ─── Table layout ─────────────────────────────────────────────────── */
 
 .ip-table-wrap {
   background: var(--ip-surface);
@@ -227,218 +142,370 @@ body { background: var(--ip-bg); }
 .ip-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 0.82rem;
-  white-space: nowrap;
+  font-size: 0.85rem;
+  min-width: 960px;
 }
 
 .ip-table thead th {
-  background: var(--ip-surface2);
-  color: var(--ip-muted);
-  text-transform: uppercase;
-  font-size: 0.68rem;
-  letter-spacing: 0.06em;
-  font-weight: 700;
   text-align: left;
-  padding: 12px 14px;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ip-muted);
+  font-weight: 700;
+  padding: 14px 16px;
+  background: var(--ip-surface2);
   border-bottom: 1px solid var(--ip-border);
+  white-space: nowrap;
   position: sticky;
   top: 0;
 }
 
 .ip-table tbody td {
-  padding: 12px 14px;
+  padding: 12px 16px;
   border-bottom: 1px solid var(--ip-border);
   color: var(--ip-text);
   vertical-align: middle;
 }
 
-.ip-row { transition: background 0.15s; }
-.ip-row:hover { background: rgba(255,255,255,0.03); }
+.ip-row {
+  transition: background 0.15s;
+  border-left: 3px solid transparent;
+}
+
+.ip-row:hover { background: rgba(213, 214, 216, 0.06); }
 .ip-row:last-child td { border-bottom: none; }
 
-.ip-row.status-pending    td.ip-td-id { border-left: 3px solid var(--ip-amber); }
-.ip-row.status-inprogress td.ip-td-id { border-left: 3px solid var(--ip-accent); }
-.ip-row.status-onhold     td.ip-td-id { border-left: 3px solid var(--ip-orange); }
-.ip-row.status-completed  td.ip-td-id { border-left: 3px solid var(--ip-green); }
-.ip-row.status-cancelled  td.ip-td-id { border-left: 3px solid var(--ip-red); }
+.ip-row.status-pending    { border-left-color: var(--ip-amber); }
+.ip-row.status-inprogress { border-left-color: var(--ip-accent); }
+.ip-row.status-onhold     { border-left-color: var(--ip-orange); }
+.ip-row.status-completed  { border-left-color: var(--ip-green); }
+.ip-row.status-cancelled  { border-left-color: var(--ip-red); }
 
-.ip-row.overdue { background: rgba(239, 68, 68, 0.06); }
-.ip-row.overdue:hover { background: rgba(239, 68, 68, 0.1); }
-
-.ip-td-id { font-weight: 700; color: #fff; }
-.ip-td-division { color: var(--ip-muted); font-size: 0.78rem; }
-.ip-td-docno { font-weight: 600; color: var(--ip-text); }
-
-.ip-td-datetime { color: var(--ip-text); }
-.ip-td-time { color: var(--ip-muted); font-size: 0.75rem; margin-left: 4px; }
-
-.ip-td-requested { white-space: normal; }
-.ip-td-vehicle {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  color: var(--ip-muted);
-  font-size: 0.78rem;
-  margin-top: 2px;
+.ip-row.overdue {
+  background: rgba(239, 68, 68, 0.06);
 }
+.ip-row.overdue:hover { background: rgba(239, 68, 68, 0.12); }
+.ip-row.overdue .ip-td-docno,
+.ip-row.overdue .ip-td-id { color: var(--ip-red); }
 
-.ip-inline-edit-btn {
-  background: none;
-  border: none;
-  color: var(--ip-accent);
-  cursor: pointer;
-  font-size: 0.75rem;
-  padding: 0 4px;
-}
-.ip-inline-edit-btn:hover { text-decoration: underline; }
-
-/* Pending days badge */
 .ip-pending-badge {
-  display: inline-block;
-  background: var(--ip-surface2);
-  color: var(--ip-text);
-  border: 1px solid var(--ip-border);
-  border-radius: 12px;
-  padding: 3px 10px;
-  font-size: 0.75rem;
+  font-size: 0.78rem;
+  color: var(--ip-muted);
   font-weight: 600;
-}
-
-.ip-pending-badge.overdue {
-  background: rgba(239, 68, 68, 0.15);
-  border-color: var(--ip-red);
-  color: #fca5a5;
-  font-weight: 700;
-}
-
-/* ─── Status badges — strong, readable colors ────────────────────── */
-
-.ip-badge {
-  display: inline-block;
-  padding: 5px 14px;
-  border-radius: 14px;
-  font-size: 0.72rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
   white-space: nowrap;
 }
 
-.ip-badge.pending    { background: var(--ip-amber);  color: #1a1203; }
-.ip-badge.inprogress { background: var(--ip-accent); color: #fff; }
-.ip-badge.onhold     { background: var(--ip-orange); color: #1a0f00; }
-.ip-badge.completed  { background: var(--ip-green);  color: #06210f; }
-.ip-badge.cancelled  { background: var(--ip-red);    color: #fff; }
+.ip-pending-badge.overdue {
+  color: var(--ip-red);
+  background: rgba(239, 68, 68, 0.14);
+  border: 1px solid rgba(239, 68, 68, 0.4);
+  padding: 3px 9px;
+  border-radius: 10px;
+}
 
-/* ─── View button ─────────────────────────────────────────────────── */
+.ip-overdue-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: rgba(239, 68, 68, 0.12);
+  border: 1px solid var(--ip-red);
+  border-radius: var(--ip-radius);
+  padding: 12px 16px;
+  color: #fca5a5;
+  font-size: 0.85rem;
+  margin-bottom: 18px;
+}
 
-.ip-btn-view {
-  background: var(--ip-surface2);
-  color: var(--ip-text);
-  border: 1px solid var(--ip-border);
+.ip-overdue-banner-icon { font-size: 1.1rem; flex-shrink: 0; }
+.ip-overdue-banner strong { color: #fff; }
+
+.ip-overdue-banner-action {
+  margin-left: auto;
+  background: rgba(239, 68, 68, 0.18);
+  border: 1px solid var(--ip-red);
+  color: #fff;
   border-radius: 7px;
-  padding: 7px 14px;
+  padding: 6px 14px;
   font-size: 0.78rem;
   font-weight: 600;
   cursor: pointer;
-  transition: all 0.15s;
+  white-space: nowrap;
+  font-family: inherit;
+  transition: opacity 0.15s;
 }
+.ip-overdue-banner-action:hover { opacity: 0.85; }
 
-.ip-btn-view:hover { background: var(--ip-accent-soft); border-color: var(--ip-accent); color: #fff; }
+.ip-td-id      { color: var(--ip-muted); font-weight: 600; }
+.ip-td-docno   { font-weight: 700; color: #fff; }
+.ip-td-datetime { white-space: nowrap; }
+.ip-td-time    { color: var(--ip-muted); font-size: 0.78rem; margin-left: 4px; }
 
-/* ─── Manage (Edit / Delete) ──────────────────────────────────────── */
-
-.ip-row-manage { display: flex; gap: 6px; }
-
-.ip-mini-manage {
-  width: 30px;
-  height: 30px;
+.ip-btn-view {
+  background: var(--ip-accent-soft);
+  border: 1px solid rgba(59,130,246,0.35);
+  color: var(--ip-accent);
   border-radius: 7px;
-  border: 1px solid var(--ip-border);
-  background: var(--ip-surface2);
-  color: var(--ip-muted);
+  padding: 6px 12px;
+  font-size: 0.78rem;
+  font-weight: 600;
   cursor: pointer;
-  font-size: 0.85rem;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: all 0.15s;
+  transition: opacity 0.15s;
+  white-space: nowrap;
+  font-family: inherit;
 }
 
-.ip-mini-edit:hover   { background: var(--ip-accent-soft); border-color: var(--ip-accent); color: var(--ip-accent); }
-.ip-mini-delete:hover { background: rgba(239,68,68,0.15); border-color: var(--ip-red); color: var(--ip-red); }
+.ip-btn-view:hover { opacity: 0.8; }
 
-/* ─── Status action buttons (Delivered / Hold / Cancel) ─────────────
-   Default: muted gray outline, not colored.
-   Disabled: faded further, not clickable.
-   Active (matches current status): filled with its color. ─────────── */
-
-.ip-row-actions { display: flex; gap: 6px; }
+.ip-row-actions {
+  display: flex;
+  gap: 6px;
+}
 
 .ip-mini-btn {
-  width: 32px;
-  height: 32px;
-  border-radius: 7px;
+  width: 30px;
+  height: 30px;
+  flex-shrink: 0;
   border: 1px solid var(--ip-border);
   background: var(--ip-surface2);
-  color: var(--ip-muted);
+  border-radius: 7px;
   cursor: pointer;
   font-size: 0.85rem;
   display: flex;
   align-items: center;
   justify-content: center;
   transition: all 0.15s;
-  opacity: 0.55;
-  filter: grayscale(1);
 }
 
-.ip-mini-btn:hover:not(:disabled) {
-  opacity: 1;
-  filter: grayscale(0);
-}
-
-.ip-mini-btn:disabled {
-  cursor: not-allowed;
-  opacity: 0.25;
-  filter: grayscale(1);
-}
-
-.ip-mini-end:hover:not(:disabled)    { border-color: var(--ip-green);  background: rgba(34,197,94,0.12); }
-.ip-mini-hold:hover:not(:disabled)   { border-color: var(--ip-orange); background: rgba(251,146,60,0.12); }
-.ip-mini-cancel:hover:not(:disabled) { border-color: var(--ip-red);    background: rgba(239,68,68,0.12); }
-
-.ip-mini-btn.active {
-  opacity: 1 !important;
-  filter: grayscale(0) !important;
-  border-width: 1px;
-}
+.ip-mini-btn:hover:not(:disabled) { transform: translateY(-1px); }
+.ip-mini-btn:disabled { opacity: 0.3; cursor: not-allowed; }
 
 .ip-mini-end.active {
-  background: var(--ip-green) !important;
-  border-color: var(--ip-green) !important;
-  color: #06210f !important;
+  background: rgba(34,197,94,0.18);
+  border-color: var(--ip-green);
 }
 
 .ip-mini-hold.active {
-  background: var(--ip-orange) !important;
-  border-color: var(--ip-orange) !important;
-  color: #1a0f00 !important;
+  background: rgba(251,146,60,0.2);
+  border-color: var(--ip-orange);
 }
+
 
 .ip-mini-cancel.active {
-  background: var(--ip-red) !important;
-  border-color: var(--ip-red) !important;
-  color: #fff !important;
+  background: rgba(239,68,68,0.2);
+  border-color: var(--ip-red);
 }
 
-/* ─── Empty / skeleton ────────────────────────────────────────────── */
+/* View popup extras */
+.ip-view-popup { width: 420px; }
 
-.ip-empty { text-align: center; padding: 56px 24px; color: var(--ip-muted); white-space: normal; }
-.ip-empty-icon { font-size: 2.6rem; margin-bottom: 10px; }
-.ip-empty p { font-size: 0.88rem; margin: 0; }
+.ip-view-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.ip-card {
+  background: var(--ip-surface);
+  border: 1px solid var(--ip-border);
+  border-radius: var(--ip-radius);
+  box-shadow: var(--ip-shadow);
+  overflow: hidden;
+  transition: transform 0.18s, box-shadow 0.18s;
+  display: flex;
+  flex-direction: column;
+}
+
+.ip-card:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 8px 32px rgba(0,0,0,0.45);
+}
+
+.ip-card::before {
+  content: '';
+  display: block;
+  height: 3px;
+  width: 100%;
+}
+
+.ip-card.status-pending::before    { background: var(--ip-amber); }
+.ip-card.status-inprogress::before { background: var(--ip-accent); }
+.ip-card.status-onhold::before     { background: var(--ip-orange); }
+.ip-card.status-completed::before  { background: var(--ip-green); }
+
+.ip-card-head {
+  padding: 16px 18px 12px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--ip-border);
+  gap: 10px;
+}
+
+.ip-doc-no {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: #fff;
+  letter-spacing: 0.02em;
+}
+
+.ip-badge {
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 3px 10px;
+  border-radius: 12px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.ip-badge.pending    { background: rgba(245,158,11,0.15); color: var(--ip-amber); }
+.ip-badge.inprogress { background: var(--ip-accent-soft); color: var(--ip-accent); }
+.ip-badge.onhold     { background: rgba(251,146,60,0.15); color: var(--ip-orange); }
+.ip-badge.completed  { background: rgba(34,197,94,0.15);  color: var(--ip-green); }
+
+.ip-card-body {
+  padding: 14px 18px;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ip-detail-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 0.82rem;
+}
+
+.ip-detail-label {
+  color: var(--ip-muted);
+  min-width: 110px;
+  flex-shrink: 0;
+  font-size: 0.78rem;
+  padding-top: 1px;
+}
+
+.ip-detail-value {
+  color: var(--ip-text);
+  word-break: break-word;
+  font-weight: 500;
+}
+
+.ip-times {
+  margin-top: 4px;
+  background: var(--ip-surface2);
+  border-radius: 8px;
+  padding: 10px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ip-time-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.8rem;
+}
+
+.ip-time-row span:first-child { color: var(--ip-muted); }
+.ip-time-row span:last-child  { color: var(--ip-text); font-weight: 500; }
+
+/* Hold info box */
+.ip-hold-box {
+  margin-top: 6px;
+  background: rgba(251, 146, 60, 0.08);
+  border: 1px solid rgba(251, 146, 60, 0.3);
+  border-radius: 8px;
+  padding: 10px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ip-hold-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.78rem;
+}
+
+.ip-hold-row span:first-child { color: var(--ip-orange); font-weight: 600; }
+.ip-hold-row span:last-child  { color: var(--ip-text); text-align: right; max-width: 60%; }
+
+/* Print Done summary box */
+.ip-print-done-box {
+  margin-top: 6px;
+  background: var(--ip-accent-soft);
+  border: 1px solid rgba(59,130,246,0.3);
+  border-radius: 8px;
+  padding: 10px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ip-print-done-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.8rem;
+}
+
+.ip-print-done-row span:first-child { color: var(--ip-accent); font-weight: 600; }
+.ip-print-done-row span:last-child  { color: var(--ip-text); font-weight: 600; }
+
+.ip-card-foot {
+  padding: 12px 18px;
+  border-top: 1px solid var(--ip-border);
+  display: flex;
+  gap: 8px;
+}
+
+.ip-btn {
+  flex: 1;
+  padding: 8px 0;
+  border: none;
+  border-radius: 7px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.15s, transform 0.12s;
+  letter-spacing: 0.02em;
+}
+
+.ip-btn:active { transform: scale(0.97); }
+.ip-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+
+.ip-btn-start  { background: var(--ip-accent); color: #fff; }
+.ip-btn-start:hover:not(:disabled)  { opacity: 0.88; }
+
+.ip-btn-hold   { background: var(--ip-orange); color: #1a0f00; }
+.ip-btn-hold:hover:not(:disabled)   { opacity: 0.88; }
+.ip-btn-hold:disabled { background: #4b3a26; color: var(--ip-muted); }
+
+.ip-btn-end    { background: var(--ip-green); color: #fff; }
+.ip-btn-end:hover:not(:disabled)    { opacity: 0.88; }
+
+.ip-btn-outline {
+  background: transparent;
+  color: var(--ip-muted);
+  border: 1px solid var(--ip-border);
+}
+.ip-btn-outline:hover:not(:disabled) { background: var(--ip-surface2); color: var(--ip-text); }
+
+.ip-empty {
+  text-align: center;
+  padding: 64px 24px;
+  color: var(--ip-muted);
+}
+
+.ip-empty-icon { font-size: 2.8rem; margin-bottom: 12px; }
+.ip-empty p    { font-size: 0.9rem; margin: 0; }
 
 .ip-skeleton {
-  background: linear-gradient(90deg, var(--ip-surface2) 25%, var(--ip-border) 50%, var(--ip-surface2) 75%);
+  background: linear-gradient(90deg, var(--ip-surface) 25%, var(--ip-surface2) 50%, var(--ip-surface) 75%);
   background-size: 200% 100%;
   animation: ip-shimmer 1.4s infinite;
   border-radius: 6px;
@@ -449,104 +516,11 @@ body { background: var(--ip-bg); }
   100% { background-position:  200% 0; }
 }
 
-/* ─── Side Drawer ─────────────────────────────────────────────────── */
-
-.ip-drawer-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(0,0,0,0.6);
-  display: flex;
-  justify-content: flex-end;
-  z-index: 999;
-  backdrop-filter: blur(2px);
-}
-
-.ip-drawer {
-  width: 460px;
-  max-width: 92vw;
-  height: 100vh;
-  background: var(--ip-surface);
-  border-left: 1px solid var(--ip-border);
-  box-shadow: -10px 0 40px rgba(0,0,0,0.5);
-  display: flex;
-  flex-direction: column;
-  animation: ip-drawer-in 0.2s ease-out;
-}
-
-@keyframes ip-drawer-in {
-  from { transform: translateX(24px); opacity: 0; }
-  to   { transform: translateX(0);    opacity: 1; }
-}
-
-.ip-drawer-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 18px 22px;
-  border-bottom: 1px solid var(--ip-border);
-  background: var(--ip-surface2);
-}
-
-.ip-drawer-title { font-weight: 700; color: #fff; font-size: 1rem; }
-
-.ip-drawer-body {
-  flex: 1;
-  overflow-y: auto;
-  padding: 18px 22px;
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-}
-
-.ip-view-section {
-  background: var(--ip-surface2);
-  border: 1px solid var(--ip-border);
-  border-left: 3px solid var(--ip-accent);
-  border-radius: 8px;
-  padding: 12px 14px;
-}
-
-.ip-view-section.accent-print    { border-left-color: var(--ip-purple); }
-.ip-view-section.accent-pick     { border-left-color: var(--ip-accent); }
-.ip-view-section.accent-check    { border-left-color: var(--ip-green); }
-.ip-view-section.accent-delivery { border-left-color: var(--ip-amber); }
-.ip-view-section.accent-hold     { border-left-color: var(--ip-orange); }
-.ip-view-section.accent-cancel   { border-left-color: var(--ip-red); }
-
-.ip-view-section-head {
-  font-weight: 700;
-  font-size: 0.82rem;
-  color: #fff;
-  margin-bottom: 8px;
-}
-
-.ip-view-section-body { display: flex; flex-direction: column; gap: 6px; }
-
-.ip-view-subhead {
-  margin-top: 8px;
-  font-size: 0.72rem;
-  font-weight: 700;
-  color: var(--ip-red);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
-
-.ip-detail-row {
-  display: flex;
-  justify-content: space-between;
-  gap: 10px;
-  font-size: 0.8rem;
-}
-
-.ip-detail-label { color: var(--ip-muted); flex-shrink: 0; }
-.ip-detail-value { color: var(--ip-text); text-align: right; font-weight: 500; word-break: break-word; }
-
-/* ─── Popups (Hold / Cancel / Delivered / Edit / Vehicle) ───────────── */
-
+/* ─── Popup ─────────────────────────────────────────────────────────── */
 .ip-popup-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0,0,0,0.65);
+  background: rgba(0, 0, 0, 0.65);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -555,71 +529,73 @@ body { background: var(--ip-bg); }
 }
 
 .ip-popup {
-  width: 420px;
-  max-width: 92vw;
-  background: var(--ip-surface);
-  color: var(--ip-text);
-  border: 1px solid var(--ip-border);
+  background: #1a2540;
+  border: 1px solid #2e3f66;
   border-radius: 14px;
-  padding: 26px;
-  box-shadow: 0 20px 60px rgba(0,0,0,0.6);
-  max-height: 88vh;
+  padding: 28px;
+  width: 380px;
+  max-width: 90vw;
+  max-height: 85vh;
   overflow-y: auto;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.6);
+  font-family: 'Inter', 'Segoe UI', sans-serif;
 }
 
 .ip-popup-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  font-size: 1rem;
+  font-weight: 700;
+  color: #fff;
   margin-bottom: 6px;
 }
 
-.ip-popup-head span { color: #fff; font-weight: 700; font-size: 1rem; }
-
 .ip-popup-close {
-  background: var(--ip-surface2);
-  color: var(--ip-muted);
+  background: none;
   border: none;
-  width: 32px;
-  height: 32px;
-  border-radius: 8px;
+  color: var(--ip-muted);
   font-size: 1rem;
-  font-weight: 700;
   cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  padding: 2px 6px;
+  border-radius: 4px;
+  transition: color 0.15s;
+}
+.ip-popup-close:hover { color: var(--ip-red); }
+
+.ip-popup-sub {
+  font-size: 0.8rem;
+  color: var(--ip-muted);
+  margin: 0 0 18px;
 }
 
-.ip-popup-close:hover { background: rgba(239,68,68,0.15); color: var(--ip-red); }
-
-.ip-popup-sub { color: var(--ip-muted); font-size: 0.8rem; margin: 0 0 18px; }
-
 .ip-popup-label {
-  color: var(--ip-muted);
   font-size: 0.78rem;
+  color: var(--ip-muted);
   font-weight: 600;
   margin-bottom: 6px;
   display: block;
 }
 
-.ip-popup-field { margin-bottom: 16px; }
-
-.ip-popup-input,
-.ip-popup-text-input {
-  width: 100%;
-  background: var(--ip-surface2);
-  color: var(--ip-text);
-  border: 1px solid var(--ip-border);
-  border-radius: 8px;
-  padding: 10px 14px;
-  margin-top: 8px;
-  outline: none;
+.ip-popup-field {
+  margin-bottom: 16px;
 }
 
-.ip-popup-input:focus,
+.ip-popup-text-input {
+  background: var(--ip-surface2);
+  border: 1px solid var(--ip-border);
+  border-radius: 8px;
+  color: var(--ip-text);
+  font-size: 0.875rem;
+  padding: 10px 14px;
+  outline: none;
+  font-family: inherit;
+  width: 100%;
+  box-sizing: border-box;
+  transition: border-color 0.2s;
+}
+
 .ip-popup-text-input:focus { border-color: var(--ip-accent); }
-.ip-popup-input::placeholder,
 .ip-popup-text-input::placeholder { color: var(--ip-muted); }
 
 .ip-popup-options {
@@ -631,15 +607,16 @@ body { background: var(--ip-bg); }
 }
 
 .ip-popup-option {
-  width: 100%;
   background: var(--ip-surface2);
-  color: var(--ip-text);
   border: 1px solid var(--ip-border);
   border-radius: 8px;
+  color: var(--ip-text);
+  font-size: 0.875rem;
   padding: 10px 14px;
   text-align: left;
   cursor: pointer;
   transition: all 0.15s;
+  font-family: inherit;
 }
 
 .ip-popup-option:hover {
@@ -655,17 +632,211 @@ body { background: var(--ip-bg); }
   font-weight: 600;
 }
 
-.ip-popup-empty {
-  color: var(--ip-muted);
-  font-size: 0.8rem;
-  padding: 10px 4px;
+.ip-popup-input {
+  background: var(--ip-surface2);
+  border: 1px solid var(--ip-accent);
+  border-radius: 8px;
+  color: var(--ip-text);
+  font-size: 0.875rem;
+  padding: 10px 14px;
+  outline: none;
+  font-family: inherit;
+  width: 100%;
+  box-sizing: border-box;
+  margin-top: -2px;
 }
 
-.ip-popup-foot { display: flex; gap: 10px; margin-top: 20px; }
+.ip-popup-input::placeholder { color: var(--ip-muted); }
+.ip-popup-input:focus { border-color: #60a5fa; }
 
-.ip-btn {
+.ip-popup-foot {
+  display: flex;
+  gap: 10px;
+  margin-top: 20px;
+}
+
+.ip-btn-done {
   flex: 1;
   padding: 10px 0;
+  background: var(--ip-green);
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  font-size: 0.875rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: opacity 0.15s;
+  font-family: inherit;
+}
+.ip-btn-done:hover:not(:disabled) { opacity: 0.88; }
+.ip-btn-done:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.ip-btn-hold-confirm {
+  flex: 1;
+  padding: 10px 0;
+  background: var(--ip-orange);
+  color: #1a0f00;
+  border: none;
+  border-radius: 8px;
+  font-size: 0.875rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: opacity 0.15s;
+  font-family: inherit;
+}
+.ip-btn-hold-confirm:hover:not(:disabled) { opacity: 0.88; }
+.ip-btn-hold-confirm:disabled { opacity: 0.4; cursor: not-allowed; }
+
+@media (max-width: 640px) {
+  .ip-page { padding: 16px 14px 32px; }
+  .ip-header { flex-direction: column; align-items: flex-start; }
+  .ip-table { min-width: 800px; }
+}
+
+/* ─── Date Range Filter ────────────────────────────────────────────── */
+.ip-date-filter {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--ip-surface);
+  border: 1px solid var(--ip-border);
+  border-radius: var(--ip-radius);
+  padding: 6px 10px;
+}
+
+.ip-date-filter-icon {
+  font-size: 0.85rem;
+  flex-shrink: 0;
+}
+
+.ip-date-input {
+  background: transparent;
+  border: none;
+  color: var(--ip-text);
+  font-size: 0.8rem;
+  font-family: inherit;
+  outline: none;
+  cursor: pointer;
+  padding: 3px 2px;
+  color-scheme: dark;
+}
+
+.ip-date-input::-webkit-calendar-picker-indicator {
+  filter: invert(0.6);
+  cursor: pointer;
+}
+
+.ip-date-sep {
+  color: var(--ip-muted);
+  font-size: 0.75rem;
+}
+
+.ip-date-clear {
+  background: rgba(239, 68, 68, 0.15);
+  border: none;
+  color: var(--ip-red);
+  border-radius: 5px;
+  width: 20px;
+  height: 20px;
+  font-size: 0.7rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: opacity 0.15s;
+}
+
+.ip-date-clear:hover { opacity: 0.8; }
+
+@media (max-width: 640px) {
+  .ip-date-filter { flex-wrap: wrap; }
+}
+
+/* ─── Cancelled status ─────────────────────────────────────────────── */
+.ip-card.status-cancelled::before { background: var(--ip-red); }
+
+.ip-badge.cancelled {
+  background: var(--ip-red);
+  color: var(--ip-red);
+}
+
+/* ─── Cancel info box ──────────────────────────────────────────────── */
+.ip-cancel-box {
+  margin-top: 6px;
+  background: rgba(216, 8, 8, 0.08);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  border-radius: 8px;
+  padding: 10px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ip-cancel-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.78rem;
+}
+
+.ip-cancel-row span:first-child { color: var(--ip-red); font-weight: 600; }
+.ip-cancel-row span:last-child  { color: var(--ip-red); text-align: right; max-width: 60%; }
+
+/* ─── Trail box (Print By / Picked By / Checked By) ───────────────── */
+.ip-trail-box {
+  margin-top: 4px;
+  background: var(--ip-surface2);
+  border-radius: 8px;
+  padding: 10px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ip-trail-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.78rem;
+}
+
+.ip-trail-row span:first-child { color: var(--ip-muted); }
+.ip-trail-row span:last-child  { color: var(--ip-text); font-weight: 500; }
+
+/* ─── Cancel button ────────────────────────────────────────────────── */
+/* ─── Cancel button ────────────────────────────────────────────────── */
+.ip-btn-cancel {
+  flex: 1;
+  padding: 8px 0;
+  background: var(--ip-red);
+  color: #fff; /* change this */
+  border: none;
+  border-radius: 7px;
+  font-size: 0.8rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: opacity 0.15s, transform 0.12s;
+}
+
+.ip-btn-cancel:hover:not(:disabled) {
+  opacity: 0.88;
+}
+
+.ip-btn-cancel:active {
+  transform: scale(0.97);
+}
+
+.ip-btn-cancel:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+  background: #4a1f1f;
+}
+
+/* ─── Cancel confirm button (inside popup) ────────────────────────── */
+.ip-btn-cancel-confirm {
+  flex: 1;
+  padding: 10px 0;
+  background: var(--ip-red);
+  color: #fff;
   border: none;
   border-radius: 8px;
   font-size: 0.875rem;
@@ -675,26 +846,144 @@ body { background: var(--ip-bg); }
   font-family: inherit;
 }
 
-.ip-btn:hover:not(:disabled) { opacity: 0.88; }
-.ip-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.ip-btn-cancel-confirm:hover:not(:disabled) { opacity: 0.88; }
+.ip-btn-cancel-confirm:disabled { opacity: 0.4; cursor: not-allowed; }
 
-.ip-btn-outline {
-  background: transparent;
-  color: var(--ip-muted);
-  border: 1px solid var(--ip-border);
+/* ══════════════════════════════════════════════════════════════════
+   BELOW: NEW STYLES for Delivery Portal — Requested By / Vehicle No
+   column, Delivery Vehicle No column, inline edit button, and the
+   side-drawer full-trail View panel (replaces the old centered
+   .ip-view-popup card for this screen).
+   ══════════════════════════════════════════════════════════════════ */
+
+/* ── Requested By / Vehicle No + Delivery Vehicle No columns ── */
+.ip-td-requested {
+  font-size: 0.82rem;
 }
-.ip-btn-outline:hover:not(:disabled) { background: var(--ip-surface2); color: var(--ip-text); }
-
-.ip-btn-done          { background: var(--ip-green);  color: #fff; }
-.ip-btn-hold-confirm  { background: var(--ip-orange); color: #1a0f00; }
-.ip-btn-cancel-confirm{ background: var(--ip-red);    color: #fff; }
-
-@media (max-width: 900px) {
-  .ip-table { font-size: 0.76rem; }
+.ip-td-vehicle {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: #0a0a0a;
+  margin-top: 2px;
+  font-size: 0.78rem;
+}
+.ip-inline-edit-btn {
+  background: none;
+  color:black;
+  border: none;
+  cursor: pointer;
+  font-size: 0.78rem;
+  padding: 0 2px;
+  opacity: 0.75;
+}
+.ip-inline-edit-btn:hover {
+  opacity: 1;
 }
 
-@media (max-width: 640px) {
-  .ip-page { padding: 16px 14px 32px; }
-  .ip-header { flex-direction: column; align-items: flex-start; }
-  .ip-drawer { width: 100vw; }
+/* ── Side Drawer (replaces the old centered ViewPopup) ── */
+.ip-drawer-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 15, 15, 0.55);
+  display: flex;
+  justify-content: flex-end;
+  z-index: 1000;
+  animation: ip-fade-in 0.15s ease;
+}
+
+.ip-drawer {
+  width: min(480px, 100%);
+  height: 100%;
+  background: #0a0a0a;
+  border-left: 1px solid #262c4a;
+  display: flex;
+  flex-direction: column;
+  box-shadow: -12px 0 40px rgba(0,0,0,0.35);
+  animation: ip-slide-in 0.22s ease;
+}
+
+@keyframes ip-slide-in {
+  from { transform: translateX(100%); }
+  to   { transform: translateX(0); }
+}
+@keyframes ip-fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+.ip-drawer-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 18px 20px;
+  border-bottom: 1px solid #262c4a;
+  flex-shrink: 0;
+}
+.ip-drawer-title {
+  font-weight: 700;
+  font-size: 1rem;
+  color: #f1f3fb;
+}
+
+.ip-drawer-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px 20px 24px;
+}
+
+/* ── Sections inside the drawer ── */
+.ip-view-section {
+  background: #dcdde0;
+  border: 1px solid #dee0e7;
+  border-radius: 10px;
+  padding: 14px 16px;
+  margin-bottom: 14px;
+  border-left: 3px solid #3b4266;
+}
+.ip-view-section.accent-print    { border-left-color: #3b82f6; }
+.ip-view-section.accent-pick     { border-left-color: #34d399; }
+.ip-view-section.accent-check    { border-left-color: #a78bfa; }
+.ip-view-section.accent-delivery { border-left-color: #f59e0b; }
+.ip-view-section.accent-hold     { border-left-color: #fb923c; }
+.ip-view-section.accent-cancel   { border-left-color: #ef4444; }
+
+.ip-view-section-head {
+  font-weight: 700;
+  font-size: 0.88rem;
+  color: #e4e7f5;
+  margin-bottom: 10px;
+}
+
+/* scoped so it does NOT clash with the .ip-detail-row used by the older
+   card-based popup (.ip-card-body .ip-detail-row) elsewhere in the app */
+.ip-view-section-body .ip-detail-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 5px 0;
+  border-bottom: 1px dashed #232848;
+  font-size: 0.82rem;
+}
+.ip-view-section-body .ip-detail-row:last-child {
+  border-bottom: none;
+}
+.ip-view-section-body .ip-detail-label {
+  color: #f8f8f8;
+  flex-shrink: 0;
+  min-width: 0;
+}
+.ip-view-section-body .ip-detail-value {
+  color: #e4e7f5;
+  text-align: right;
+  font-weight: 600;
+}
+
+.ip-view-subhead {
+  margin: 10px 0 4px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: #fbbf24;
+  border-top: 1px dashed #232848;
+  padding-top: 8px;
 }
