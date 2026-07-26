@@ -504,7 +504,7 @@ function DocumentCard({
           </div>
           {divisionLabel && (
             <div className="ip-doc-division-sub">
-              🏷 {divisionLabel}
+               {divisionLabel}
             </div>
           )}
         </div>

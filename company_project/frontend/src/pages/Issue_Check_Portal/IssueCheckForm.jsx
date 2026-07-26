@@ -1,29 +1,26 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from "react";
-// import DateRangeFilter from "./DateRangeFilter";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import "./IssueCheck.css";
 
 // const API_BASE = "http://localhost:8080/api/check-portal";
-// // Master Setup API — same base the Admin Dashboard's "Master Setup → Check"
-// // panel saves to. We read from here so Held By / Checked By always match
-// // whatever names are entered in Admin Dashboard, live from the DB.
 // const SETUP_API = "http://localhost:8080/api/admin-setup";
 
 const API_BASE = "https://time-tracker-system-production.up.railway.app/api/check-portal";
-
 const SETUP_API = "https://time-tracker-system-production.up.railway.app/api/admin-setup";
 const AUTO_REFRESH = 10000;
-const OPERATOR_REFRESH = 15000;
 
-// Reasons a Picking Error can be logged under.
-// Only "Material Shortage" and "Material Excess" represent an actual
-// picking error that needs SKU/Qty capture + triggers the Emergency Pick
-// workflow (red banner, hasWrongMaterial flag, etc). "Collected Different
-// Material" is logged for record-keeping but does NOT create a picking
-// error / does not require SKU+Qty or trigger the emergency pick flow.
-const PICKING_ERROR_REASONS = [
-  { key: "SHORTAGE", label: "Material Shortage", createsError: true },
-  { key: "EXCESS", label: "Material Excess", createsError: true },
-  { key: "DIFFERENT", label: "Collected Different Material", createsError: false },
+const ISSUE_REASONS = [
+  "Wrong SKU picked",
+  "Wrong quantity",
+  "Damaged item",
+  "Missing item",
+  "Other",
+];
+
+const HOLD_REASONS = [
+  "Waiting for documents",
+  "Checker unavailable",
+  "Waiting for approval",
+  "Other",
 ];
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -47,24 +44,11 @@ function formatDuration(seconds) {
   return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
 }
 
-function jobTypeColor(jt) {
-  const map = {
-    balance:      "#a78bfa",
-    domestic:     "#34d399",
-    cost_center:  "#f59e0b",
-    commercial:   "#3b82f6",
-    sales_order:  "#f472b6",
-  };
-  return map[(jt || "").toLowerCase().replace(/\s+/g, "_")] || "#7c8db0";
-}
-
-// Groups documents by their request date and numbers each group starting
-// from 1, then combines that with the date to build a unique Request ID
-// like 20260816/0001. Same scheme as Pick Portal / Print Portal, so IDs
-// read consistently across all three portals.
+// Same scheme as Print/Pick Portal — groups by request date, numbers
+// within the day, e.g. 20260816/0001.
 function computeRequestIds(documents) {
   const dateKeyOf = (doc) => {
-    if (doc.requestDate)     return String(doc.requestDate).substring(0, 10);
+    if (doc.requestDate) return String(doc.requestDate).substring(0, 10);
     if (doc.createdDatetime) return String(doc.createdDatetime).substring(0, 10);
     return null;
   };
@@ -81,12 +65,9 @@ function computeRequestIds(documents) {
     const compactDate = key === "unknown" ? "00000000" : key.replace(/-/g, "");
     group
       .slice()
-      .sort((a, b) => {
-        if (a.createdDatetime && b.createdDatetime) {
-          return new Date(a.createdDatetime) - new Date(b.createdDatetime);
-        }
-        return a.id - b.id;
-      })
+      .sort((a, b) => (a.createdDatetime && b.createdDatetime
+        ? new Date(a.createdDatetime) - new Date(b.createdDatetime)
+        : a.id - b.id))
       .forEach((doc, idx) => {
         idMap[doc.id] = `${compactDate}/${String(idx + 1).padStart(4, "0")}`;
       });
@@ -95,215 +76,116 @@ function computeRequestIds(documents) {
   return idMap;
 }
 
-function statusClass(s) {
-  const v = (s || "").toLowerCase();
-  if (v.includes("hold"))     return "onhold";
+function jobTypeColor(jt) {
+  const map = {
+    balance: "#8b5cf6", domestic: "#16a34a", cost_center: "#b45309",
+    commercial: "#1d4ed8", sales_order: "#db2777",
+  };
+  return map[(jt || "").toLowerCase().replace(/\s+/g, "_")] || "#64748b";
+}
+
+// ── Status helpers ───────────────────────────────────────────────────────────
+// PENDING → [Start] → IN_PROGRESS
+// IN_PROGRESS → [Hold] → ON_HOLD → [Start = Resume] → IN_PROGRESS
+// IN_PROGRESS → [Report Wrong Material] → WRONG_MATERIAL (sent to Pick Portal
+//   as an emergency). Once Pick Portal resolves it (emergencyPickResolved),
+//   the checker can Resume and finish the check normally.
+// IN_PROGRESS / ON_HOLD → [End] → COMPLETED (Checked)
+
+function statusClass(doc) {
+  const hasOpenIssue = (doc.hasWrongMaterial || "").toUpperCase() === "YES" && !doc.emergencyPickResolved;
+  if (hasOpenIssue) return "wrongmaterial";
+  const v = (doc.status || "").toLowerCase();
+  if (v.includes("hold")) return "onhold";
   if (v.includes("progress")) return "inprogress";
-  if (v.includes("complete") || v.includes("done")) return "completed";
+  if (v.includes("complete") || v.includes("checked") || v.includes("done")) return "completed";
   return "pending";
 }
 
-function statusLabel(s) {
-  const c = statusClass(s);
-  return { pending: "Pending", inprogress: "In Progress", onhold: "On Hold", completed: "Check Done" }[c];
+function statusLabel(doc) {
+  const c = statusClass(doc);
+  return {
+    pending: "Pending",
+    inprogress: "In Progress",
+    onhold: "On Hold",
+    wrongmaterial: "Wrong Material",
+    completed: "Checked",
+  }[c];
 }
 
-// ── Checker names — live from Master Setup (DB) ─────────────────────────────
-// Replaces the old hardcoded PEOPLE_OPTIONS list. Reads the same
-// "/check-operators" table that Admin Dashboard → Master Setup → Check
-// writes to, so adding / editing / deleting a checker there shows up here
-// automatically (polled).
-
-function useCheckOperatorNames() {
-  const [names, setNames] = useState([]);
-
-  const load = useCallback(() => {
-    fetch(`${SETUP_API}/check-operators`)
-      .then(res => {
-        if (!res.ok) throw new Error(`Server error: ${res.status}`);
-        return res.json();
-      })
-      .then(data => {
-        setNames(
-          (Array.isArray(data) ? data : [])
-            .map(p => p.operatorName)
-            .filter(Boolean)
-        );
-      })
-      .catch(() => { /* keep last known list on transient errors */ });
-  }, []);
-
-  useEffect(() => {
-    load();
-    const id = setInterval(load, OPERATOR_REFRESH);
-    return () => clearInterval(id);
-  }, [load]);
-
-  return names;
-}
-
-// ── Generic Person Picker ──────────────────────────────────────────────────
-// Now driven purely by the `options` prop (Master Setup checker names).
-// "Other" free-text entry has been removed — only names that exist in the
-// Check Operators master table can be selected, so whatever gets saved to
-// the DB (heldBy / checkedBy) always matches Master Setup.
-
-function PersonPicker({ value, onChange, options }) {
-  if (!options || options.length === 0) {
-    return (
-      <div className="ip-popup-options">
-        <div style={{ color: "#7c8db0", fontSize: "0.8rem", padding: "8px 2px" }}>
-          No checkers set up yet. Add names in Admin Dashboard → Master Setup → Check.
-        </div>
-      </div>
-    );
-  }
-
+// ── Person Picker (Only Master Data - No "Other") ───────────────────────────
+function PersonPicker({ value, onChange, people, loading }) {
   return (
     <div className="ip-popup-options">
-      {options.map(name => (
-        <button
-          key={name}
-          className={`ip-popup-option ${value === name ? "selected" : ""}`}
-          onClick={() => onChange(name)}
-        >
-          👤 {name}
-        </button>
-      ))}
+      {loading ? (
+        <div className="ip-popup-empty">Loading checkers…</div>
+      ) : people.length === 0 ? (
+        <div className="ip-popup-empty">No checkers found for this division in Master Setup</div>
+      ) : (
+        people.map(name => (
+          <button
+            key={name}
+            className={`ip-popup-option ${value === name ? "selected" : ""}`}
+            onClick={() => onChange(name)}
+          >
+            👤 {name}
+          </button>
+        ))
+      )}
     </div>
   );
 }
 
-// ── Popup: Hold + Picking Error (Held By, no reason field) ──────────────────
-// "Hold Reason" has been removed entirely. Holding now only asks:
-//   1) Is there a picking error, and if so which materials/quantities
-//      (any number of rows, added with "+ Add Material")
-//   2) Who is holding this (Held By, from Master Setup checkers)
-
-function HoldPopup({ operatorNames, onConfirm, onCancel }) {
+// ── Hold Popup ─────────────────────────────────────────────────────────────
+function HoldPopup({ onConfirm, onCancel, checkers, checkersLoading }) {
+  const [reason, setReason] = useState("");
+  const [otherReason, setOtherReason] = useState("");
   const [heldBy, setHeldBy] = useState("");
-  const [pickingErrorKey, setPickingErrorKey] = useState(null); // "SHORTAGE" | "EXCESS" | "DIFFERENT" | "NONE" | null
-  const [materials, setMaterials] = useState([{ sku: "", qty: "" }]);
 
-  const selectedErrorReason = PICKING_ERROR_REASONS.find(r => r.key === pickingErrorKey) || null;
-  // Only "Material Shortage" and "Material Excess" actually create a picking
-  // error (and therefore require SKU/Qty rows). "Collected Different
-  // Material" is recorded but does not create a picking error.
-  const needsDetails = !!selectedErrorReason && selectedErrorReason.createsError;
-
-  const addMaterialRow    = () => setMaterials(prev => [...prev, { sku: "", qty: "" }]);
-  const removeMaterialRow = (idx) => setMaterials(prev => prev.filter((_, i) => i !== idx));
-  const updateMaterialRow = (idx, field, value) =>
-    setMaterials(prev => prev.map((m, i) => (i === idx ? { ...m, [field]: value } : m)));
-
-  const filledMaterials = materials.filter(m => m.sku.trim().length > 0 && m.qty.trim().length > 0);
-
-  const canConfirm =
-    !!heldBy &&
-    pickingErrorKey !== null &&
-    (!needsDetails || filledMaterials.length > 0);
-
-  const handleConfirm = () => {
-    const hasWrongMaterial = needsDetails ? "YES" : "NO";
-    // Multiple material rows are joined into one string per field so no
-    // backend/DB schema change is needed — "SKU-A; SKU-B" ↔ "5; 12" line up
-    // by position (same separator, same order).
-    const skuJoined = needsDetails ? filledMaterials.map(m => m.sku.trim()).join("; ") : "";
-    const qtyJoined = needsDetails ? filledMaterials.map(m => m.qty.trim()).join("; ") : "";
-    onConfirm(
-      heldBy,
-      hasWrongMaterial,
-      skuJoined,
-      qtyJoined,
-      pickingErrorKey === "NONE" ? "" : (selectedErrorReason ? selectedErrorReason.label : "")
-    );
-  };
+  const isOther = reason === "Other";
+  const finalReason = isOther ? otherReason.trim() : reason;
+  const canConfirm = !!finalReason && !!heldBy;
 
   return (
     <div className="ip-popup-overlay">
       <div className="ip-popup">
         <div className="ip-popup-head">
-          <span>⏸ Hold Check</span>
+          <span>⏸ Hold Document</span>
           <button className="ip-popup-close" onClick={onCancel}>✕</button>
         </div>
-        <p className="ip-popup-sub">Select whether there's a picking error, and who is holding this</p>
+        <p className="ip-popup-sub">Select reason and who is holding</p>
 
-        <span className="ip-popup-label">Picking Error?</span>
+        <span className="ip-popup-label">Hold Reason</span>
         <div className="ip-popup-options" style={{ marginBottom: 16 }}>
-          {PICKING_ERROR_REASONS.map(r => (
+          {HOLD_REASONS.map(r => (
             <button
-              key={r.key}
-              className={`ip-popup-option ${pickingErrorKey === r.key ? "selected" : ""}`}
-              onClick={() => {
-                setPickingErrorKey(r.key);
-                if (!r.createsError) setMaterials([{ sku: "", qty: "" }]);
-              }}
+              key={r}
+              className={`ip-popup-option ${reason === r ? "selected" : ""}`}
+              onClick={() => setReason(r)}
             >
-              {r.createsError ? "⚠️ " : "ℹ️ "}{r.label}
+              {r}
             </button>
           ))}
-          <button
-            className={`ip-popup-option ${pickingErrorKey === "NONE" ? "selected" : ""}`}
-            onClick={() => { setPickingErrorKey("NONE"); setMaterials([{ sku: "", qty: "" }]); }}
-          >
-            ✅ No Picking Error
-          </button>
+          {isOther && (
+            <input
+              className="ip-popup-input"
+              placeholder="Type reason..."
+              value={otherReason}
+              onChange={e => setOtherReason(e.target.value)}
+              autoFocus
+            />
+          )}
         </div>
 
-        {needsDetails && (
-          <div style={{ marginBottom: 16 }}>
-            <span className="ip-popup-label">Wrong Material(s)</span>
-
-            {materials.map((m, idx) => (
-              <div key={idx} style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 8 }}>
-                <input
-                  className="ip-popup-text-input"
-                  type="text"
-                  placeholder="SKU / Description"
-                  value={m.sku}
-                  onChange={e => updateMaterialRow(idx, "sku", e.target.value)}
-                  style={{ flex: 2 }}
-                />
-                <input
-                  className="ip-popup-text-input"
-                  type="text"
-                  placeholder="Quantity"
-                  value={m.qty}
-                  onChange={e => updateMaterialRow(idx, "qty", e.target.value)}
-                  style={{ flex: 1 }}
-                />
-                {materials.length > 1 && (
-                  <button
-                    className="ip-btn ip-btn-outline"
-                    style={{ padding: "6px 10px", flex: "unset" }}
-                    onClick={() => removeMaterialRow(idx)}
-                    aria-label="Remove row"
-                  >
-                    ✕
-                  </button>
-                )}
-              </div>
-            ))}
-
-            <button
-              className="ip-btn ip-btn-outline"
-              style={{ marginTop: 10, padding: "6px 14px", flex: "unset" }}
-              onClick={addMaterialRow}
-            >
-              + Add Material
-            </button>
-          </div>
-        )}
-
         <span className="ip-popup-label">Held By</span>
-        <PersonPicker value={heldBy} onChange={setHeldBy} options={operatorNames} />
+        <PersonPicker value={heldBy} onChange={setHeldBy} people={checkers} loading={checkersLoading} />
 
         <div className="ip-popup-foot">
           <button className="ip-btn ip-btn-outline" onClick={onCancel}>Cancel</button>
           <button
             className="ip-btn ip-btn-hold-confirm"
             disabled={!canConfirm}
-            onClick={handleConfirm}
+            onClick={() => onConfirm(finalReason, heldBy)}
           >
             ⏸ Confirm Hold
           </button>
@@ -313,31 +195,83 @@ function HoldPopup({ operatorNames, onConfirm, onCancel }) {
   );
 }
 
-// ── Popup: Check Done (Yes/No wrong material) ────────────────────────────────
-
-function CheckDonePopup({ operatorNames, onConfirm, onCancel }) {
+// ── Report Wrong Material Popup ─────────────────────────────────────────────
+function ReportIssuePopup({ onConfirm, onCancel, checkers, checkersLoading }) {
+  const [reason, setReason] = useState("");
+  const [otherReason, setOtherReason] = useState("");
+  const [sku, setSku] = useState("");
+  const [qty, setQty] = useState("");
   const [checkedBy, setCheckedBy] = useState("");
-  const canConfirm = !!checkedBy;
+
+  const isOther = reason === "Other";
+  const finalReason = isOther ? otherReason.trim() : reason;
+  const canConfirm = !!finalReason && !!sku.trim() && !!qty && !!checkedBy;
 
   return (
     <div className="ip-popup-overlay">
       <div className="ip-popup">
         <div className="ip-popup-head">
-          <span>✅ Check Done</span>
+          <span>🚨 Report Wrong Material</span>
           <button className="ip-popup-close" onClick={onCancel}>✕</button>
         </div>
-        <p className="ip-popup-sub">Select who completed this check</p>
+        <p className="ip-popup-sub">This will alert the Pick Portal for an emergency re-pick</p>
 
-        <PersonPicker value={checkedBy} onChange={setCheckedBy} options={operatorNames} />
+        <span className="ip-popup-label">Reason</span>
+        <div className="ip-popup-options" style={{ marginBottom: 16 }}>
+          {ISSUE_REASONS.map(r => (
+            <button
+              key={r}
+              className={`ip-popup-option ${reason === r ? "selected" : ""}`}
+              onClick={() => setReason(r)}
+            >
+              {r}
+            </button>
+          ))}
+          {isOther && (
+            <input
+              className="ip-popup-input"
+              placeholder="Type reason..."
+              value={otherReason}
+              onChange={e => setOtherReason(e.target.value)}
+              autoFocus
+            />
+          )}
+        </div>
 
-        <div className="ip-popup-foot" style={{ marginTop: 18 }}>
+        <div className="ip-popup-field">
+          <span className="ip-popup-label">Wrong SKU / Description</span>
+          <input
+            className="ip-popup-text-input"
+            type="text"
+            placeholder="Enter SKU or description..."
+            value={sku}
+            onChange={e => setSku(e.target.value)}
+          />
+        </div>
+
+        <div className="ip-popup-field">
+          <span className="ip-popup-label">Quantity</span>
+          <input
+            className="ip-popup-text-input"
+            type="number"
+            min="0"
+            placeholder="Enter quantity..."
+            value={qty}
+            onChange={e => setQty(e.target.value)}
+          />
+        </div>
+
+        <span className="ip-popup-label">Checked By</span>
+        <PersonPicker value={checkedBy} onChange={setCheckedBy} people={checkers} loading={checkersLoading} />
+
+        <div className="ip-popup-foot">
           <button className="ip-btn ip-btn-outline" onClick={onCancel}>Cancel</button>
           <button
-            className="ip-btn ip-btn-done"
+            className="ip-btn ip-btn-emergency"
             disabled={!canConfirm}
-            onClick={() => onConfirm(checkedBy)}
+            onClick={() => onConfirm({ reason: finalReason, sku: sku.trim(), qty, checkedBy })}
           >
-            ✅ Check Done
+            🚨 Report Issue
           </button>
         </div>
       </div>
@@ -345,260 +279,79 @@ function CheckDonePopup({ operatorNames, onConfirm, onCancel }) {
   );
 }
 
-// ── Popup: View Full Details (Print + Pick) ──────────────────────────────────
-
-function ViewDetailsPopup({ doc, onClose }) {
-  if (!doc) return null;
-
-  const row = (label, value) => (
-    <div className="ip-hold-row" key={label}>
-      <span>{label}</span>
-      <span>{value ?? "—"}</span>
-    </div>
-  );
+// ── Check Done (End) Popup — also used for Edit of a completed document ────
+function CheckDonePopup({ onConfirm, onCancel, checkers, checkersLoading, initialCheckedBy, isEdit }) {
+  const [checkedBy, setCheckedBy] = useState(initialCheckedBy || "");
+  const canConfirm = !!checkedBy;
 
   return (
     <div className="ip-popup-overlay">
       <div className="ip-popup">
         <div className="ip-popup-head">
-          <span>📋 Full Details</span>
-          <button className="ip-popup-close" onClick={onClose}>✕</button>
+          <span>✅ {isEdit ? "Edit Check Details" : "Check Done"}</span>
+          <button className="ip-popup-close" onClick={onCancel}>✕</button>
         </div>
-        <p className="ip-popup-sub">Complete history for this document</p>
+        <p className="ip-popup-sub">Select who completed this check</p>
 
-        <div style={{ marginBottom: 6, fontSize: "0.78rem", color: "#7c8db0", fontWeight: 600 }}>
-          Print Portal
-        </div>
-        <div className="ip-hold-box" style={{ marginBottom: 14 }}>
-          {row("Handed Over By", doc.printHandedOverBy && `👤 ${doc.printHandedOverBy}`)}
-          {row("Document Number", doc.printDocumentNo)}
-          {row("Vehicle Number", doc.vehicleNo)}
-          {row("Print Hold Reason", doc.printHoldReason)}
-          {row("Print Held By", doc.printHeldBy && `👤 ${doc.printHeldBy}`)}
-          {row("Print Held At", formatDateTime(doc.printHoldTime))}
-          {row("Printed By", doc.printedBy && `👤 ${doc.printedBy}`)}
-          {row("Print Duration", `⏱ ${formatDuration(doc.printDurationSeconds)}`)}
-        </div>
-
-        <div style={{ marginBottom: 6, fontSize: "0.78rem", color: "#7c8db0", fontWeight: 600 }}>
-          Pick Portal
-        </div>
-        <div className="ip-hold-box" style={{ marginBottom: 14 }}>
-          {row("Pick Hold Reason", doc.pickHoldReason)}
-          {row("Pick Held By", doc.pickHeldBy && `👤 ${doc.pickHeldBy}`)}
-          {row("Pick Held At", formatDateTime(doc.pickHoldTime))}
-          {row("Picked By", doc.pickedBy && `👤 ${doc.pickedBy}`)}
-          {row("Pick Duration", `⏱ ${formatDuration(doc.pickDurationSeconds ?? doc.durationSeconds)}`)}
-        </div>
-
-        {doc.pickingErrorReason && (doc.hasWrongMaterial || "").toUpperCase() !== "YES" && (
-          <>
-            <div style={{ marginBottom: 6, fontSize: "0.78rem", fontWeight: 700, color: "#7c8db0" }}>
-              ℹ️ Picking Note
-            </div>
-            <div className="ip-hold-box" style={{ marginBottom: 14 }}>
-              {row("Note", doc.pickingErrorReason)}
-            </div>
-          </>
-        )}
-
-        {(doc.hasWrongMaterial || "").toUpperCase() === "YES" && (
-          <>
-            <div
-              style={{
-                marginBottom: 6, fontSize: "0.78rem", fontWeight: 700,
-                color: doc.emergencyPickResolved ? "#34d399" : "#ef4444",
-              }}
-            >
-              {doc.emergencyPickResolved ? "✅ Picking Error — Resolved" : "🚨 Picking Error — Pending"}
-            </div>
-            <div
-              className="ip-hold-box"
-              style={{
-                marginBottom: 14,
-                border: `1px solid ${doc.emergencyPickResolved ? "#34d399" : "#ef4444"}`,
-                background: doc.emergencyPickResolved ? "rgba(52,211,153,0.08)" : "rgba(239,68,68,0.08)",
-              }}
-            >
-              {row("Error Type", doc.pickingErrorReason)}
-              {row("Wrong SKU / Description", doc.wrongMaterialSku)}
-              {row("Quantity", doc.wrongMaterialQty)}
-              {row("Re-picked By", doc.emergencyPickResolvedBy && `👤 ${doc.emergencyPickResolvedBy}`)}
-            </div>
-          </>
-        )}
+        <span className="ip-popup-label">Checked By (End By)</span>
+        <PersonPicker value={checkedBy} onChange={setCheckedBy} people={checkers} loading={checkersLoading} />
 
         <div className="ip-popup-foot">
-          <button className="ip-btn ip-btn-outline" onClick={onClose}>Close</button>
+          <button className="ip-btn ip-btn-outline" onClick={onCancel}>Cancel</button>
+          <button
+            className="ip-btn ip-btn-done"
+            disabled={!canConfirm}
+            onClick={() => onConfirm(checkedBy)}
+          >
+            {isEdit ? "✅ Save Changes" : "✅ Check Done"}
+          </button>
         </div>
       </div>
     </div>
   );
 }
 
-// ── Popup: New Emergency Pick Done Alert (auto-triggered from Pick Portal) ──
-// Mirrors the Pick Portal's red "New Picking Error" alert popup, but in
-// green, and fires when Pick Portal confirms an Emergency Pick Done for a
-// document that was previously flagged with a wrong-material error. Clicking
-// an item jumps/scrolls to the matching card in the grid below.
-
-function ResolvedPickAlertPopup({ docs, requestIdMap, onJump, onClose }) {
-  return (
-    <div className="ip-popup-overlay">
-      <div className="ip-popup">
-        <div className="ip-popup-head">
-          <span>✅ Emergency Pick{docs.length > 1 ? "s" : ""} Done</span>
-          <button className="ip-popup-close" onClick={onClose}>✕</button>
-        </div>
-        <p className="ip-popup-sub">
-          Pick Portal re-picked {docs.length} document{docs.length > 1 ? "s" : ""} — click one to jump to it
-        </p>
-
-        <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 16 }}>
-          {docs.map(d => (
-            <button
-              key={d.id}
-              onClick={() => onJump(d.id)}
-              style={{
-                textAlign: "left",
-                background: "rgba(52,211,153,0.1)",
-                border: "1px solid #34d399",
-                borderRadius: 8,
-                padding: "10px 12px",
-                cursor: "pointer",
-                color: "#fff",
-              }}
-            >
-              <div style={{ fontWeight: 700, color: "#34d399", marginBottom: 4 }}>
-                {requestIdMap[d.id] || "—"} · Doc No: {d.printDocumentNo || "—"}
-              </div>
-              <div style={{ fontSize: "0.8rem", color: "#86efac" }}>
-                {d.pickingErrorReason ? `${d.pickingErrorReason} · ` : ""}
-                Re-picked by {d.emergencyPickResolvedBy || "—"}
-              </div>
-            </button>
-          ))}
-        </div>
-
-        <div className="ip-popup-foot">
-          <button className="ip-btn ip-btn-outline" onClick={onClose}>Close</button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ── Single Document Card ─────────────────────────────────────────────────────
-
-function DocumentCard({ doc, requestId, onStart, onHold, onEnd, onView, cardRef, jumpHighlighted }) {
-  const sc        = statusClass(doc.checkStatus);
-  const jColor    = jobTypeColor(doc.jobType);
+// ── Document Card ──────────────────────────────────────────────────────────
+function DocumentCard({ doc, requestId, divisionLabel, onStart, onHold, onReportIssue, onEnd, onEdit, onDelete }) {
+  const sc = statusClass(doc);
+  const jColor = jobTypeColor(doc.jobType);
   const isPending = sc === "pending";
-  const isStarted = sc === "inprogress";
-  const isOnHold  = sc === "onhold";
-  const isDone    = sc === "completed";
+  const isInProgress = sc === "inprogress";
+  const isOnHold = sc === "onhold";
+  const isWrongMaterial = sc === "wrongmaterial";
+  const isDone = sc === "completed";
 
-  const isFlagged = (doc.hasWrongMaterial || "").toUpperCase() === "YES";
-  // Pick Portal hasn't re-picked yet — still an open picking error.
-  const hasUnresolvedError = isFlagged && !doc.emergencyPickResolved && !isDone;
-  // Pick Portal has confirmed Emergency Pick Done — error is cleared,
-  // waiting on this Check to finish/confirm.
-  const hasResolvedError = isFlagged && doc.emergencyPickResolved && !isDone;
-
-  const cardClassName =
-    `ip-card status-${sc}` +
-    (hasUnresolvedError ? " ip-card-wrong-material" : "") +
-    (hasResolvedError ? " ip-card-error-resolved" : "");
-
-  const cardStyle = hasUnresolvedError
-    ? {
-        border: "2px solid #ef4444",
-        boxShadow: "0 0 0 1px rgba(239,68,68,0.35), 0 0 16px rgba(239,68,68,0.25)",
-        background: "rgba(239,68,68,0.06)",
-      }
-    : hasResolvedError
-    ? {
-        border: "2px solid #34d399",
-        boxShadow: "0 0 0 1px rgba(52,211,153,0.35), 0 0 16px rgba(52,211,153,0.2)",
-        background: "rgba(52,211,153,0.06)",
-      }
-    : undefined;
-
-  // Extra pulsing ring shown briefly right after jumping here from the
-  // "Emergency Pick Done" alert popup, so it's obvious which card it meant.
-  const jumpStyle = jumpHighlighted
-    ? {
-        outline: "3px solid #facc15",
-        outlineOffset: 2,
-        transition: "outline-color 0.3s ease",
-      }
-    : undefined;
+  const canStart = isPending || isOnHold;
+  const canHold = isInProgress;
+  const canReportIssue = isInProgress;
+  const canEnd = isInProgress || isOnHold;
 
   return (
-    <div ref={cardRef} className={cardClassName} style={{ ...cardStyle, ...jumpStyle }}>
-      {hasUnresolvedError && (
-        <div
-          style={{
-            background: "#ef4444",
-            color: "#fff",
-            fontWeight: 700,
-            fontSize: "0.78rem",
-            padding: "6px 12px",
-            borderRadius: 6,
-            marginBottom: 10,
-            display: "flex",
-            alignItems: "center",
-            gap: 6,
-          }}
-        >
-          🚨 PICKING ERROR{doc.pickingErrorReason ? ` (${doc.pickingErrorReason})` : ""} — Emergency Pick Required
+    <div className={`ip-card status-${sc}`}>
+      {isWrongMaterial && (
+        <div className="ip-emergency-banner">
+          🚨 WRONG MATERIAL REPORTED — Waiting on Pick Portal
         </div>
       )}
-      {hasResolvedError && (
-        <div
-          style={{
-            background: "#34d399",
-            color: "#06281c",
-            fontWeight: 700,
-            fontSize: "0.78rem",
-            padding: "6px 12px",
-            borderRadius: 6,
-            marginBottom: 10,
-            display: "flex",
-            alignItems: "center",
-            gap: 6,
-          }}
-        >
-          ✅ EMERGENCY PICK DONE — Re-picked, ready to continue check
-        </div>
-      )}
-
-      {/* ── Head ── */}
       <div className="ip-card-head">
         <div>
           <div className="ip-doc-no">{requestId || "—"}</div>
           <div className="ip-doc-number-sub">
-            Doc No: {doc.printDocumentNo ? doc.printDocumentNo : "Not entered"}
+            Doc No: {doc.printDocumentNo || "Not entered"}
           </div>
           <div style={{ color: jColor, fontWeight: 700, fontSize: "0.78rem", marginTop: 2 }}>
             {doc.jobType || "—"}
           </div>
+          {divisionLabel && (
+            <div className="ip-doc-division-sub">
+               {divisionLabel}
+            </div>
+          )}
         </div>
-        <span className={`ip-badge ${hasUnresolvedError ? "onhold" : hasResolvedError ? "completed" : sc}`}>
-          {hasUnresolvedError
-            ? "🚨 Picking Error Pending"
-            : hasResolvedError
-            ? "✅ Emergency Pick Done"
-            : statusLabel(doc.checkStatus)}
-        </span>
+        <span className={`ip-badge ${sc}`}>{statusLabel(doc)}</span>
       </div>
 
-      {/* ── Body ── */}
       <div className="ip-card-body">
-        <div className="ip-detail-row">
-          <span className="ip-detail-label">Requested By</span>
-          <span className="ip-detail-value">{doc.requestedBy || "—"}</span>
-        </div>
         <div className="ip-detail-row">
           <span className="ip-detail-label">Job WBS</span>
           <span className="ip-detail-value">{doc.jobwbs || "—"}</span>
@@ -613,195 +366,103 @@ function DocumentCard({ doc, requestId, onStart, onHold, onEnd, onView, cardRef,
         </div>
 
         <div className="ip-times">
-          <div className="ip-time-row">
-            <span>Request Date</span>
-            <span>{formatDate(doc.requestDate)}</span>
-          </div>
-          <div className="ip-time-row">
-            <span>Request Time</span>
-            <span>{formatTime(doc.requestTime)}</span>
-          </div>
+          <div className="ip-time-row"><span>Request Date</span><span>{formatDate(doc.requestDate)}</span></div>
+          <div className="ip-time-row"><span>Request Time</span><span>{formatTime(doc.requestTime)}</span></div>
         </div>
 
-        {/* Hold info banner — Hold Reason removed, Held By / Held At only */}
-        {(isOnHold || doc.checkHeldBy) && (
+        {(isOnHold || doc.holdReason) && (
           <div className="ip-hold-box">
+            <div className="ip-hold-row"><span>Hold Reason</span><span>{doc.holdReason || "—"}</span></div>
+            <div className="ip-hold-row"><span>Held By</span><span>👤 {doc.heldBy || "—"}</span></div>
+            <div className="ip-hold-row"><span>Held At</span><span>{formatDateTime(doc.holdTime)}</span></div>
+          </div>
+        )}
+
+        {(doc.hasWrongMaterial || "").toUpperCase() === "YES" && (
+          <div className="ip-hold-box ip-issue-box">
+            <div className="ip-hold-row"><span>Issue Reason</span><span>{doc.pickingErrorReason || "—"}</span></div>
+            <div className="ip-hold-row"><span>Wrong SKU</span><span>{doc.wrongMaterialSku || "—"}</span></div>
+            <div className="ip-hold-row"><span>Quantity</span><span>{doc.wrongMaterialQty || "—"}</span></div>
+            <div className="ip-hold-row"><span>Checked By</span><span>👤 {doc.checkedBy || "—"}</span></div>
             <div className="ip-hold-row">
-              <span>Held By</span>
-              <span>👤 {doc.checkHeldBy || "—"}</span>
-            </div>
-            <div className="ip-hold-row">
-              <span>Held At</span>
-              <span>{formatDateTime(doc.checkHoldTime)}</span>
+              <span>Emergency Pick</span>
+              <span>{doc.emergencyPickResolved ? "✅ Resolved" : "⏳ Pending"}</span>
             </div>
           </div>
         )}
 
-        {/* Wrong material info — reported at Hold time, shown as soon as it's known */}
-        {isFlagged && (
-          <div className="ip-wrong-material-box">
-            <div className="ip-wrong-material-row">
-              <span>{hasResolvedError ? "✅ Emergency Pick Done" : "⚠️ " + (doc.pickingErrorReason || "Wrong Material")}</span>
-              <span>{doc.wrongMaterialSku || "—"}</span>
-            </div>
-            <div className="ip-wrong-material-row">
-              <span>Quantity</span>
-              <span>{doc.wrongMaterialQty || "—"}</span>
-            </div>
-            {hasResolvedError && (
-              <div className="ip-wrong-material-row">
-                <span>Re-picked By</span>
-                <span>👤 {doc.emergencyPickResolvedBy || "—"}</span>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Collected Different Material — logged, but not a picking error */}
-        {!isFlagged && doc.pickingErrorReason && (
-          <div className="ip-hold-box">
-            <div className="ip-hold-row">
-              <span>ℹ️ Picking Note</span>
-              <span>{doc.pickingErrorReason}</span>
-            </div>
-          </div>
-        )}
-
-        {/* Check Done summary */}
         {isDone && (
-          <>
-            {!isFlagged && !doc.pickingErrorReason && (
-              <div className="ip-no-issue-box">✅ No material issues</div>
-            )}
+          <div className="ip-print-done-box">
+            <div className="ip-print-done-row"><span>Checked By (End By)</span><span>👤 {doc.checkedBy || "—"}</span></div>
+            <div className="ip-print-done-row"><span>Duration</span><span>⏱ {formatDuration(doc.durationSeconds)}</span></div>
+          </div>
+        )}
+      </div>
 
-            <div className="ip-print-done-box">
-              <div className="ip-print-done-row">
-                <span>Checked By</span>
-                <span>👤 {doc.checkedBy || "—"}</span>
-              </div>
-              <div className="ip-print-done-row">
-                <span>Duration</span>
-                <span>⏱ {formatDuration(doc.checkDurationSeconds)}</span>
-              </div>
-            </div>
+      <div className="ip-card-foot">
+        {isDone ? (
+          <>
+            <button className="ip-btn ip-btn-edit" onClick={() => onEdit(doc)}>
+              ✎ Edit
+            </button>
+            <button className="ip-btn ip-btn-delete" onClick={() => onDelete(doc.id)}>
+              🗑 Delete
+            </button>
+          </>
+        ) : (
+          <>
+            <button className="ip-btn ip-btn-start" disabled={!canStart} onClick={() => onStart(doc.id)}>
+              {isOnHold ? "▶ Resume" : "▶ Start"}
+            </button>
+            <button className="ip-btn ip-btn-hold" disabled={!canHold} onClick={() => onHold(doc.id)}>
+              ⏸ Hold
+            </button>
+            <button className="ip-btn ip-btn-emergency" disabled={!canReportIssue} onClick={() => onReportIssue(doc.id)}>
+              🚨 Wrong Material
+            </button>
+            <button className="ip-btn ip-btn-end" disabled={!canEnd} onClick={() => onEnd(doc.id)}>
+              ■ End
+            </button>
           </>
         )}
       </div>
-
-      {/* ── Footer Buttons: Start | Hold | End | View ── */}
-      <div className="ip-card-foot">
-        <button
-          className="ip-btn ip-btn-start"
-          disabled={!(isPending || isOnHold)}
-          onClick={() => onStart(doc.id)}
-        >
-          {isOnHold ? "▶ Resume" : "▶ Start"}
-        </button>
-        <button
-          className="ip-btn ip-btn-hold"
-          disabled={!isStarted}
-          onClick={() => onHold(doc.id)}
-        >
-          ⏸ Hold
-        </button>
-        <button
-          className="ip-btn ip-btn-end"
-          disabled={!(isStarted || isOnHold)}
-          onClick={() => onEnd(doc.id)}
-        >
-          ■ End
-        </button>
-        <button
-          className="ip-btn ip-btn-outline"
-          onClick={() => onView(doc.id)}
-        >
-          👁 View
-        </button>
-      </div>
     </div>
   );
 }
 
-// ── Skeleton Card ────────────────────────────────────────────────────────────
-
-function SkeletonCard() {
-  return (
-    <div className="ip-card status-pending">
-      <div className="ip-card-head">
-        <div>
-          <div className="ip-skeleton" style={{ width: 100, height: 15, marginBottom: 6 }} />
-          <div className="ip-skeleton" style={{ width: 70, height: 11 }} />
-        </div>
-        <div className="ip-skeleton" style={{ width: 72, height: 22, borderRadius: 12 }} />
-      </div>
-      <div className="ip-card-body">
-        {[1,2,3,4].map(i => (
-          <div key={i} className="ip-detail-row">
-            <div className="ip-skeleton" style={{ width: 90, height: 11 }} />
-            <div className="ip-skeleton" style={{ width: 130, height: 11 }} />
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-// ── Main Component ───────────────────────────────────────────────────────────
-
-export default function IssueCheckForm() {
-  const [documents,    setDocuments]    = useState([]);
-  const [loading,      setLoading]      = useState(true);
-  const [error,        setError]        = useState(null);
-  const [search,       setSearch]       = useState("");
-  const [filterType,   setFilterType]   = useState("ALL");
+// ── Main Component ─────────────────────────────────────────────────────────
+export default function IssueCheckFormat() {
+  const [documents, setDocuments] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [search, setSearch] = useState("");
+  const [filterType, setFilterType] = useState("ALL");
   const [filterStatus, setFilterStatus] = useState("ALL");
-  const [fromDate,     setFromDate]     = useState("");
-  const [toDate,       setToDate]       = useState("");
-  const [lastUpdated,  setLastUpdated]  = useState(null);
-  const [refreshing,   setRefreshing]   = useState(false);
+  const [lastUpdated, setLastUpdated] = useState(null);
+  const [refreshing, setRefreshing] = useState(false);
 
-  // Checker names — live from Admin Dashboard → Master Setup → Check (DB).
-  const checkOperatorNames = useCheckOperatorNames();
+  // Divisions (Admin Master Data) — used to label each card with its Division
+  const [divisions, setDivisions] = useState([]);
 
-  const [activePopup,  setActivePopup]  = useState(null); // "hold" | "end" | "view" | null
-  const [activeId,     setActiveId]     = useState(null);
+  // Checkers shown in the currently open popup — scoped to that document's
+  // Division (Admin Master Data, division-wise), same pattern as
+  // Print Portal's popupOperators / Pick Portal's popupPickers.
+  const [popupCheckers, setPopupCheckers] = useState([]);
+  const [popupCheckersLoading, setPopupCheckersLoading] = useState(false);
 
-  // "Emergency Pick Done" alert popup (separate from activePopup — auto-triggered
-  // when Pick Portal confirms a re-pick, on top of the persistent green bar).
-  const [resolvedAlertDocs, setResolvedAlertDocs] = useState([]); // docs waiting to be acknowledged
-  const [seenResolvedIds,   setSeenResolvedIds]   = useState(() => new Set()); // ids already alerted for
+  const [activePopup, setActivePopup] = useState(null); // "hold" | "issue" | "end" | null
+  const [activeId, setActiveId] = useState(null);
+  const [editValues, setEditValues] = useState({ checkedBy: "" });
 
-  // Card scroll/highlight — used by the alert popup's "jump to card" click
-  const cardRefs = useRef({});
-  const [jumpHighlightId, setJumpHighlightId] = useState(null);
-
-  const handleJumpToCard = (id) => {
-    setResolvedAlertDocs([]); // close the alert popup
-    const el = cardRefs.current[id];
-    if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
-    setJumpHighlightId(id);
-    setTimeout(() => setJumpHighlightId(prev => (prev === id ? null : prev)), 2500);
-  };
-
-  // ── Fetch ──
   const fetchDocuments = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
     else setRefreshing(true);
     setError(null);
     try {
-      const res  = await fetch(API_BASE);
+      const res = await fetch(API_BASE);
       if (!res.ok) throw new Error(`Server error: ${res.status}`);
       const data = await res.json();
-      // Only bring documents into Check Portal once BOTH conditions are met:
-      // 1) Pick Portal has marked the document as Pick Done (status = completed)
-      // 2) Print Portal has already entered a document number for it
-      const readyForCheck = data.filter(d => {
-        const pickDone = statusClass(d.status) === "completed";
-        const hasDocNo = d.printDocumentNo && String(d.printDocumentNo).trim() !== "";
-        return pickDone && hasDocNo;
-      });
-
-      setDocuments(readyForCheck);
+      setDocuments(data);
       setLastUpdated(new Date());
     } catch (err) {
       setError(err.message);
@@ -811,151 +472,243 @@ export default function IssueCheckForm() {
     }
   }, []);
 
-  useEffect(() => { fetchDocuments(false); }, [fetchDocuments]);
+  const fetchDivisions = useCallback(async () => {
+    try {
+      const res = await fetch(`${SETUP_API}/divisions`);
+      if (res.ok) {
+        const data = await res.json();
+        setDivisions(data || []);
+      }
+    } catch (e) {
+      console.warn("Failed to load divisions", e);
+    }
+  }, []);
+
+  const divisionNoToName = useMemo(() => {
+    const map = {};
+    divisions.forEach(d => { map[d.divisionNo] = d.divisionName; });
+    return map;
+  }, [divisions]);
+
+  // Division-wise checkers — only the checkers added under that specific
+  // Division in Admin Master Data. The backend's /checkers endpoint
+  // returns ALL checkers (no dedicated "by division" endpoint), so we
+  // fetch them all and filter client-side on divisionNo — same pattern
+  // as Print Portal's /print-operators and Pick Portal's /pickers.
+  const fetchCheckersForDivision = useCallback(async (divisionNo) => {
+    if (!divisionNo) {
+      setPopupCheckers([]);
+      return;
+    }
+
+    setPopupCheckersLoading(true);
+    try {
+      const res = await fetch(`${SETUP_API}/checkers`);
+      if (res.ok) {
+        const data = await res.json();
+        setPopupCheckers(
+          (data || [])
+            .filter(c => {
+              const cDivisionNo = c.divisionNo || (c.division && c.division.divisionNo) || "";
+              return String(cDivisionNo) === String(divisionNo);
+            })
+            .map(c => c.checkerNicName || c.checkerName || c.name || c.fullName)
+            .filter(Boolean)
+        );
+      } else {
+        setPopupCheckers([]);
+      }
+    } catch (e) {
+      console.warn("Failed to load checkers for division", e);
+      setPopupCheckers([]);
+    } finally {
+      setPopupCheckersLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
-    const id = setInterval(() => fetchDocuments(true), AUTO_REFRESH);
+    fetchDocuments(false);
+    fetchDivisions();
+  }, [fetchDocuments, fetchDivisions]);
+
+  useEffect(() => {
+    const id = setInterval(() => {
+      fetchDocuments(true);
+    }, AUTO_REFRESH);
     return () => clearInterval(id);
   }, [fetchDocuments]);
 
-  // ── Start / Resume ──
+  const getDocById = useCallback(
+    (id) => documents.find(d => d.id === id),
+    [documents]
+  );
+
+  const closePopup = () => {
+    setActivePopup(null);
+    setActiveId(null);
+    setEditValues({ checkedBy: "" });
+    setPopupCheckers([]);
+  };
+
   const handleStart = async (id) => {
     try {
       await fetch(`${API_BASE}/${id}/start`, { method: "PUT" });
       fetchDocuments(true);
+    } catch (err) { alert("Start failed: " + err.message); }
+  };
+
+  const handleHoldClick = async (id) => {
+    const doc = getDocById(id);
+    setActiveId(id);
+    setActivePopup("hold");
+    await fetchCheckersForDivision(doc?.divisionNo);
+  };
+
+  const handleReportIssueClick = async (id) => {
+    const doc = getDocById(id);
+    setActiveId(id);
+    setActivePopup("issue");
+    await fetchCheckersForDivision(doc?.divisionNo);
+  };
+
+  const handleEndClick = async (id) => {
+    const doc = getDocById(id);
+    setActiveId(id);
+    setEditValues({ checkedBy: "" });
+    setActivePopup("end");
+    await fetchCheckersForDivision(doc?.divisionNo);
+  };
+
+  // Edit — reopens the same popup pre-filled with the completed document's values
+  const handleEditClick = async (doc) => {
+    setActiveId(doc.id);
+    setEditValues({ checkedBy: doc.checkedBy || "" });
+    setActivePopup("end");
+    await fetchCheckersForDivision(doc?.divisionNo);
+  };
+
+  // Delete — removes the document entirely
+  const handleDeleteClick = async (id) => {
+    if (!window.confirm("Delete this document permanently? This cannot be undone.")) return;
+    try {
+      const res = await fetch(`${API_BASE}/${id}`, { method: "DELETE" });
+      if (!res.ok) throw new Error(`Server error: ${res.status}`);
+      fetchDocuments(true);
     } catch (err) {
-      alert("Start failed: " + err.message);
+      alert("Delete failed: " + err.message);
     }
   };
 
-  const handleHoldClick = (id) => { setActiveId(id); setActivePopup("hold"); };
-  const handleEndClick  = (id) => { setActiveId(id); setActivePopup("end"); };
-  const handleViewClick = (id) => { setActiveId(id); setActivePopup("view"); };
-  const closePopup = () => { setActivePopup(null); setActiveId(null); };
-
-  // Hold Reason removed — Hold now only carries heldBy + picking-error info.
-  const handleHoldConfirm = async (heldBy, hasWrongMaterial, wrongMaterialSku, wrongMaterialQty, pickingErrorReason) => {
+  const handleHoldConfirm = async (holdReason, heldBy) => {
+    const id = activeId;
     closePopup();
     try {
-      await fetch(`${API_BASE}/${activeId}/hold`, {
+      await fetch(`${API_BASE}/${id}/hold`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ heldBy, hasWrongMaterial, wrongMaterialSku, wrongMaterialQty, pickingErrorReason }),
+        body: JSON.stringify({ holdReason, heldBy }),
       });
       fetchDocuments(true);
-    } catch (err) {
-      alert("Hold failed: " + err.message);
-    }
+    } catch (err) { alert("Hold failed: " + err.message); }
+  };
+
+  const handleReportIssueConfirm = async ({ reason, sku, qty, checkedBy }) => {
+    const id = activeId;
+    closePopup();
+    try {
+      await fetch(`${API_BASE}/${id}/report-issue`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          pickingErrorReason: reason,
+          wrongMaterialSku: sku,
+          wrongMaterialQty: qty,
+          checkedBy,
+        }),
+      });
+      fetchDocuments(true);
+    } catch (err) { alert("Report failed: " + err.message); }
   };
 
   const handleCheckDoneConfirm = async (checkedBy) => {
+    const id = activeId;
     closePopup();
     try {
-      await fetch(`${API_BASE}/${activeId}/end`, {
+      await fetch(`${API_BASE}/${id}/end`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ checkedBy }),
       });
       fetchDocuments(true);
-    } catch (err) {
-      alert("Check Done failed: " + err.message);
-    }
+    } catch (err) { alert("Check Done failed: " + err.message); }
   };
 
-  // Request ID: date + daily sequence, e.g. 20260816/0001 — same scheme as Pick/Print Portal
   const requestIdMap = useMemo(() => computeRequestIds(documents), [documents]);
 
-  // Picking errors still open — Pick Portal hasn't re-picked yet.
-  const activeErrorDocs = useMemo(
-    () => documents.filter(d => {
-      const isFlagged = (d.hasWrongMaterial || "").toUpperCase() === "YES";
-      return isFlagged && !d.emergencyPickResolved && statusClass(d.checkStatus) !== "completed";
-    }),
-    [documents]
-  );
-
-  // Picking errors Pick Portal has just resolved (Emergency Pick Done
-  // confirmed) — still waiting for this Check to be finished/confirmed.
-  const resolvedErrorDocs = useMemo(
-    () => documents.filter(d => {
-      const isFlagged = (d.hasWrongMaterial || "").toUpperCase() === "YES";
-      return isFlagged && d.emergencyPickResolved && statusClass(d.checkStatus) !== "completed";
-    }),
-    [documents]
-  );
-
-  // Whenever a NEW Emergency Pick Done shows up (one we haven't alerted for
-  // yet), queue it into the popup. Runs once per new event, not on every 10s
-  // poll — and if a doc later gets checked/completed and then re-flagged, it
-  // can alert again since it drops out of "seen" once no longer pending.
-  useEffect(() => {
-    setSeenResolvedIds(prevSeen => {
-      const newOnes = resolvedErrorDocs.filter(d => !prevSeen.has(d.id));
-      if (newOnes.length > 0) {
-        setResolvedAlertDocs(prevAlert => {
-          const existingIds = new Set(prevAlert.map(d => d.id));
-          return [...prevAlert, ...newOnes.filter(d => !existingIds.has(d.id))];
-        });
-      }
-      return new Set(resolvedErrorDocs.map(d => d.id));
-    });
-  }, [resolvedErrorDocs]);
-
-  // ── Filters ──
   const jobTypes = ["ALL", ...new Set(documents.map(d => d.jobType).filter(Boolean))];
-  const statuses = ["ALL", ...new Set(documents.map(d => d.checkStatus).filter(Boolean))];
+
+  const STATUS_FILTERS = [
+    { value: "ALL", label: "All Status" },
+    { value: "pending", label: "Pending" },
+    { value: "inprogress", label: "In Progress" },
+    { value: "onhold", label: "On Hold" },
+    { value: "wrongmaterial", label: "Wrong Material" },
+    { value: "completed", label: "Checked" },
+  ];
 
   const visible = documents.filter(doc => {
     const q = search.toLowerCase();
     const matchSearch = !q || [
-      String(doc.id), doc.requestedBy, doc.jobwbs,
-      doc.reservationNo, doc.enteredBy, doc.jobType,
+      String(doc.id), doc.jobwbs, doc.reservationNo,
+      doc.enteredBy, doc.jobType, doc.printDocumentNo
     ].some(v => (v || "").toLowerCase().includes(q));
 
-    const matchType   = filterType   === "ALL" || doc.jobType === filterType;
-    const matchStatus = filterStatus === "ALL" || doc.checkStatus === filterStatus;
+    const matchType = filterType === "ALL" || doc.jobType === filterType;
+    const matchStatus = filterStatus === "ALL" || statusClass(doc) === filterStatus;
 
-    const docDate = doc.requestDate;
-    const matchFrom = !fromDate || (docDate && docDate >= fromDate);
-    const matchTo   = !toDate   || (docDate && docDate <= toDate);
-    const matchDate = matchFrom && matchTo;
-
-    return matchSearch && matchType && matchStatus && matchDate;
+    return matchSearch && matchType && matchStatus;
   });
 
-  // Stats
-  const total     = documents.length;
-  const pending   = documents.filter(d => statusClass(d.checkStatus) === "pending").length;
-  const inProg    = documents.filter(d => statusClass(d.checkStatus) === "inprogress").length;
-  const onHold    = documents.filter(d => statusClass(d.checkStatus) === "onhold").length;
-  const completed = documents.filter(d => statusClass(d.checkStatus) === "completed").length;
-  const wrongCount = documents.filter(d => (d.hasWrongMaterial || "").toUpperCase() === "YES").length;
+  const total = documents.length;
+  const pending = documents.filter(d => statusClass(d) === "pending").length;
+  const inProg = documents.filter(d => statusClass(d) === "inprogress").length;
+  const onHold = documents.filter(d => statusClass(d) === "onhold").length;
+  const wrongMaterial = documents.filter(d => statusClass(d) === "wrongmaterial").length;
+  const completed = documents.filter(d => statusClass(d) === "completed").length;
 
-  const viewingDoc = documents.find(d => d.id === activeId) || null;
+  // clicking a stat chip filters the grid by that status (Total clears the filter)
+  const handleStatClick = (statusValue) => setFilterStatus(statusValue);
 
   return (
     <div className="ip-page">
-
       {activePopup === "hold" && (
-        <HoldPopup operatorNames={checkOperatorNames} onConfirm={handleHoldConfirm} onCancel={closePopup} />
+        <HoldPopup
+          onConfirm={handleHoldConfirm}
+          onCancel={closePopup}
+          checkers={popupCheckers}
+          checkersLoading={popupCheckersLoading}
+        />
+      )}
+      {activePopup === "issue" && (
+        <ReportIssuePopup
+          onConfirm={handleReportIssueConfirm}
+          onCancel={closePopup}
+          checkers={popupCheckers}
+          checkersLoading={popupCheckersLoading}
+        />
       )}
       {activePopup === "end" && (
-        <CheckDonePopup operatorNames={checkOperatorNames} onConfirm={handleCheckDoneConfirm} onCancel={closePopup} />
-      )}
-      {activePopup === "view" && (
-        <ViewDetailsPopup doc={viewingDoc} onClose={closePopup} />
-      )}
-      {resolvedAlertDocs.length > 0 && (
-        <ResolvedPickAlertPopup
-          docs={resolvedAlertDocs}
-          requestIdMap={requestIdMap}
-          onJump={handleJumpToCard}
-          onClose={() => setResolvedAlertDocs([])}
+        <CheckDonePopup
+          onConfirm={handleCheckDoneConfirm}
+          onCancel={closePopup}
+          checkers={popupCheckers}
+          checkersLoading={popupCheckersLoading}
+          initialCheckedBy={editValues.checkedBy}
+          isEdit={!!editValues.checkedBy}
         />
       )}
 
-      {/* ── Header ── */}
-     <div className="ip-header">
+      <div className="ip-header">
         <div className="ip-header-left">
           <h1>LOGITRACK-WAREHOUSE TIME EFFICENCY TRACKER SYSTEM</h1>
           <h1>  Check Portal</h1>
@@ -977,160 +730,110 @@ export default function IssueCheckForm() {
         </button>
       </div>
 
-      {/* ── Active Picking Error Notification Bar ── */}
-      {activeErrorDocs.length > 0 && (
-        <div
-          style={{
-            background: "rgba(239,68,68,0.15)",
-            border: "1px solid #ef4444",
-            borderRadius: 8,
-            padding: "12px 16px",
-            marginBottom: 18,
-            display: "flex",
-            flexDirection: "column",
-            gap: 8,
-          }}
-        >
-          <div style={{ color: "#ef4444", fontWeight: 700, fontSize: "0.9rem", display: "flex", alignItems: "center", gap: 8 }}>
-            🚨 {activeErrorDocs.length} Picking Error{activeErrorDocs.length > 1 ? "s" : ""} Pending — waiting on Pick Portal
-          </div>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-            {activeErrorDocs.map(d => (
-              <span
-                key={d.id}
-                style={{
-                  background: "#ef4444",
-                  color: "#fff",
-                  fontWeight: 600,
-                  fontSize: "0.78rem",
-                  padding: "4px 10px",
-                  borderRadius: 6,
-                }}
-              >
-                {requestIdMap[d.id] || "—"} · Doc No: {d.printDocumentNo || "—"}
-              </span>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* ── Resolved Picking Error Notification Bar (green, real-time count) ── */}
-      {resolvedErrorDocs.length > 0 && (
-        <div
-          style={{
-            background: "rgba(52,211,153,0.15)",
-            border: "1px solid #34d399",
-            borderRadius: 8,
-            padding: "12px 16px",
-            marginBottom: 18,
-            display: "flex",
-            flexDirection: "column",
-            gap: 8,
-          }}
-        >
-          <div style={{ color: "#34d399", fontWeight: 700, fontSize: "0.9rem", display: "flex", alignItems: "center", gap: 8 }}>
-            ✅ {resolvedErrorDocs.length} Emergency Pick{resolvedErrorDocs.length > 1 ? "s" : ""} Done — re-picked, ready to continue check
-          </div>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-            {resolvedErrorDocs.map(d => (
-              <button
-                key={d.id}
-                onClick={() => handleJumpToCard(d.id)}
-                style={{
-                  background: "#34d399",
-                  color: "#06281c",
-                  fontWeight: 600,
-                  fontSize: "0.78rem",
-                  padding: "4px 10px",
-                  borderRadius: 6,
-                  border: "none",
-                  cursor: "pointer",
-                }}
-              >
-                {requestIdMap[d.id] || "—"} · Doc No: {d.printDocumentNo || "—"} · Emergency Pick Done
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* ── Toolbar ── */}
+      {/* Toolbar */}
       <div className="ip-toolbar">
         <div className="ip-search-wrap">
           <span className="ip-search-icon">🔍</span>
           <input
             className="ip-search"
             type="text"
-            placeholder="Search by ID, Requested By, WBS, Reservation..."
+            placeholder="Search by ID, WBS, Reservation, Doc No..."
             value={search}
             onChange={e => setSearch(e.target.value)}
           />
         </div>
         <select className="ip-filter-select" value={filterType} onChange={e => setFilterType(e.target.value)}>
-          {jobTypes.map(t => <option key={t} value={t}>{t === "ALL" ? "All Job Types" : t}</option>)}
+          {jobTypes.map(t => (
+            <option key={t} value={t}>{t === "ALL" ? "All Job Types" : t}</option>
+          ))}
         </select>
         <select className="ip-filter-select" value={filterStatus} onChange={e => setFilterStatus(e.target.value)}>
-          {statuses.map(s => <option key={s} value={s}>{s === "ALL" ? "All Status" : s}</option>)}
+          {STATUS_FILTERS.map(opt => (
+            <option key={opt.value} value={opt.value}>{opt.label}</option>
+          ))}
         </select>
-        {/* <DateRangeFilter
-          fromDate={fromDate}
-          toDate={toDate}
-          onChange={(f, t) => { setFromDate(f); setToDate(t); }}
-          onClear={() => { setFromDate(""); setToDate(""); }}
-        /> */}
       </div>
 
-      {/* ── Stats ── */}
+      {/* Stats — all clickable, each filters the grid by that status */}
       <div className="ip-stats">
-        <div className="ip-stat-chip blue">Total <strong>{total}</strong></div>
-        <div className="ip-stat-chip"><strong style={{color:"#f59e0b"}}>{pending}</strong> Pending</div>
-        <div className="ip-stat-chip"><strong style={{color:"#3b82f6"}}>{inProg}</strong> In Progress</div>
-        <div className="ip-stat-chip"><strong style={{color:"#fb923c"}}>{onHold}</strong> On Hold</div>
-        <div className="ip-stat-chip green">Check Done <strong>{completed}</strong></div>
-        {wrongCount > 0 && (
-          <div className="ip-stat-chip" style={{ background: "rgba(239,68,68,0.15)", border: "1px solid #ef4444" }}>
-            <strong style={{ color: "#ef4444" }}>{wrongCount}</strong> ⚠️ Wrong Material
-          </div>
-        )}
-        <div className="ip-stat-chip">Showing <strong style={{color:"#a78bfa"}}>{visible.length}</strong> of {total}</div>
+        <button
+          type="button"
+          className={`ip-stat-chip blue ip-stat-chip-clickable ${filterStatus === "ALL" ? "active" : ""}`}
+          onClick={() => handleStatClick("ALL")}
+        >
+          Total <strong>{total}</strong>
+        </button>
+        <button
+          type="button"
+          className={`ip-stat-chip ip-stat-chip-clickable ${filterStatus === "pending" ? "active" : ""}`}
+          onClick={() => handleStatClick("pending")}
+        >
+          <strong style={{ color: "#b45309" }}>{pending}</strong> Pending
+        </button>
+        <button
+          type="button"
+          className={`ip-stat-chip ip-stat-chip-clickable ${filterStatus === "inprogress" ? "active" : ""}`}
+          onClick={() => handleStatClick("inprogress")}
+        >
+          <strong style={{ color: "#1d4ed8" }}>{inProg}</strong> In Progress
+        </button>
+        <button
+          type="button"
+          className={`ip-stat-chip ip-stat-chip-clickable ${filterStatus === "onhold" ? "active" : ""}`}
+          onClick={() => handleStatClick("onhold")}
+        >
+          <strong style={{ color: "#c2410c" }}>{onHold}</strong> On Hold
+        </button>
+        <button
+          type="button"
+          className={`ip-stat-chip red ip-stat-chip-clickable ${filterStatus === "wrongmaterial" ? "active" : ""}`}
+          onClick={() => handleStatClick("wrongmaterial")}
+        >
+          <strong style={{ color: "#ef4444" }}>{wrongMaterial}</strong> Wrong Material
+        </button>
+        <button
+          type="button"
+          className={`ip-stat-chip green ip-stat-chip-clickable ${filterStatus === "completed" ? "active" : ""}`}
+          onClick={() => handleStatClick("completed")}
+        >
+          Checked <strong>{completed}</strong>
+        </button>
       </div>
 
-      {/* ── Error ── */}
       {error && (
-        <div style={{
-          background:"rgba(239,68,68,0.12)", border:"1px solid #ef4444",
-          borderRadius:8, padding:"12px 16px", color:"#fca5a5",
-          marginBottom:18, fontSize:"0.85rem",
-        }}>
-          ⚠ {error} —{" "}
-          <button onClick={() => fetchDocuments(false)}
-            style={{background:"none",border:"none",color:"#60a5fa",cursor:"pointer",textDecoration:"underline"}}>
-            retry
-          </button>
+        <div style={{ background: "rgba(239,68,68,0.08)", border: "1px solid #ef4444", borderRadius: 8, padding: "12px 16px", color: "#b91c1c", marginBottom: 18 }}>
+          ⚠ {error} — <button onClick={() => fetchDocuments(false)} style={{ color: "#1d4ed8", textDecoration: "underline" }}>retry</button>
         </div>
       )}
 
-      {/* ── Grid ── */}
       <div className="ip-grid">
         {loading ? (
-          [1,2,3,4,5,6].map(i => <SkeletonCard key={i} />)
+          Array.from({ length: 6 }).map((_, i) => (
+            <div key={i} className="ip-card status-pending">
+              <div className="ip-card-head" style={{ opacity: 0.6 }}>
+                <div style={{ height: 40, background: "#e2e8f0", borderRadius: 4 }} />
+              </div>
+            </div>
+          ))
         ) : visible.length === 0 ? (
-          <div className="ip-empty">
-            <div className="ip-empty-icon">📭</div>
-            <p>No documents found{search ? ` for "${search}"` : ""}.</p>
-          </div>
+          <div className="ip-empty">No documents found.</div>
         ) : (
           visible.map(doc => (
             <DocumentCard
               key={doc.id}
               doc={doc}
               requestId={requestIdMap[doc.id]}
+              divisionLabel={
+                doc.divisionNo
+                  ? `${doc.divisionNo} — ${divisionNoToName[doc.divisionNo] || ""}`
+                  : null
+              }
               onStart={handleStart}
               onHold={handleHoldClick}
+              onReportIssue={handleReportIssueClick}
               onEnd={handleEndClick}
-              onView={handleViewClick}
-              cardRef={el => { cardRefs.current[doc.id] = el; }}
-              jumpHighlighted={jumpHighlightId === doc.id}
+              onEdit={handleEditClick}
+              onDelete={handleDeleteClick}
             />
           ))
         )}
