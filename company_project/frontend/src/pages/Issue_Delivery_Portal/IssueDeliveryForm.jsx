@@ -771,7 +771,7 @@ function DocumentRow({ doc, requestId, divisionLabel, onView, onDelivered, onHol
         <button className="ip-btn-view" onClick={() => onView(doc)}>👁 View</button>
       </td>
       <td>
-        <div className="ip-row-manage">
+        <div className="ip-row-manage" style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <button
             className="ip-mini-manage ip-mini-edit"
             title="Edit"
@@ -780,6 +780,10 @@ function DocumentRow({ doc, requestId, divisionLabel, onView, onDelivered, onHol
               backgroundColor: "#3b82f6",
               color: "#eaf2ff",
               borderColor: "#3b82f6",
+              minWidth: 34,
+              minHeight: 34,
+              fontSize: "1.05rem",
+              borderRadius: 8,
             }}
           >
             ✎
@@ -791,13 +795,14 @@ function DocumentRow({ doc, requestId, divisionLabel, onView, onDelivered, onHol
             onClick={() => onDelete(doc.id)}
             style={
               isLocked
-                ? { opacity: 0.35, cursor: "not-allowed", backgroundColor: "#3a1010", color: "#ef4444", borderColor: "#ef4444" }
-                : { backgroundColor: "#ef4444", color: "#2a0a0a", borderColor: "#ef4444" }
+                ? { opacity: 0.35, cursor: "not-allowed", backgroundColor: "#3a1010", color: "#ef4444", borderColor: "#ef4444", minWidth: 34, minHeight: 34, fontSize: "1.05rem", borderRadius: 8 }
+                : { backgroundColor: "#ef4444", color: "#2a0a0a", borderColor: "#ef4444", minWidth: 34, minHeight: 34, fontSize: "1.05rem", borderRadius: 8 }
             }
           >
             🗑
           </button>
         </div>
+
 
       </td>
       <td>

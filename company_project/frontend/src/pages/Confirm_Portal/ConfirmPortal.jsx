@@ -45,6 +45,9 @@ function jobTypeColor(jt) {
   return map[(jt || "").toLowerCase().replace(/\s+/g, "_")] || "#7c8db0";
 }
 
+// NOTE: "hold" no longer surfaces in this portal (Confirm Portal only shows
+// delivered/cancelled), but the classifier is left intact for safety in
+// case a stray record with an unexpected status ever reaches the frontend.
 function statusClass(s) {
   const v = (s || "").toLowerCase();
   if (v.includes("cancel"))   return "cancelled";
@@ -62,7 +65,7 @@ function statusLabel(sc) {
 }
 
 // Once a document has a fileNumber, its badge/status is shown as "Filed"
-// regardless of the underlying delivered/hold/cancelled status.
+// regardless of the underlying delivered/cancelled status.
 function displayStatus(doc) {
   if (doc.fileNumber) return { label: "Filed", cls: "filed" };
   const sc = statusClass(doc.deliveryStatus);
@@ -107,9 +110,6 @@ function eventInfo(doc) {
   if (sc === "completed") {
     return { dateTime: doc.deliveryEndTime, by: doc.deliveredBy, reason: null };
   }
-  if (sc === "onhold") {
-    return { dateTime: doc.deliveryHoldTime, by: doc.deliveryHeldBy, reason: doc.deliveryHoldReason };
-  }
   if (sc === "cancelled") {
     return { dateTime: doc.deliveryCancelTime, by: doc.deliveryCancelledBy, reason: doc.deliveryCancelReason };
   }
@@ -117,8 +117,6 @@ function eventInfo(doc) {
 }
 
 // ── Active file number (set by admin in Master Setup → Document File No) ──
-// Fetches the single record marked "active" — the Master Setup panel
-// guarantees only one is ever active at a time.
 async function fetchActiveFileNumber() {
   const res = await fetch(`${SETUP_API}/file-numbers`);
   if (!res.ok) throw new Error(`Server error: ${res.status}`);
@@ -128,9 +126,6 @@ async function fetchActiveFileNumber() {
 }
 
 // ── Add to File popup ───────────────────────────────────────────────────────
-// File number is no longer typed by hand — it's pulled straight from the
-// active record admin set up in Master Setup, so this portal and the admin
-// panel always agree on which file number is currently in use.
 
 function AddFilePopup({ doc, reqId, activeFileNo, loadingFileNo, fileNoError, onConfirm, onCancel }) {
   const canConfirm = !!activeFileNo && !loadingFileNo;
@@ -184,6 +179,57 @@ function AddFilePopup({ doc, reqId, activeFileNo, loadingFileNo, fileNoError, on
   );
 }
 
+// ── NEW: Edit / Delete File popup ───────────────────────────────────────────
+// Opened by clicking a "Filed" badge or the file number itself. Lets the
+// user correct a wrong file number (Edit) or clear it entirely (Delete),
+// which sends the document back to "not filed".
+
+function FileEditPopup({ doc, editValue, onEditValueChange, saving, onSave, onDelete, onCancel }) {
+  return (
+    <div className="icf-popup-overlay">
+      <div className="icf-popup">
+        <div className="icf-popup-head">
+          <span>📁 Edit File Number</span>
+          <button className="icf-popup-close" onClick={onCancel}>✕</button>
+        </div>
+        <p className="icf-popup-sub">
+          {doc.printDocumentNo || `Doc #${doc.id}`} — currently filed as{" "}
+          <strong>{doc.fileNumber}</strong>
+        </p>
+
+        <div className="icf-popup-field">
+          <span className="icf-popup-label">File Number</span>
+          <input
+            className="icf-popup-text-input"
+            type="text"
+            value={editValue}
+            onChange={e => onEditValueChange(e.target.value)}
+            placeholder="Enter file number"
+            disabled={saving}
+          />
+        </div>
+
+        <div className="icf-popup-foot">
+          <button className="icf-btn icf-btn-danger" disabled={saving} onClick={onDelete}>
+            🗑 Delete
+          </button>
+          <div style={{ flex: 1 }} />
+          <button className="icf-btn icf-btn-outline" disabled={saving} onClick={onCancel}>
+            Cancel
+          </button>
+          <button
+            className="icf-btn-done"
+            disabled={saving || !editValue.trim()}
+            onClick={onSave}
+          >
+            {saving ? "Saving..." : "✓ Save"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── View Drawer helpers (same pattern as Delivery Portal) ─────────────────
 
 function DetailRow({ label, value }) {
@@ -204,8 +250,7 @@ function Section({ icon, title, children, accent }) {
   );
 }
 
-// ── Side Drawer: full document trail (mirrors Delivery Portal's ViewDrawer,
-// plus a File Details section at the end for this portal) ─────────────────
+// ── Side Drawer: full document trail ───────────────────────────────────────
 
 function ViewDrawer({ doc, reqId, onClose }) {
   const ds = displayStatus(doc);
@@ -223,7 +268,6 @@ function ViewDrawer({ doc, reqId, onClose }) {
 
         <div className="icf-drawer-body">
 
-          {/* Request info */}
           <Section icon="📝" title="Request Details">
             <DetailRow label="Req ID" value={doc.reqId || reqId} />
             <DetailRow label="Customer" value={doc.customerName} />
@@ -240,7 +284,6 @@ function ViewDrawer({ doc, reqId, onClose }) {
             <DetailRow label="Entered Date/Time" value={formatDateTime(doc.createdDatetime)} />
           </Section>
 
-          {/* Print trail */}
           <Section icon="🖨️" title="Print Details" accent="print">
             <DetailRow label="Print Status" value={doc.printStatus} />
             <DetailRow label="Print Document No" value={doc.printDocumentNo} />
@@ -259,7 +302,6 @@ function ViewDrawer({ doc, reqId, onClose }) {
             )}
           </Section>
 
-          {/* Picking trail */}
           <Section icon="📦" title="Picking Details" accent="pick">
             <DetailRow label="Picked By" value={doc.pickedBy} />
             <DetailRow label="Pick Start Time" value={formatDateTime(doc.startTime)} />
@@ -281,7 +323,6 @@ function ViewDrawer({ doc, reqId, onClose }) {
             )}
           </Section>
 
-          {/* Check trail (incl. picking error) */}
           <Section icon="✅" title="Check Details" accent="check">
             <DetailRow label="Checked By" value={doc.checkedBy} />
             <DetailRow label="Check Start Time" value={formatDateTime(doc.checkStartTime)} />
@@ -304,7 +345,6 @@ function ViewDrawer({ doc, reqId, onClose }) {
             )}
           </Section>
 
-          {/* Delivery trail */}
           <Section icon="🚚" title="Delivery Details" accent="delivery">
             <DetailRow label="Delivery Status" value={statusLabel(statusClass(doc.deliveryStatus))} />
             <DetailRow label="Delivery Start Time" value={formatDateTime(doc.deliveryStartTime)} />
@@ -316,17 +356,6 @@ function ViewDrawer({ doc, reqId, onClose }) {
             <DetailRow label="Delivery Confirm Time" value={formatDateTime(doc.deliveryConfirmTime)} />
           </Section>
 
-          {/* Hold info */}
-          {(statusClass(doc.deliveryStatus) === "onhold" || doc.deliveryHoldReason) && (
-            <Section icon="⏸" title="Delivery Hold" accent="hold">
-              <DetailRow label="Hold Reason" value={doc.deliveryHoldReason} />
-              <DetailRow label="Held By" value={doc.deliveryHeldBy} />
-              <DetailRow label="Held At" value={formatDateTime(doc.deliveryHoldTime)} />
-              <DetailRow label="Resume Time" value={formatDateTime(doc.deliveryResumeTime)} />
-            </Section>
-          )}
-
-          {/* Cancel info */}
           {doc.deliveryCancelReason && (
             <Section icon="✕" title="Delivery Cancelled" accent="cancel">
               <DetailRow label="Cancel Reason" value={doc.deliveryCancelReason} />
@@ -338,7 +367,6 @@ function ViewDrawer({ doc, reqId, onClose }) {
             </Section>
           )}
 
-          {/* File info — specific to Confirm Portal */}
           <Section icon="📁" title="File Details" accent="file">
             <DetailRow label="Req ID" value={doc.reqId || reqId} />
             <DetailRow label="File Number" value={doc.fileNumber ? `📁 ${doc.fileNumber}` : "Not yet added to file"} />
@@ -362,17 +390,21 @@ export default function IssueConfirm() {
   const [error,       setError]       = useState(null);
   const [lastUpdated, setLastUpdated] = useState(null);
   const [refreshing,  setRefreshing]  = useState(false);
-  const [filterStatus, setFilterStatus] = useState("ALL"); // ALL | completed | onhold | cancelled
+  const [filterStatus, setFilterStatus] = useState("ALL"); // ALL | completed | cancelled
   const [savingId,    setSavingId]    = useState(null);
   const [viewDoc,     setViewDoc]     = useState(null);
 
-  // Add-to-File popup state — file number now comes from Master Setup, not
-  // typed in by hand, so we track the doc being filed plus the fetched
-  // active file number / loading / error state for that fetch.
+  // Add-to-File popup state
   const [fileDoc,       setFileDoc]       = useState(null);
   const [activeFileNo,  setActiveFileNo]  = useState(null);
   const [loadingFileNo, setLoadingFileNo] = useState(false);
   const [fileNoError,   setFileNoError]   = useState(null);
+
+  // NEW: Edit/Delete file popup state — opened by clicking a "Filed" badge
+  // or the file number itself.
+  const [editDoc,        setEditDoc]        = useState(null);
+  const [editValue,      setEditValue]      = useState("");
+  const [fileActionSaving, setFileActionSaving] = useState(false);
 
   const fetchDocuments = useCallback(async (silent = false) => {
     if (!silent) setLoading(true); else setRefreshing(true);
@@ -399,8 +431,8 @@ export default function IssueConfirm() {
 
   const reqIdMap = useMemo(() => computeRequestIds(documents), [documents]);
 
-  // Only the 3 finalised pools belong on this portal
-  const relevant = documents.filter(d => ["completed", "onhold", "cancelled"].includes(statusClass(d.deliveryStatus)));
+  // Only Delivered + Cancelled belong on this portal now — Hold is dropped.
+  const relevant = documents.filter(d => ["completed", "cancelled"].includes(statusClass(d.deliveryStatus)));
 
   const visible = filterStatus === "ALL"
     ? relevant
@@ -408,19 +440,15 @@ export default function IssueConfirm() {
 
   const counts = {
     completed: relevant.filter(d => statusClass(d.deliveryStatus) === "completed").length,
-    onhold:    relevant.filter(d => statusClass(d.deliveryStatus) === "onhold").length,
     cancelled: relevant.filter(d => statusClass(d.deliveryStatus) === "cancelled").length,
   };
 
-  // keep the view drawer's data in sync after a refresh
   useEffect(() => {
     if (!viewDoc) return;
     const fresh = documents.find(d => d.id === viewDoc.id);
     if (fresh) setViewDoc(fresh);
   }, [documents]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Opening "Add to File" now pulls the active file number set by admin in
-  // Master Setup → Document File No, instead of showing a blank text box.
   const handleAddToFileClick = async (doc) => {
     setFileDoc(doc);
     setActiveFileNo(null);
@@ -467,6 +495,55 @@ export default function IssueConfirm() {
     }
   };
 
+  // ── NEW: Edit / Delete file number ──────────────────────────────────
+
+  const openFileEdit = (doc) => {
+    setEditDoc(doc);
+    setEditValue(doc.fileNumber || "");
+  };
+
+  const closeFileEdit = () => {
+    setEditDoc(null);
+    setEditValue("");
+  };
+
+  const handleSaveEdit = async () => {
+    if (!editDoc || !editValue.trim()) return;
+    setFileActionSaving(true);
+    try {
+      const res = await fetch(`${CONFIRM_API}/${editDoc.id}/edit-file`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fileNumber: editValue.trim() }),
+      });
+      if (!res.ok) throw new Error(`Server error: ${res.status}`);
+      const updated = await res.json();
+      setDocuments(prev => prev.map(d => d.id === updated.id ? updated : d));
+      closeFileEdit();
+    } catch (err) {
+      alert("Edit failed: " + err.message);
+    } finally {
+      setFileActionSaving(false);
+    }
+  };
+
+  const handleDeleteFile = async () => {
+    if (!editDoc) return;
+    if (!window.confirm(`Remove file number ${editDoc.fileNumber}? This document will go back to "not filed".`)) return;
+    setFileActionSaving(true);
+    try {
+      const res = await fetch(`${CONFIRM_API}/${editDoc.id}/file`, { method: "DELETE" });
+      if (!res.ok) throw new Error(`Server error: ${res.status}`);
+      const updated = await res.json();
+      setDocuments(prev => prev.map(d => d.id === updated.id ? updated : d));
+      closeFileEdit();
+    } catch (err) {
+      alert("Delete failed: " + err.message);
+    } finally {
+      setFileActionSaving(false);
+    }
+  };
+
   return (
     <div className="icf-page">
 
@@ -487,6 +564,18 @@ export default function IssueConfirm() {
           fileNoError={fileNoError}
           onConfirm={handleAddToFileConfirm}
           onCancel={closeFilePopup}
+        />
+      )}
+
+      {editDoc && (
+        <FileEditPopup
+          doc={editDoc}
+          editValue={editValue}
+          onEditValueChange={setEditValue}
+          saving={fileActionSaving}
+          onSave={handleSaveEdit}
+          onDelete={handleDeleteFile}
+          onCancel={closeFileEdit}
         />
       )}
 
@@ -513,7 +602,7 @@ export default function IssueConfirm() {
         </button>
       </div>
 
-      {/* Toolbar — the 3-way status filter */}
+      {/* Toolbar — Delivered / Cancelled filter only */}
       <div className="icf-toolbar">
         <select
           className="icf-filter-select"
@@ -522,13 +611,11 @@ export default function IssueConfirm() {
         >
           <option value="ALL">All Status</option>
           <option value="completed">Delivered</option>
-          <option value="onhold">Hold</option>
           <option value="cancelled">Cancelled</option>
         </select>
 
         <div className="icf-stats">
           <div className="icf-stat-chip completed">Delivered <strong>{counts.completed}</strong></div>
-          <div className="icf-stat-chip onhold">Hold <strong>{counts.onhold}</strong></div>
           <div className="icf-stat-chip cancelled">Cancelled <strong>{counts.cancelled}</strong></div>
         </div>
       </div>
@@ -551,7 +638,6 @@ export default function IssueConfirm() {
               <th>Delivery Vehicle</th>
               <th>Delivered By</th>
               <th>Cancelled By</th>
-              <th>Hold By / Reason</th>
               <th>Date / Time</th>
               <th>Job Type</th>
               <th>View</th>
@@ -560,29 +646,34 @@ export default function IssueConfirm() {
           </thead>
           <tbody>
             {loading ? (
-              <tr><td colSpan={12} className="icf-empty-cell">Loading...</td></tr>
+              <tr><td colSpan={11} className="icf-empty-cell">Loading...</td></tr>
             ) : visible.length === 0 ? (
-              <tr><td colSpan={12} className="icf-empty-cell">No documents found.</td></tr>
+              <tr><td colSpan={11} className="icf-empty-cell">No documents found.</td></tr>
             ) : (
               visible.map(doc => {
                 const sc = statusClass(doc.deliveryStatus);
                 const info = eventInfo(doc);
                 const ds = displayStatus(doc);
+                const isFiled = !!doc.fileNumber;
 
                 return (
                   <tr key={doc.id} className="icf-row">
-                    <td><span className={`icf-badge ${ds.cls}`}>{ds.label}</span></td>
+                    <td>
+                      <span
+                        className={`icf-badge ${ds.cls}`}
+                        style={isFiled ? { cursor: "pointer" } : undefined}
+                        title={isFiled ? "Click to edit or delete this file entry" : undefined}
+                        onClick={isFiled ? () => openFileEdit(doc) : undefined}
+                      >
+                        {ds.label}
+                      </span>
+                    </td>
                     <td className="icf-td-reqid">{doc.reqId || reqIdMap[doc.id] || "—"}</td>
                     <td className="icf-td-docno">{doc.printDocumentNo || `Doc #${doc.id}`}</td>
                     <td>{doc.requestedBy || "—"}</td>
                     <td>🚐 {doc.deliveryVehicleNo || "—"}</td>
                     <td>{sc === "completed" ? `👤 ${info.by || "—"}` : "—"}</td>
                     <td>{sc === "cancelled" ? `👤 ${info.by || "—"}` : "—"}</td>
-                    <td>
-                      {sc === "onhold"
-                        ? <>👤 {info.by || "—"}<br /><span className="icf-reason">{info.reason || "—"}</span></>
-                        : "—"}
-                    </td>
                     <td className="icf-td-datetime">{formatDateTime(info.dateTime)}</td>
                     <td>{doc.jobType || "—"}</td>
                     <td>
@@ -590,7 +681,14 @@ export default function IssueConfirm() {
                     </td>
                     <td>
                       {doc.fileNumber ? (
-                        <span className="icf-filenum">📁 {doc.fileNumber}</span>
+                        <span
+                          className="icf-filenum"
+                          style={{ cursor: "pointer" }}
+                          title="Click to edit or delete this file entry"
+                          onClick={() => openFileEdit(doc)}
+                        >
+                          📁 {doc.fileNumber}
+                        </span>
                       ) : (
                         <button
                           className="icf-btn-addfile"

@@ -17,13 +17,13 @@ public class IssueConfirmController {
     @Autowired
     private IssueConfirmService issueConfirmService;
 
-    // ── GET all confirm-relevant documents (delivered / hold / cancelled) ──
+    // ── GET all confirm-relevant documents (delivered / cancelled only) ──
     @GetMapping
     public ResponseEntity<List<Issue>> getAll() {
         return ResponseEntity.ok(issueConfirmService.getAllConfirmDocuments());
     }
 
-    // status: delivered | hold | cancelled
+    // status: delivered | cancelled
     @GetMapping("/status/{status}")
     public ResponseEntity<List<Issue>> getByStatus(@PathVariable String status) {
         return ResponseEntity.ok(issueConfirmService.getByConfirmStatus(status));
@@ -58,6 +58,41 @@ public class IssueConfirmController {
             return ResponseEntity.ok(issueConfirmService.addToFile(id, reqId, fileNumber.trim()));
         } catch (IllegalStateException alreadyFiled) {
             return ResponseEntity.status(409).body(alreadyFiled.getMessage());
+        } catch (RuntimeException e) {
+            return ResponseEntity.notFound().build();
+        }
+    }
+
+    // ── PUT Edit File Number ────────────────────────────────────────────
+    // body: { fileNumber } — only allowed once the document already has a
+    // file number (i.e. it was already added to file).
+    @PutMapping("/{id}/edit-file")
+    public ResponseEntity<?> editFile(
+            @PathVariable Long id,
+            @RequestBody Map<String, String> body) {
+
+        String fileNumber = body.getOrDefault("fileNumber", "");
+
+        if (fileNumber.trim().isEmpty()) {
+            return ResponseEntity.badRequest().body("fileNumber is required");
+        }
+
+        try {
+            return ResponseEntity.ok(issueConfirmService.editFile(id, fileNumber.trim()));
+        } catch (IllegalStateException notFiled) {
+            return ResponseEntity.status(409).body(notFiled.getMessage());
+        } catch (RuntimeException e) {
+            return ResponseEntity.notFound().build();
+        }
+    }
+
+    // ── DELETE File Number ──────────────────────────────────────────────
+    // Clears the file number/reqId, sending the document back to "not filed".
+    // Does NOT delete the underlying Issue/document itself.
+    @DeleteMapping("/{id}/file")
+    public ResponseEntity<?> deleteFile(@PathVariable Long id) {
+        try {
+            return ResponseEntity.ok(issueConfirmService.removeFile(id));
         } catch (RuntimeException e) {
             return ResponseEntity.notFound().build();
         }
