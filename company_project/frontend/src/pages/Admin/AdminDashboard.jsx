@@ -881,7 +881,9 @@ function MasterSetupPanel({ jobTypes, setJobTypes }) {
 }
 
 // ── Dashboard Panel (dynamic Job Type cards + Division) ────────────────────
+// ── Dashboard Panel (Division-wise Job Type + multiple active support already done) ──
 function DashboardPanel({ documents, jobTypes, divisionsList }) {
+  // Portal counts
   const print = portalCounts(documents, () => true, d => printStatusClass(d.printStatus));
   const pick = portalCounts(documents, d => !!d.printDocumentNo, d => pickStatusClass(d.status));
   const check = portalCounts(
@@ -896,17 +898,17 @@ function DashboardPanel({ documents, jobTypes, divisionsList }) {
   );
 
   const deliveredDocs = documents.filter(d => deliveryStatusClass(d.deliveryStatus) === "completed");
-  const filedCount    = deliveredDocs.filter(d => d.fileNumber).length;
-  const holdCount     = documents.filter(d => deliveryStatusClass(d.deliveryStatus) === "onhold").length;
+  const filedCount = deliveredDocs.filter(d => d.fileNumber).length;
+  const holdCount = documents.filter(d => deliveryStatusClass(d.deliveryStatus) === "onhold").length;
   const cancelledCount = documents.filter(d => deliveryStatusClass(d.deliveryStatus) === "cancelled").length;
   const pendingFileCount = deliveredDocs.length - filedCount;
 
-  const printEff    = operatorEfficiency(documents, "printedBy", "printDurationSeconds", d => printStatusClass(d.printStatus) === "completed");
-  const pickEff     = operatorEfficiency(documents, "pickedBy", "durationSeconds", d => pickStatusClass(d.status) === "completed");
-  const checkEff    = operatorEfficiency(documents, "checkedBy", "checkDurationSeconds", d => checkStatusClass(d.checkStatus) === "completed");
+  const printEff = operatorEfficiency(documents, "printedBy", "printDurationSeconds", d => printStatusClass(d.printStatus) === "completed");
+  const pickEff = operatorEfficiency(documents, "pickedBy", "durationSeconds", d => pickStatusClass(d.status) === "completed");
+  const checkEff = operatorEfficiency(documents, "checkedBy", "checkDurationSeconds", d => checkStatusClass(d.checkStatus) === "completed");
   const deliveryEff = operatorEfficiency(documents, "deliveredBy", "deliveryDurationSeconds", d => deliveryStatusClass(d.deliveryStatus) === "completed");
 
-  // Dynamic cards per Job Type + Division under each
+  // ── 1. Job Type cards (with Division under each) ──
   const jobTypeCounts = jobTypes.map(t => {
     const typeDocs = documents.filter(d => (d.jobType || "").toLowerCase() === t.toLowerCase());
     const divMap = {};
@@ -923,11 +925,27 @@ function DashboardPanel({ documents, jobTypes, divisionsList }) {
     };
   });
 
+  // ── 2. Division-wise Job Type matrix (all combinations) ──
+  const divisionWise = divisionsList.map(div => {
+    const divDocs = documents.filter(d => String(d.divisionNo) === String(div.divisionNo));
+    const byJobType = jobTypes.map(jt => ({
+      jobType: jt,
+      count: divDocs.filter(d => (d.jobType || "").toLowerCase() === jt.toLowerCase()).length,
+    }));
+    return {
+      divisionNo: div.divisionNo,
+      divisionName: div.divisionName,
+      total: divDocs.length,
+      byJobType,
+    };
+  });
+
   return (
     <div>
       <h2 className="adm-title">Fentons Operation Efficiency Dashboard</h2>
-      <p className="adm-subtitle">Live view, recalculates automatically as documents update.</p>
+      <p className="adm-subtitle">Live view • recalculates automatically</p>
 
+      {/* ── Total + Job Type cards ── */}
       <SectionTitle>Total Jobs by Job Type</SectionTitle>
       <div className="adm-kpi-row" style={{ flexWrap: "wrap", gap: 14 }}>
         <KpiCard label="Total Jobs" value={documents.length} colorClass="accent" />
@@ -946,6 +964,64 @@ function DashboardPanel({ documents, jobTypes, divisionsList }) {
         ))}
       </div>
 
+      {/* ── NEW: Division-wise Job Type breakdown ── */}
+      <SectionTitle>Division-wise Job Type Breakdown</SectionTitle>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 16, marginBottom: 28 }}>
+        {divisionWise.map(div => (
+          <div
+            key={div.divisionNo}
+            style={{
+              background: "#fff",
+              border: "1px solid #e2e8f0",
+              borderRadius: 12,
+              padding: "16px 18px",
+              boxShadow: "0 1px 3px rgba(0,0,0,0.06)",
+            }}
+          >
+            <div style={{ fontWeight: 700, fontSize: "1rem", color: "#1e293b", marginBottom: 4 }}>
+              {div.divisionNo} — {div.divisionName}
+            </div>
+            <div style={{ fontSize: "0.85rem", color: "#64748b", marginBottom: 12 }}>
+              Total: <strong style={{ color: "#3b82f6" }}>{div.total}</strong>
+            </div>
+
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              {div.byJobType.map(jt => (
+                <div
+                  key={jt.jobType}
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    background: jt.count > 0 ? "#f0f9ff" : "#f8fafc",
+                    padding: "6px 10px",
+                    borderRadius: 8,
+                    fontSize: "0.82rem",
+                  }}
+                >
+                  <span style={{ color: "#334155" }}>{jt.jobType}</span>
+                  <span style={{
+                    fontWeight: 700,
+                    color: jt.count > 0 ? "#0369a1" : "#94a3b8",
+                    minWidth: 28,
+                    textAlign: "right",
+                  }}>
+                    {jt.count}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        ))}
+
+        {divisionWise.length === 0 && (
+          <div style={{ color: "#94a3b8", fontSize: "0.9rem" }}>
+            No divisions found. Add divisions in Master Setup → Division.
+          </div>
+        )}
+      </div>
+
+      {/* ── Portal stats ── */}
       <SectionTitle>Total Jobs Issued Per Day / Portal</SectionTitle>
       <div className="adm-triple-row">
         <TripleStat title="Print Portal"    {...print} />
@@ -954,6 +1030,7 @@ function DashboardPanel({ documents, jobTypes, divisionsList }) {
         <TripleStat title="Delivery Portal" {...delivery} />
       </div>
 
+      {/* ── Filing status ── */}
       <SectionTitle>Document Filing Status</SectionTitle>
       <div className="adm-kpi-row">
         <KpiCard label="Delivered (Total)" value={deliveredDocs.length} colorClass="green" />
@@ -963,6 +1040,7 @@ function DashboardPanel({ documents, jobTypes, divisionsList }) {
         <KpiCard label="Cancelled" value={cancelledCount} colorClass="red" />
       </div>
 
+      {/* ── Efficiency ── */}
       <SectionTitle>System Efficiency — by Operator</SectionTitle>
       <div className="adm-eff-row">
         <EfficiencyTable title="Print Efficiency" rows={printEff} />
