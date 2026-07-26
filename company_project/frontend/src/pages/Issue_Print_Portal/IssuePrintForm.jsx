@@ -265,7 +265,7 @@ function DocumentCard({ doc, requestId, divisionLabel, onStart, onHold, onEnd, o
           </div>
           {divisionLabel && (
             <div className="ip-doc-division-sub">
-               {divisionLabel}
+              🏢 {divisionLabel}
             </div>
           )}
         </div>
@@ -400,12 +400,12 @@ export default function IssuPrinFormt() {
   // specific Division in Admin Master Data.
   // NOTE: the backend's /print-operators endpoint returns ALL operators
   // (there is no dedicated "by division" endpoint), so we fetch them all
-  // and filter client-side by divisionName — the same way Job Categories
-  // are matched to a Division in the Document Portal form.
+  // and filter client-side. Master Setup shows each operator's division
+  // as a "divisionNo — divisionName" code, so the stored field on each
+  // operator is the divisionNo code (e.g. "4017"), not the division name —
+  // match on that.
   const fetchOperatorsForDivision = useCallback(async (divisionNo) => {
-    const divisionName = divisionNoToName[divisionNo];
-
-    if (!divisionNo || !divisionName) {
+    if (!divisionNo) {
       setPopupOperators([]);
       return;
     }
@@ -417,7 +417,13 @@ export default function IssuPrinFormt() {
         const data = await res.json();
         setPopupOperators(
           (data || [])
-            .filter(op => (op.divisionName || op.division || "") === divisionName)
+            .filter(op => {
+              const opDivisionNo =
+                op.divisionNo ||
+                (op.division && op.division.divisionNo) ||
+                "";
+              return String(opDivisionNo) === String(divisionNo);
+            })
             .map(op => op.operatorNicName || op.operatorName || op.name || op.fullName)
             .filter(Boolean)
         );
@@ -430,7 +436,7 @@ export default function IssuPrinFormt() {
     } finally {
       setPopupOperatorsLoading(false);
     }
-  }, [divisionNoToName]);
+  }, []);
 
   useEffect(() => {
     fetchDocuments(false);
