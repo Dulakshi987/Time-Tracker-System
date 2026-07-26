@@ -265,7 +265,7 @@ function DocumentCard({ doc, requestId, divisionLabel, onStart, onHold, onEnd, o
           </div>
           {divisionLabel && (
             <div className="ip-doc-division-sub">
-              🏢 {divisionLabel}
+               {divisionLabel}
             </div>
           )}
         </div>
