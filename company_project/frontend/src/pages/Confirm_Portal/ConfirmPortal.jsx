@@ -122,24 +122,25 @@ function AddFilePopup({ doc, reqId, activeFileNo, loadingFileNo, fileNoError, on
 
   return (
     <div className="icf-popup-overlay">
-      <div className="icf-popup">
-        <div className="icf-popup-head">
-          <span>📁 Add to File</span>
-          <button className="icf-popup-close" onClick={onCancel}>✕</button>
+      <div className="icf-popup" style={{ color: "#1a1a1a" }}>
+        <div className="icf-popup-head" style={{ color: "#111" }}>
+          <span style={{ color: "#111", fontWeight: 700 }}>📁 Add to File</span>
+          <button className="icf-popup-close" onClick={onCancel} style={{ color: "#333" }}>✕</button>
         </div>
-        <p className="icf-popup-sub">
+        <p className="icf-popup-sub" style={{ color: "#333" }}>
           {doc.printDocumentNo || `Doc #${doc.id}`} (Req ID: {reqId || "—"}) සඳහා
           admin විසින් setup කළ active file number එක auto-fill වේ
         </p>
 
         <div className="icf-popup-field">
-          <span className="icf-popup-label">Active File Number</span>
+          <span className="icf-popup-label" style={{ color: "#222", fontWeight: 600 }}>Active File Number</span>
           <input
             className="icf-popup-text-input"
             type="text"
             value={loadingFileNo ? "Loading..." : (activeFileNo || "")}
             readOnly
             placeholder="No active file number set by admin"
+            style={{ color: "#111" }}
           />
         </div>
 
@@ -154,12 +155,27 @@ function AddFilePopup({ doc, reqId, activeFileNo, loadingFileNo, fileNoError, on
           </div>
         )}
 
-        <div className="icf-popup-foot">
-          <button className="icf-btn icf-btn-outline" onClick={onCancel}>Cancel</button>
+        <div className="icf-popup-foot" style={{ justifyContent: "flex-end", gap: 12 }}>
+          <button
+            className="icf-btn icf-btn-outline"
+            onClick={onCancel}
+            style={{
+              minWidth: 90, padding: "8px 18px", borderRadius: 8,
+              border: "1.5px solid #94a3b8", background: "#fff",
+              color: "#334155", fontWeight: 600, cursor: "pointer",
+            }}
+          >
+            Cancel
+          </button>
           <button
             className="icf-btn-done"
             disabled={!canConfirm}
             onClick={() => onConfirm(activeFileNo)}
+            style={{
+              minWidth: 90, padding: "8px 18px", borderRadius: 8,
+              background: "#7c3aed", color: "#fff", fontWeight: 600,
+              border: "none", cursor: "pointer",
+            }}
           >
             📁 Confirm
           </button>
@@ -174,18 +190,18 @@ function AddFilePopup({ doc, reqId, activeFileNo, loadingFileNo, fileNoError, on
 function FileEditPopup({ doc, editValue, onEditValueChange, saving, onSave, onDelete, onCancel }) {
   return (
     <div className="icf-popup-overlay">
-      <div className="icf-popup">
-        <div className="icf-popup-head">
-          <span>📁 Edit File Number</span>
-          <button className="icf-popup-close" onClick={onCancel}>✕</button>
+      <div className="icf-popup" style={{ color: "#1a1a1a" }}>
+        <div className="icf-popup-head" style={{ color: "#111" }}>
+          <span style={{ color: "#111", fontWeight: 700 }}>📁 Edit File Number</span>
+          <button className="icf-popup-close" onClick={onCancel} style={{ color: "#333" }}>✕</button>
         </div>
-        <p className="icf-popup-sub">
+        <p className="icf-popup-sub" style={{ color: "#333" }}>
           {doc.printDocumentNo || `Doc #${doc.id}`} — currently filed as{" "}
           <strong>{doc.fileNumber}</strong>
         </p>
 
         <div className="icf-popup-field">
-          <span className="icf-popup-label">File Number</span>
+          <span className="icf-popup-label" style={{ color: "#222", fontWeight: 600 }}>File Number</span>
           <input
             className="icf-popup-text-input"
             type="text"
@@ -193,21 +209,45 @@ function FileEditPopup({ doc, editValue, onEditValueChange, saving, onSave, onDe
             onChange={e => onEditValueChange(e.target.value)}
             placeholder="Enter file number"
             disabled={saving}
+            style={{ color: "#111" }}
           />
         </div>
 
-        <div className="icf-popup-foot">
-          <button className="icf-btn-danger" disabled={saving} onClick={onDelete}>
+        <div className="icf-popup-foot" style={{ gap: 12 }}>
+          <button
+            className="icf-btn-danger"
+            disabled={saving}
+            onClick={onDelete}
+            style={{
+              minWidth: 90, padding: "8px 18px", borderRadius: 8,
+              background: "#fee2e2", color: "#b91c1c", border: "1.5px solid #f87171",
+              fontWeight: 600, cursor: "pointer",
+            }}
+          >
             🗑 Delete
           </button>
           <div style={{ flex: 1 }} />
-          <button className="icf-btn icf-btn-outline" disabled={saving} onClick={onCancel}>
+          <button
+            className="icf-btn icf-btn-outline"
+            disabled={saving}
+            onClick={onCancel}
+            style={{
+              minWidth: 90, padding: "8px 18px", borderRadius: 8,
+              border: "1.5px solid #94a3b8", background: "#fff",
+              color: "#334155", fontWeight: 600, cursor: "pointer",
+            }}
+          >
             Cancel
           </button>
           <button
             className="icf-btn-done"
             disabled={saving || !editValue.trim()}
             onClick={onSave}
+            style={{
+              minWidth: 90, padding: "8px 18px", borderRadius: 8,
+              background: "#7c3aed", color: "#fff", fontWeight: 600,
+              border: "none", cursor: "pointer",
+            }}
           >
             {saving ? "Saving..." : "✓ Save"}
           </button>
@@ -217,26 +257,29 @@ function FileEditPopup({ doc, editValue, onEditValueChange, saving, onSave, onDe
   );
 }
 
-// ── Edit / Delete Status popup ──────────────────────────────────────────────
+// ── Edit Status popup (NO Delete button) ────────────────────────────────────
 
-function StatusEditPopup({ doc, fields, onFieldChange, saving, onSave, onDelete, onCancel }) {
+function StatusEditPopup({ doc, fields, onFieldChange, saving, onSave, onCancel }) {
   const sc = statusClass(doc.deliveryStatus);
   const isDelivered = sc === "completed";
 
   return (
     <div className="icf-popup-overlay">
-      <div className="icf-popup">
-        <div className="icf-popup-head">
-          <span>{isDelivered ? "🚚 Edit Delivered Details" : "✕ Edit Cancelled Details"}</span>
-          <button className="icf-popup-close" onClick={onCancel}>✕</button>
+      <div className="icf-popup" style={{ color: "#1a1a1a" }}>
+        <div className="icf-popup-head" style={{ color: "#111" }}>
+          <span style={{ color: "#111", fontWeight: 700 }}>
+            {isDelivered ? "🚚 Edit Delivered Details" : "✕ Edit Cancelled Details"}
+          </span>
+          <button className="icf-popup-close" onClick={onCancel} style={{ color: "#333" }}>✕</button>
         </div>
-        <p className="icf-popup-sub">
+
+        <p className="icf-popup-sub" style={{ color: "#333", marginBottom: 16 }}>
           {doc.printDocumentNo || `Doc #${doc.id}`}
         </p>
 
         {isDelivered ? (
           <div className="icf-popup-field">
-            <span className="icf-popup-label">Delivered By</span>
+            <span className="icf-popup-label" style={{ color: "#222", fontWeight: 600 }}>Delivered By</span>
             <input
               className="icf-popup-text-input"
               type="text"
@@ -244,12 +287,13 @@ function StatusEditPopup({ doc, fields, onFieldChange, saving, onSave, onDelete,
               onChange={e => onFieldChange("deliveredBy", e.target.value)}
               placeholder="Enter name"
               disabled={saving}
+              style={{ color: "#111" }}
             />
           </div>
         ) : (
           <>
             <div className="icf-popup-field">
-              <span className="icf-popup-label">Cancelled By</span>
+              <span className="icf-popup-label" style={{ color: "#222", fontWeight: 600 }}>Cancelled By</span>
               <input
                 className="icf-popup-text-input"
                 type="text"
@@ -257,10 +301,11 @@ function StatusEditPopup({ doc, fields, onFieldChange, saving, onSave, onDelete,
                 onChange={e => onFieldChange("deliveryCancelledBy", e.target.value)}
                 placeholder="Enter name"
                 disabled={saving}
+                style={{ color: "#111" }}
               />
             </div>
             <div className="icf-popup-field">
-              <span className="icf-popup-label">Cancel Reason</span>
+              <span className="icf-popup-label" style={{ color: "#222", fontWeight: 600 }}>Cancel Reason</span>
               <input
                 className="icf-popup-text-input"
                 type="text"
@@ -268,20 +313,35 @@ function StatusEditPopup({ doc, fields, onFieldChange, saving, onSave, onDelete,
                 onChange={e => onFieldChange("deliveryCancelReason", e.target.value)}
                 placeholder="Enter reason"
                 disabled={saving}
+                style={{ color: "#111" }}
               />
             </div>
           </>
         )}
 
-        <div className="icf-popup-foot">
-          <button className="icf-btn-danger" disabled={saving} onClick={onDelete}>
-            🗑 Delete Document
-          </button>
-          <div style={{ flex: 1 }} />
-          <button className="icf-btn icf-btn-outline" disabled={saving} onClick={onCancel}>
+        <div className="icf-popup-foot" style={{ justifyContent: "flex-end", gap: 12, marginTop: 20 }}>
+          <button
+            className="icf-btn icf-btn-outline"
+            disabled={saving}
+            onClick={onCancel}
+            style={{
+              minWidth: 90, padding: "8px 18px", borderRadius: 8,
+              border: "1.5px solid #94a3b8", background: "#fff",
+              color: "#334155", fontWeight: 600, cursor: "pointer",
+            }}
+          >
             Cancel
           </button>
-          <button className="icf-btn-done" disabled={saving} onClick={onSave}>
+          <button
+            className="icf-btn-done"
+            disabled={saving}
+            onClick={onSave}
+            style={{
+              minWidth: 90, padding: "8px 18px", borderRadius: 8,
+              background: "#7c3aed", color: "#fff", fontWeight: 600,
+              border: "none", cursor: "pointer",
+            }}
+          >
             {saving ? "Saving..." : "✓ Save"}
           </button>
         </div>
@@ -462,7 +522,7 @@ export default function IssueConfirm() {
   const [editFileValue,    setEditFileValue]    = useState("");
   const [fileActionSaving, setFileActionSaving] = useState(false);
 
-  // Edit/Delete STATUS popup
+  // Edit STATUS popup
   const [editStatusDoc,      setEditStatusDoc]      = useState(null);
   const [statusFields,       setStatusFields]       = useState({ deliveredBy: "", deliveryCancelledBy: "", deliveryCancelReason: "" });
   const [statusActionSaving, setStatusActionSaving] = useState(false);
@@ -623,7 +683,7 @@ export default function IssueConfirm() {
     }
   };
 
-  // ── Status Edit / Delete ──
+  // ── Status Edit ──
   const openStatusEdit = (doc) => {
     setEditStatusDoc(doc);
     setStatusFields({
@@ -667,25 +727,21 @@ export default function IssueConfirm() {
     }
   };
 
+  // Delete document (from Manage column)
   const handleDeleteDocument = async (doc) => {
-    const target = doc || editStatusDoc;
-    if (!target) return;
-    if (!window.confirm(`Permanently delete ${target.printDocumentNo || `Doc #${target.id}`}? This cannot be undone.`)) return;
+    if (!doc) return;
+    if (!window.confirm(`Permanently delete ${doc.printDocumentNo || `Doc #${doc.id}`}? This cannot be undone.`)) return;
 
-    setStatusActionSaving(true);
     try {
-      const res = await fetch(`${CONFIRM_API}/${target.id}`, { method: "DELETE" });
+      const res = await fetch(`${CONFIRM_API}/${doc.id}`, { method: "DELETE" });
       if (!res.ok) throw new Error(`Server error: ${res.status}`);
-      setDocuments(prev => prev.filter(d => d.id !== target.id));
-      closeStatusEdit();
+      setDocuments(prev => prev.filter(d => d.id !== doc.id));
     } catch (err) {
       alert("Delete failed: " + err.message);
-    } finally {
-      setStatusActionSaving(false);
     }
   };
 
-  // Manage column → Edit button
+  // Manage → Edit
   const handleManageEdit = (doc) => {
     if (doc.fileNumber) {
       openFileEdit(doc);
@@ -736,7 +792,6 @@ export default function IssueConfirm() {
           onFieldChange={handleStatusFieldChange}
           saving={statusActionSaving}
           onSave={handleSaveStatusEdit}
-          onDelete={() => handleDeleteDocument(editStatusDoc)}
           onCancel={closeStatusEdit}
         />
       )}
@@ -839,7 +894,7 @@ export default function IssueConfirm() {
                       <span
                         className={`icf-badge ${ds.cls}`}
                         style={{ cursor: "pointer" }}
-                        title="Click to edit or delete"
+                        title="Click to edit"
                         onClick={() => (isFiled ? openFileEdit(doc) : openStatusEdit(doc))}
                       >
                         {ds.label}
@@ -881,11 +936,10 @@ export default function IssueConfirm() {
                       </button>
                     </td>
 
-                    {/* Manage — Edit + Delete (same style as Delivery Portal) */}
+                    {/* Manage — Edit + Delete */}
                     <td>
                       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                         <button
-                          className="icf-mini-manage"
                           title="Edit"
                           onClick={() => handleManageEdit(doc)}
                           style={{
@@ -902,7 +956,6 @@ export default function IssueConfirm() {
                           ✎
                         </button>
                         <button
-                          className="icf-mini-manage"
                           title="Delete"
                           onClick={() => handleDeleteDocument(doc)}
                           style={{
