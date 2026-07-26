@@ -10,22 +10,30 @@ const SETUP_API = "https://time-tracker-system-production.up.railway.app/api/adm
 const AUTO_REFRESH = 10000;
 
 // Reasons a Picking Error can be logged under.
+// "Material Shortage" and "Collected Different Material" now create a
+// picking error (SKU/Qty capture + Emergency Pick workflow). "Material
+// Excess" is logged for record-keeping only — it does NOT create a picking
+// error / does not require SKU+Qty.
 const PICKING_ERROR_REASONS = [
   { key: "SHORTAGE", label: "Material Shortage", createsError: true },
-  { key: "EXCESS", label: "Material Excess", createsError: true },
-  { key: "DIFFERENT", label: "Collected Different Material", createsError: false },
+  { key: "DIFFERENT", label: "Collected Different Material", createsError: true },
+  { key: "EXCESS", label: "Material Excess", createsError: false },
 ];
 
+// Minimum length required for a SKU / Description entry on a picking-error
+// material row.
+const SKU_MIN_LENGTH = 8;
+
 // Status filters — normalized classes, shared between the dropdown and the
-// clickable stat chips so both always stay in sync. "wrongmaterial" is a
-// virtual filter (not a real checkStatus) that shows flagged documents.
+// clickable stat chips so both always stay in sync. The "Wrong Material"
+// stat chip has been merged into "Pending" — an unresolved picking error is
+// treated as part of Pending, not a separate bucket.
 const STATUS_FILTERS = [
   { value: "ALL", label: "All Status" },
   { value: "pending", label: "Pending" },
   { value: "inprogress", label: "In Progress" },
   { value: "onhold", label: "On Hold" },
   { value: "completed", label: "Check Done" },
-  { value: "wrongmaterial", label: "Wrong Material" },
 ];
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -152,11 +160,12 @@ function HoldPopup({ people, peopleLoading, onConfirm, onCancel }) {
     setMaterials(prev => prev.map((m, i) => (i === idx ? { ...m, [field]: value } : m)));
 
   const filledMaterials = materials.filter(m => m.sku.trim().length > 0 && m.qty.trim().length > 0);
+  const invalidSkuMaterials = filledMaterials.filter(m => m.sku.trim().length < SKU_MIN_LENGTH);
 
   const canConfirm =
     !!heldBy &&
     pickingErrorKey !== null &&
-    (!needsDetails || filledMaterials.length > 0);
+    (!needsDetails || (filledMaterials.length > 0 && invalidSkuMaterials.length === 0));
 
   const handleConfirm = () => {
     const hasWrongMaterial = needsDetails ? "YES" : "NO";
@@ -206,36 +215,47 @@ function HoldPopup({ people, peopleLoading, onConfirm, onCancel }) {
           <div style={{ marginBottom: 16 }}>
             <span className="ip-popup-label">Wrong Material(s)</span>
 
-            {materials.map((m, idx) => (
-              <div key={idx} style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 8 }}>
-                <input
-                  className="ip-popup-text-input"
-                  type="text"
-                  placeholder="SKU / Description"
-                  value={m.sku}
-                  onChange={e => updateMaterialRow(idx, "sku", e.target.value)}
-                  style={{ flex: 2 }}
-                />
-                <input
-                  className="ip-popup-text-input"
-                  type="text"
-                  placeholder="Quantity"
-                  value={m.qty}
-                  onChange={e => updateMaterialRow(idx, "qty", e.target.value)}
-                  style={{ flex: 1 }}
-                />
-                {materials.length > 1 && (
-                  <button
-                    className="ip-btn ip-btn-outline"
-                    style={{ padding: "6px 10px", flex: "unset" }}
-                    onClick={() => removeMaterialRow(idx)}
-                    aria-label="Remove row"
-                  >
-                    ✕
-                  </button>
-                )}
-              </div>
-            ))}
+            {materials.map((m, idx) => {
+              const skuTrimmed = m.sku.trim();
+              const skuTooShort = skuTrimmed.length > 0 && skuTrimmed.length < SKU_MIN_LENGTH;
+              return (
+                <div key={idx} style={{ marginTop: 8 }}>
+                  <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                    <input
+                      className="ip-popup-text-input"
+                      type="text"
+                      placeholder="SKU / Description (min 8 characters)"
+                      value={m.sku}
+                      onChange={e => updateMaterialRow(idx, "sku", e.target.value)}
+                      style={{ flex: 2, borderColor: skuTooShort ? "#ef4444" : undefined }}
+                    />
+                    <input
+                      className="ip-popup-text-input"
+                      type="text"
+                      placeholder="Quantity"
+                      value={m.qty}
+                      onChange={e => updateMaterialRow(idx, "qty", e.target.value)}
+                      style={{ flex: 1 }}
+                    />
+                    {materials.length > 1 && (
+                      <button
+                        className="ip-btn ip-btn-outline"
+                        style={{ padding: "6px 10px", flex: "unset" }}
+                        onClick={() => removeMaterialRow(idx)}
+                        aria-label="Remove row"
+                      >
+                        ✕
+                      </button>
+                    )}
+                  </div>
+                  {skuTooShort && (
+                    <div style={{ color: "#ef4444", fontSize: "0.72rem", marginTop: 4 }}>
+                      SKU / Description must be at least {SKU_MIN_LENGTH} characters ({skuTrimmed.length}/{SKU_MIN_LENGTH})
+                    </div>
+                  )}
+                </div>
+              );
+            })}
 
             <button
               className="ip-btn ip-btn-outline"
@@ -1041,11 +1061,16 @@ export default function IssueCheckForm() {
 
     const matchType = filterType === "ALL" || doc.jobType === filterType;
 
+    // "Pending" is merged with unresolved picking errors — a flagged
+    // document that hasn't been re-picked yet counts as Pending even if its
+    // raw checkStatus is something else (e.g. ON_HOLD).
+    const docSc = statusClass(doc.checkStatus);
     const isWrongMaterial = (doc.hasWrongMaterial || "").toUpperCase() === "YES";
+    const hasUnresolvedError = isWrongMaterial && !doc.emergencyPickResolved && docSc !== "completed";
     const matchStatus =
       filterStatus === "ALL" ? true :
-      filterStatus === "wrongmaterial" ? isWrongMaterial :
-      statusClass(doc.checkStatus) === filterStatus;
+      filterStatus === "pending" ? (docSc === "pending" || hasUnresolvedError) :
+      docSc === filterStatus;
 
     const docDate = doc.requestDate;
     const matchFrom = !fromDate || (docDate && docDate >= fromDate);
@@ -1057,11 +1082,21 @@ export default function IssueCheckForm() {
 
   // Stats
   const total     = documents.length;
-  const pending   = documents.filter(d => statusClass(d.checkStatus) === "pending").length;
   const inProg    = documents.filter(d => statusClass(d.checkStatus) === "inprogress").length;
   const onHold    = documents.filter(d => statusClass(d.checkStatus) === "onhold").length;
   const completed = documents.filter(d => statusClass(d.checkStatus) === "completed").length;
   const wrongCount = documents.filter(d => (d.hasWrongMaterial || "").toUpperCase() === "YES").length;
+
+  // "Wrong Material" is merged into "Pending" — a document with an
+  // unresolved picking error is counted (and shown) under Pending rather
+  // than as a separate bucket.
+  const isPendingOrUnresolvedError = (d) => {
+    const sc = statusClass(d.checkStatus);
+    const isFlagged = (d.hasWrongMaterial || "").toUpperCase() === "YES";
+    const hasUnresolvedError = isFlagged && !d.emergencyPickResolved && sc !== "completed";
+    return sc === "pending" || hasUnresolvedError;
+  };
+  const pending = documents.filter(isPendingOrUnresolvedError).length;
 
   const handleStatClick = (statusValue) => setFilterStatus(statusValue);
 
@@ -1256,6 +1291,11 @@ export default function IssueCheckForm() {
           onClick={() => handleStatClick("pending")}
         >
           <strong style={{color:"#f59e0b"}}>{pending}</strong> Pending
+          {wrongCount > 0 && (
+            <span style={{ marginLeft: 6, color: "#ef4444", fontWeight: 700, fontSize: "0.75rem" }}>
+              ⚠️ {wrongCount}
+            </span>
+          )}
         </button>
         <button
           type="button"
@@ -1278,16 +1318,6 @@ export default function IssueCheckForm() {
         >
           Check Done <strong>{completed}</strong>
         </button>
-        {wrongCount > 0 && (
-          <button
-            type="button"
-            className={`ip-stat-chip ip-stat-chip-clickable ${filterStatus === "wrongmaterial" ? "active" : ""}`}
-            style={{ background: "rgba(239,68,68,0.15)", border: "1px solid #ef4444" }}
-            onClick={() => handleStatClick("wrongmaterial")}
-          >
-            <strong style={{ color: "#ef4444" }}>{wrongCount}</strong> ⚠️ Wrong Material
-          </button>
-        )}
         <div className="ip-stat-chip">Showing <strong style={{color:"#a78bfa"}}>{visible.length}</strong> of {total}</div>
       </div>
 
