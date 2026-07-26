@@ -22,7 +22,7 @@ const PICKING_ERROR_REASONS = [
 
 // Minimum length required for a SKU / Description entry on a picking-error
 // material row.
-const SKU_MIN_LENGTH = 8;
+const SKU_MAX_LENGTH = 8;
 
 // Status filters — normalized classes, shared between the dropdown and the
 // clickable stat chips so both always stay in sync. The "Wrong Material"
@@ -160,7 +160,7 @@ function HoldPopup({ people, peopleLoading, onConfirm, onCancel }) {
     setMaterials(prev => prev.map((m, i) => (i === idx ? { ...m, [field]: value } : m)));
 
   const filledMaterials = materials.filter(m => m.sku.trim().length > 0 && m.qty.trim().length > 0);
-  const invalidSkuMaterials = filledMaterials.filter(m => m.sku.trim().length < SKU_MIN_LENGTH);
+  const invalidSkuMaterials = filledMaterials.filter(m => m.sku.trim().length < SKU_MAX_LENGTH);
 
   const canConfirm =
     !!heldBy &&
@@ -217,14 +217,14 @@ function HoldPopup({ people, peopleLoading, onConfirm, onCancel }) {
 
             {materials.map((m, idx) => {
               const skuTrimmed = m.sku.trim();
-              const skuTooShort = skuTrimmed.length > 0 && skuTrimmed.length < SKU_MIN_LENGTH;
+              const skuTooShort = skuTrimmed.length > 0 && skuTrimmed.length < SKU_MAX_LENGTH;
               return (
                 <div key={idx} style={{ marginTop: 8 }}>
                   <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                     <input
                       className="ip-popup-text-input"
                       type="text"
-                      placeholder="SKU / Description (min 8 characters)"
+                      placeholder="SKU  (min 8 characters)"
                       value={m.sku}
                       onChange={e => updateMaterialRow(idx, "sku", e.target.value)}
                       style={{ flex: 2, borderColor: skuTooShort ? "#ef4444" : undefined }}
