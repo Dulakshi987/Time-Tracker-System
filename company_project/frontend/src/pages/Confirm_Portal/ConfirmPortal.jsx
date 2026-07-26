@@ -3,14 +3,10 @@ import "./ConfirmPortal.css";
 
 // const DELIVERY_API = "http://localhost:8080/api/delivery-portal";
 // const CONFIRM_API = "http://localhost:8080/api/issue-confirm";
-// // Same source Master Setup → "Document File No" panel writes to.
 // const SETUP_API = "http://localhost:8080/api/admin-setup";
 
 const DELIVERY_API = "https://time-tracker-system-production.up.railway.app/api/delivery-portal";
-
 const CONFIRM_API = "https://time-tracker-system-production.up.railway.app/api/issue-confirm";
-
-// Same source Master Setup → "Document File No" panel writes to.
 const SETUP_API = "https://time-tracker-system-production.up.railway.app/api/admin-setup";
 const AUTO_REFRESH = 10000;
 
@@ -45,9 +41,6 @@ function jobTypeColor(jt) {
   return map[(jt || "").toLowerCase().replace(/\s+/g, "_")] || "#7c8db0";
 }
 
-// NOTE: "hold" no longer surfaces in this portal (Confirm Portal only shows
-// delivered/cancelled), left intact for safety in case a stray record with
-// an unexpected status ever reaches the frontend.
 function statusClass(s) {
   const v = (s || "").toLowerCase();
   if (v.includes("cancel"))   return "cancelled";
@@ -64,8 +57,6 @@ function statusLabel(sc) {
   return sc;
 }
 
-// Once a document has a fileNumber, its badge/status is shown as "Filed"
-// regardless of the underlying delivered/cancelled status.
 function displayStatus(doc) {
   if (doc.fileNumber) return { label: "Filed", cls: "filed" };
   const sc = statusClass(doc.deliveryStatus);
@@ -116,7 +107,6 @@ function eventInfo(doc) {
   return { dateTime: null, by: null, reason: null };
 }
 
-// ── Active file number (set by admin in Master Setup → Document File No) ──
 async function fetchActiveFileNumber() {
   const res = await fetch(`${SETUP_API}/file-numbers`);
   if (!res.ok) throw new Error(`Server error: ${res.status}`);
@@ -179,7 +169,7 @@ function AddFilePopup({ doc, reqId, activeFileNo, loadingFileNo, fileNoError, on
   );
 }
 
-// ── Edit / Delete File popup (opened from the "Filed" badge / file no.) ────
+// ── Edit / Delete File popup ────────────────────────────────────────────────
 
 function FileEditPopup({ doc, editValue, onEditValueChange, saving, onSave, onDelete, onCancel }) {
   return (
@@ -227,9 +217,7 @@ function FileEditPopup({ doc, editValue, onEditValueChange, saving, onSave, onDe
   );
 }
 
-// ── NEW: Edit / Delete Status popup (opened from Delivered / Cancelled) ────
-// Edit lets the user correct who delivered/cancelled it (and the cancel
-// reason). Delete permanently removes the whole document from the system.
+// ── Edit / Delete Status popup ──────────────────────────────────────────────
 
 function StatusEditPopup({ doc, fields, onFieldChange, saving, onSave, onDelete, onCancel }) {
   const sc = statusClass(doc.deliveryStatus);
@@ -302,7 +290,7 @@ function StatusEditPopup({ doc, fields, onFieldChange, saving, onSave, onDelete,
   );
 }
 
-// ── View Drawer helpers (light theme) ───────────────────────────────────────
+// ── View Drawer helpers ─────────────────────────────────────────────────────
 
 function DetailRow({ label, value }) {
   return (
@@ -322,8 +310,6 @@ function Section({ icon, title, children, accent }) {
   );
 }
 
-// ── Side Drawer: full document trail (light theme, black text on white) ────
-
 function ViewDrawer({ doc, reqId, onClose }) {
   const ds = displayStatus(doc);
 
@@ -339,7 +325,6 @@ function ViewDrawer({ doc, reqId, onClose }) {
         </div>
 
         <div className="icf-drawer-body">
-
           <Section icon="📝" title="Request Details">
             <DetailRow label="Req ID" value={doc.reqId || reqId} />
             <DetailRow label="Customer" value={doc.customerName} />
@@ -443,7 +428,6 @@ function ViewDrawer({ doc, reqId, onClose }) {
             <DetailRow label="Req ID" value={doc.reqId || reqId} />
             <DetailRow label="File Number" value={doc.fileNumber ? `📁 ${doc.fileNumber}` : "Not yet added to file"} />
           </Section>
-
         </div>
 
         <div className="icf-popup-foot">
@@ -454,7 +438,7 @@ function ViewDrawer({ doc, reqId, onClose }) {
   );
 }
 
-// ── Main ─────────────────────────────────────────────────────────────────────
+// ── Main Component ──────────────────────────────────────────────────────────
 
 export default function IssueConfirm() {
   const [documents,   setDocuments]   = useState([]);
@@ -462,22 +446,23 @@ export default function IssueConfirm() {
   const [error,       setError]       = useState(null);
   const [lastUpdated, setLastUpdated] = useState(null);
   const [refreshing,  setRefreshing]  = useState(false);
-  const [filterStatus, setFilterStatus] = useState("ALL"); // ALL | completed | cancelled
+  const [filterStatus, setFilterStatus] = useState("ALL");
+  const [search,      setSearch]      = useState("");
   const [savingId,    setSavingId]    = useState(null);
   const [viewDoc,     setViewDoc]     = useState(null);
 
-  // Add-to-File popup state
+  // Add-to-File popup
   const [fileDoc,       setFileDoc]       = useState(null);
   const [activeFileNo,  setActiveFileNo]  = useState(null);
   const [loadingFileNo, setLoadingFileNo] = useState(false);
   const [fileNoError,   setFileNoError]   = useState(null);
 
-  // Edit/Delete FILE popup state — opened from "Filed" badge / file number
+  // Edit/Delete FILE popup
   const [editFileDoc,      setEditFileDoc]      = useState(null);
   const [editFileValue,    setEditFileValue]    = useState("");
   const [fileActionSaving, setFileActionSaving] = useState(false);
 
-  // NEW: Edit/Delete STATUS popup state — opened from Delivered / Cancelled badge
+  // Edit/Delete STATUS popup
   const [editStatusDoc,      setEditStatusDoc]      = useState(null);
   const [statusFields,       setStatusFields]       = useState({ deliveredBy: "", deliveryCancelledBy: "", deliveryCancelReason: "" });
   const [statusActionSaving, setStatusActionSaving] = useState(false);
@@ -507,12 +492,30 @@ export default function IssueConfirm() {
 
   const reqIdMap = useMemo(() => computeRequestIds(documents), [documents]);
 
-  // Only Delivered + Cancelled belong on this portal now — Hold is dropped.
+  // Only Delivered + Cancelled
   const relevant = documents.filter(d => ["completed", "cancelled"].includes(statusClass(d.deliveryStatus)));
 
-  const visible = filterStatus === "ALL"
-    ? relevant
-    : relevant.filter(d => statusClass(d.deliveryStatus) === filterStatus);
+  const visible = relevant.filter(doc => {
+    const sc = statusClass(doc.deliveryStatus);
+    const matchStatus = filterStatus === "ALL" || sc === filterStatus;
+
+    const q = search.toLowerCase().trim();
+    const reqId = (doc.reqId || reqIdMap[doc.id] || "").toLowerCase();
+    const matchSearch = !q || [
+      reqId,
+      doc.printDocumentNo,
+      doc.jobwbs,
+      doc.customerName,
+      doc.requestedBy,
+      doc.deliveryVehicleNo,
+      doc.deliveredBy,
+      doc.deliveryCancelledBy,
+      doc.fileNumber,
+      String(doc.id),
+    ].some(v => (v || "").toLowerCase().includes(q));
+
+    return matchStatus && matchSearch;
+  });
 
   const counts = {
     completed: relevant.filter(d => statusClass(d.deliveryStatus) === "completed").length,
@@ -525,6 +528,7 @@ export default function IssueConfirm() {
     if (fresh) setViewDoc(fresh);
   }, [documents]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // ── Add to File ──
   const handleAddToFileClick = async (doc) => {
     setFileDoc(doc);
     setActiveFileNo(null);
@@ -571,8 +575,7 @@ export default function IssueConfirm() {
     }
   };
 
-  // ── Edit / Delete FILE number (Filed badge) ─────────────────────────
-
+  // ── File Edit / Delete ──
   const openFileEdit = (doc) => {
     setEditFileDoc(doc);
     setEditFileValue(doc.fileNumber || "");
@@ -620,8 +623,7 @@ export default function IssueConfirm() {
     }
   };
 
-  // ── NEW: Edit / Delete STATUS (Delivered / Cancelled badge) ─────────
-
+  // ── Status Edit / Delete ──
   const openStatusEdit = (doc) => {
     setEditStatusDoc(doc);
     setStatusFields({
@@ -665,19 +667,30 @@ export default function IssueConfirm() {
     }
   };
 
-  const handleDeleteDocument = async () => {
-    if (!editStatusDoc) return;
-    if (!window.confirm(`Permanently delete ${editStatusDoc.printDocumentNo || `Doc #${editStatusDoc.id}`}? This cannot be undone.`)) return;
+  const handleDeleteDocument = async (doc) => {
+    const target = doc || editStatusDoc;
+    if (!target) return;
+    if (!window.confirm(`Permanently delete ${target.printDocumentNo || `Doc #${target.id}`}? This cannot be undone.`)) return;
+
     setStatusActionSaving(true);
     try {
-      const res = await fetch(`${CONFIRM_API}/${editStatusDoc.id}`, { method: "DELETE" });
+      const res = await fetch(`${CONFIRM_API}/${target.id}`, { method: "DELETE" });
       if (!res.ok) throw new Error(`Server error: ${res.status}`);
-      setDocuments(prev => prev.filter(d => d.id !== editStatusDoc.id));
+      setDocuments(prev => prev.filter(d => d.id !== target.id));
       closeStatusEdit();
     } catch (err) {
       alert("Delete failed: " + err.message);
     } finally {
       setStatusActionSaving(false);
+    }
+  };
+
+  // Manage column → Edit button
+  const handleManageEdit = (doc) => {
+    if (doc.fileNumber) {
+      openFileEdit(doc);
+    } else {
+      openStatusEdit(doc);
     }
   };
 
@@ -723,16 +736,16 @@ export default function IssueConfirm() {
           onFieldChange={handleStatusFieldChange}
           saving={statusActionSaving}
           onSave={handleSaveStatusEdit}
-          onDelete={handleDeleteDocument}
+          onDelete={() => handleDeleteDocument(editStatusDoc)}
           onCancel={closeStatusEdit}
         />
       )}
 
       {/* Header */}
-       <div className="ip-header">
+      <div className="ip-header">
         <div className="ip-header-left">
           <h1>LOGITRACK-WAREHOUSE TIME EFFICENCY TRACKER SYSTEM</h1>
-          <h1>  Issue Confirm Portal</h1>
+          <h1>Issue Confirm Portal</h1>
           <p>
             Document Cart View
             {lastUpdated && (
@@ -751,8 +764,19 @@ export default function IssueConfirm() {
         </button>
       </div>
 
-      {/* Toolbar — Delivered / Cancelled filter only */}
+      {/* Toolbar — Search + Filter */}
       <div className="icf-toolbar">
+        <div className="icf-search-wrap" style={{ flex: 1, maxWidth: 420 }}>
+          <span className="icf-search-icon">🔍</span>
+          <input
+            className="icf-search"
+            type="text"
+            placeholder="Search by Req ID, Doc No, WBS, Customer, Requested By, Vehicle, File No..."
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+          />
+        </div>
+
         <select
           className="icf-filter-select"
           value={filterStatus}
@@ -766,6 +790,7 @@ export default function IssueConfirm() {
         <div className="icf-stats">
           <div className="icf-stat-chip completed">Delivered <strong>{counts.completed}</strong></div>
           <div className="icf-stat-chip cancelled">Cancelled <strong>{counts.cancelled}</strong></div>
+          <div className="icf-stat-chip">Showing <strong style={{ color: "#a78bfa" }}>{visible.length}</strong></div>
         </div>
       </div>
 
@@ -775,7 +800,7 @@ export default function IssueConfirm() {
         </div>
       )}
 
-      {/* Unified table */}
+      {/* Table */}
       <div className="icf-table-wrap">
         <table className="icf-table">
           <thead>
@@ -790,23 +815,26 @@ export default function IssueConfirm() {
               <th>Date / Time</th>
               <th>Job Type</th>
               <th>View</th>
+              <th>Manage</th>
               <th>File No.</th>
             </tr>
           </thead>
           <tbody>
             {loading ? (
-              <tr><td colSpan={11} className="icf-empty-cell">Loading...</td></tr>
+              <tr><td colSpan={12} className="icf-empty-cell">Loading...</td></tr>
             ) : visible.length === 0 ? (
-              <tr><td colSpan={11} className="icf-empty-cell">No documents found.</td></tr>
+              <tr><td colSpan={12} className="icf-empty-cell">No documents found.</td></tr>
             ) : (
               visible.map(doc => {
                 const sc = statusClass(doc.deliveryStatus);
                 const info = eventInfo(doc);
                 const ds = displayStatus(doc);
                 const isFiled = !!doc.fileNumber;
+                const reqId = doc.reqId || reqIdMap[doc.id] || "—";
 
                 return (
                   <tr key={doc.id} className="icf-row">
+                    {/* Status badge (clickable) */}
                     <td>
                       <span
                         className={`icf-badge ${ds.cls}`}
@@ -817,17 +845,83 @@ export default function IssueConfirm() {
                         {ds.label}
                       </span>
                     </td>
-                    <td className="icf-td-reqid">{doc.reqId || reqIdMap[doc.id] || "—"}</td>
+
+                    {/* Req ID */}
+                    <td className="icf-td-reqid">{reqId}</td>
+
+                    {/* Doc No */}
                     <td className="icf-td-docno">{doc.printDocumentNo || `Doc #${doc.id}`}</td>
+
+                    {/* Requested By */}
                     <td>{doc.requestedBy || "—"}</td>
+
+                    {/* Delivery Vehicle */}
                     <td>🚐 {doc.deliveryVehicleNo || "—"}</td>
+
+                    {/* Delivered By */}
                     <td>{sc === "completed" ? `👤 ${info.by || "—"}` : "—"}</td>
+
+                    {/* Cancelled By */}
                     <td>{sc === "cancelled" ? `👤 ${info.by || "—"}` : "—"}</td>
+
+                    {/* Date / Time */}
                     <td className="icf-td-datetime">{formatDateTime(info.dateTime)}</td>
-                    <td>{doc.jobType || "—"}</td>
+
+                    {/* Job Type */}
                     <td>
-                      <button className="icf-btn-view" onClick={() => setViewDoc(doc)}>👁 View</button>
+                      <span style={{ color: jobTypeColor(doc.jobType), fontWeight: 600 }}>
+                        {doc.jobType || "—"}
+                      </span>
                     </td>
+
+                    {/* View */}
+                    <td>
+                      <button className="icf-btn-view" onClick={() => setViewDoc(doc)}>
+                        👁 View
+                      </button>
+                    </td>
+
+                    {/* Manage — Edit + Delete (same style as Delivery Portal) */}
+                    <td>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        <button
+                          className="icf-mini-manage"
+                          title="Edit"
+                          onClick={() => handleManageEdit(doc)}
+                          style={{
+                            backgroundColor: "#3b82f6",
+                            color: "#eaf2ff",
+                            border: "1px solid #3b82f6",
+                            minWidth: 34,
+                            minHeight: 34,
+                            fontSize: "1.05rem",
+                            borderRadius: 8,
+                            cursor: "pointer",
+                          }}
+                        >
+                          ✎
+                        </button>
+                        <button
+                          className="icf-mini-manage"
+                          title="Delete"
+                          onClick={() => handleDeleteDocument(doc)}
+                          style={{
+                            backgroundColor: "#ef4444",
+                            color: "#2a0a0a",
+                            border: "1px solid #ef4444",
+                            minWidth: 34,
+                            minHeight: 34,
+                            fontSize: "1.05rem",
+                            borderRadius: 8,
+                            cursor: "pointer",
+                          }}
+                        >
+                          🗑
+                        </button>
+                      </div>
+                    </td>
+
+                    {/* File No */}
                     <td>
                       {doc.fileNumber ? (
                         <span
