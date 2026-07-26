@@ -8,14 +8,6 @@ const API_BASE = "https://time-tracker-system-production.up.railway.app/api/chec
 const SETUP_API = "https://time-tracker-system-production.up.railway.app/api/admin-setup";
 const AUTO_REFRESH = 10000;
 
-const ISSUE_REASONS = [
-  "Wrong SKU picked",
-  "Wrong quantity",
-  "Damaged item",
-  "Missing item",
-  "Other",
-];
-
 const HOLD_REASONS = [
   "Waiting for documents",
   "Checker unavailable",
@@ -95,7 +87,7 @@ function jobTypeColor(jt) {
 function statusClass(doc) {
   const hasOpenIssue = (doc.hasWrongMaterial || "").toUpperCase() === "YES" && !doc.emergencyPickResolved;
   if (hasOpenIssue) return "wrongmaterial";
-  const v = (doc.status || "").toLowerCase();
+  const v = (doc.checkStatus || "").toLowerCase();
   if (v.includes("hold")) return "onhold";
   if (v.includes("progress")) return "inprogress";
   if (v.includes("complete") || v.includes("checked") || v.includes("done")) return "completed";
@@ -196,16 +188,14 @@ function HoldPopup({ onConfirm, onCancel, checkers, checkersLoading }) {
 }
 
 // ── Report Wrong Material Popup ─────────────────────────────────────────────
+// Only captures fields that exist on the backend entity: wrong_material_sku,
+// wrong_material_qty, checked_by. has_wrong_material is set to "YES" on submit.
 function ReportIssuePopup({ onConfirm, onCancel, checkers, checkersLoading }) {
-  const [reason, setReason] = useState("");
-  const [otherReason, setOtherReason] = useState("");
   const [sku, setSku] = useState("");
   const [qty, setQty] = useState("");
   const [checkedBy, setCheckedBy] = useState("");
 
-  const isOther = reason === "Other";
-  const finalReason = isOther ? otherReason.trim() : reason;
-  const canConfirm = !!finalReason && !!sku.trim() && !!qty && !!checkedBy;
+  const canConfirm = !!sku.trim() && !!qty && !!checkedBy;
 
   return (
     <div className="ip-popup-overlay">
@@ -216,28 +206,6 @@ function ReportIssuePopup({ onConfirm, onCancel, checkers, checkersLoading }) {
         </div>
         <p className="ip-popup-sub">This will alert the Pick Portal for an emergency re-pick</p>
 
-        <span className="ip-popup-label">Reason</span>
-        <div className="ip-popup-options" style={{ marginBottom: 16 }}>
-          {ISSUE_REASONS.map(r => (
-            <button
-              key={r}
-              className={`ip-popup-option ${reason === r ? "selected" : ""}`}
-              onClick={() => setReason(r)}
-            >
-              {r}
-            </button>
-          ))}
-          {isOther && (
-            <input
-              className="ip-popup-input"
-              placeholder="Type reason..."
-              value={otherReason}
-              onChange={e => setOtherReason(e.target.value)}
-              autoFocus
-            />
-          )}
-        </div>
-
         <div className="ip-popup-field">
           <span className="ip-popup-label">Wrong SKU / Description</span>
           <input
@@ -246,6 +214,7 @@ function ReportIssuePopup({ onConfirm, onCancel, checkers, checkersLoading }) {
             placeholder="Enter SKU or description..."
             value={sku}
             onChange={e => setSku(e.target.value)}
+            autoFocus
           />
         </div>
 
@@ -269,7 +238,7 @@ function ReportIssuePopup({ onConfirm, onCancel, checkers, checkersLoading }) {
           <button
             className="ip-btn ip-btn-emergency"
             disabled={!canConfirm}
-            onClick={() => onConfirm({ reason: finalReason, sku: sku.trim(), qty, checkedBy })}
+            onClick={() => onConfirm({ sku: sku.trim(), qty, checkedBy })}
           >
             🚨 Report Issue
           </button>
@@ -370,17 +339,16 @@ function DocumentCard({ doc, requestId, divisionLabel, onStart, onHold, onReport
           <div className="ip-time-row"><span>Request Time</span><span>{formatTime(doc.requestTime)}</span></div>
         </div>
 
-        {(isOnHold || doc.holdReason) && (
+        {(isOnHold || doc.checkHoldReason) && (
           <div className="ip-hold-box">
-            <div className="ip-hold-row"><span>Hold Reason</span><span>{doc.holdReason || "—"}</span></div>
-            <div className="ip-hold-row"><span>Held By</span><span>👤 {doc.heldBy || "—"}</span></div>
-            <div className="ip-hold-row"><span>Held At</span><span>{formatDateTime(doc.holdTime)}</span></div>
+            <div className="ip-hold-row"><span>Hold Reason</span><span>{doc.checkHoldReason || "—"}</span></div>
+            <div className="ip-hold-row"><span>Held By</span><span>👤 {doc.checkHeldBy || "—"}</span></div>
+            <div className="ip-hold-row"><span>Held At</span><span>{formatDateTime(doc.checkHoldTime)}</span></div>
           </div>
         )}
 
         {(doc.hasWrongMaterial || "").toUpperCase() === "YES" && (
           <div className="ip-hold-box ip-issue-box">
-            <div className="ip-hold-row"><span>Issue Reason</span><span>{doc.pickingErrorReason || "—"}</span></div>
             <div className="ip-hold-row"><span>Wrong SKU</span><span>{doc.wrongMaterialSku || "—"}</span></div>
             <div className="ip-hold-row"><span>Quantity</span><span>{doc.wrongMaterialQty || "—"}</span></div>
             <div className="ip-hold-row"><span>Checked By</span><span>👤 {doc.checkedBy || "—"}</span></div>
@@ -388,13 +356,19 @@ function DocumentCard({ doc, requestId, divisionLabel, onStart, onHold, onReport
               <span>Emergency Pick</span>
               <span>{doc.emergencyPickResolved ? "✅ Resolved" : "⏳ Pending"}</span>
             </div>
+            {doc.emergencyPickResolved && (
+              <>
+                <div className="ip-hold-row"><span>Resolved By</span><span>👤 {doc.emergencyPickResolvedBy || "—"}</span></div>
+                <div className="ip-hold-row"><span>Resolved At</span><span>{formatDateTime(doc.emergencyResolvedTime)}</span></div>
+              </>
+            )}
           </div>
         )}
 
         {isDone && (
           <div className="ip-print-done-box">
             <div className="ip-print-done-row"><span>Checked By (End By)</span><span>👤 {doc.checkedBy || "—"}</span></div>
-            <div className="ip-print-done-row"><span>Duration</span><span>⏱ {formatDuration(doc.durationSeconds)}</span></div>
+            <div className="ip-print-done-row"><span>Duration</span><span>⏱ {formatDuration(doc.checkDurationSeconds)}</span></div>
           </div>
         )}
       </div>
@@ -599,20 +573,20 @@ export default function IssueCheckFormat() {
     }
   };
 
-  const handleHoldConfirm = async (holdReason, heldBy) => {
+  const handleHoldConfirm = async (checkHoldReason, checkHeldBy) => {
     const id = activeId;
     closePopup();
     try {
       await fetch(`${API_BASE}/${id}/hold`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ holdReason, heldBy }),
+        body: JSON.stringify({ checkHoldReason, checkHeldBy }),
       });
       fetchDocuments(true);
     } catch (err) { alert("Hold failed: " + err.message); }
   };
 
-  const handleReportIssueConfirm = async ({ reason, sku, qty, checkedBy }) => {
+  const handleReportIssueConfirm = async ({ sku, qty, checkedBy }) => {
     const id = activeId;
     closePopup();
     try {
@@ -620,7 +594,7 @@ export default function IssueCheckFormat() {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          pickingErrorReason: reason,
+          hasWrongMaterial: "YES",
           wrongMaterialSku: sku,
           wrongMaterialQty: qty,
           checkedBy,
