@@ -187,35 +187,51 @@ function HoldPopup({ onConfirm, onCancel, checkers, checkersLoading }) {
   );
 }
 
-// ── Report Wrong Material Popup ─────────────────────────────────────────────
+// ── Report Emergency Pick Error Popup ───────────────────────────────────────
 // Only captures fields that exist on the backend entity: wrong_material_sku,
 // wrong_material_qty, checked_by. has_wrong_material is set to "YES" on submit.
+const SKU_MIN_LENGTH = 8;
+
 function ReportIssuePopup({ onConfirm, onCancel, checkers, checkersLoading }) {
   const [sku, setSku] = useState("");
   const [qty, setQty] = useState("");
   const [checkedBy, setCheckedBy] = useState("");
+  const [skuError, setSkuError] = useState("");
 
-  const canConfirm = !!sku.trim() && !!qty && !!checkedBy;
+  const handleSkuChange = (e) => {
+    const value = e.target.value;
+    setSku(value);
+    if (value.trim().length === 0) {
+      setSkuError("");
+    } else if (value.trim().length < SKU_MIN_LENGTH) {
+      setSkuError(`Material code must be at least ${SKU_MIN_LENGTH} characters.`);
+    } else {
+      setSkuError("");
+    }
+  };
+
+  const canConfirm = sku.trim().length >= SKU_MIN_LENGTH && !!qty && !!checkedBy;
 
   return (
     <div className="ip-popup-overlay">
       <div className="ip-popup">
         <div className="ip-popup-head">
-          <span>🚨 Report Wrong Material</span>
+          <span>🚨 Emergency Pick Error</span>
           <button className="ip-popup-close" onClick={onCancel}>✕</button>
         </div>
         <p className="ip-popup-sub">This will alert the Pick Portal for an emergency re-pick</p>
 
         <div className="ip-popup-field">
-          <span className="ip-popup-label">Wrong SKU / Description</span>
+          <span className="ip-popup-label">Wrong Material Code (min {SKU_MIN_LENGTH} characters)</span>
           <input
-            className="ip-popup-text-input"
+            className={`ip-popup-text-input ${skuError ? "ip-input-error" : ""}`}
             type="text"
-            placeholder="Enter SKU or description..."
+            placeholder="Enter material code..."
             value={sku}
-            onChange={e => setSku(e.target.value)}
+            onChange={handleSkuChange}
             autoFocus
           />
+          {skuError && <span className="ip-field-error">{skuError}</span>}
         </div>
 
         <div className="ip-popup-field">
@@ -292,7 +308,6 @@ function DocumentCard({ doc, requestId, divisionLabel, onStart, onHold, onReport
 
   const canStart = isPending || isOnHold;
   const canHold = isInProgress;
-  const canReportIssue = isInProgress;
   const canEnd = isInProgress || isOnHold;
 
   return (
@@ -382,6 +397,9 @@ function DocumentCard({ doc, requestId, divisionLabel, onStart, onHold, onReport
             <button className="ip-btn ip-btn-delete" onClick={() => onDelete(doc.id)}>
               🗑 Delete
             </button>
+            <button className="ip-btn ip-btn-emergency" onClick={() => onReportIssue(doc.id)}>
+              🚨 Emergency Pick Error
+            </button>
           </>
         ) : (
           <>
@@ -390,9 +408,6 @@ function DocumentCard({ doc, requestId, divisionLabel, onStart, onHold, onReport
             </button>
             <button className="ip-btn ip-btn-hold" disabled={!canHold} onClick={() => onHold(doc.id)}>
               ⏸ Hold
-            </button>
-            <button className="ip-btn ip-btn-emergency" disabled={!canReportIssue} onClick={() => onReportIssue(doc.id)}>
-              🚨 Wrong Material
             </button>
             <button className="ip-btn ip-btn-end" disabled={!canEnd} onClick={() => onEnd(doc.id)}>
               ■ End
@@ -464,11 +479,12 @@ export default function IssueCheckFormat() {
     return map;
   }, [divisions]);
 
-  // Division-wise checkers — only the checkers added under that specific
-  // Division in Admin Master Data. The backend's /checkers endpoint
-  // returns ALL checkers (no dedicated "by division" endpoint), so we
-  // fetch them all and filter client-side on divisionNo — same pattern
-  // as Print Portal's /print-operators and Pick Portal's /pickers.
+  // Division-wise checkers — Master Setup has ONE shared "Operator Name
+  // Setup" table (Operator Name / NIC / Operator NIC Name / Division) that
+  // the Print Portal already reads from /print-operators. The Check Portal
+  // uses the SAME master data (there's no separate "checkers" table), so we
+  // hit /print-operators here too and filter client-side on divisionNo —
+  // exactly like the Print Portal does.
   const fetchCheckersForDivision = useCallback(async (divisionNo) => {
     if (!divisionNo) {
       setPopupCheckers([]);
@@ -477,16 +493,19 @@ export default function IssueCheckFormat() {
 
     setPopupCheckersLoading(true);
     try {
-      const res = await fetch(`${SETUP_API}/checkers`);
+      const res = await fetch(`${SETUP_API}/print-operators`);
       if (res.ok) {
         const data = await res.json();
         setPopupCheckers(
           (data || [])
-            .filter(c => {
-              const cDivisionNo = c.divisionNo || (c.division && c.division.divisionNo) || "";
-              return String(cDivisionNo) === String(divisionNo);
+            .filter(op => {
+              const opDivisionNo =
+                op.divisionNo ||
+                (op.division && op.division.divisionNo) ||
+                "";
+              return String(opDivisionNo) === String(divisionNo);
             })
-            .map(c => c.checkerNicName || c.checkerName || c.name || c.fullName)
+            .map(op => op.operatorNicName || op.operatorName || op.name || op.fullName)
             .filter(Boolean)
         );
       } else {
@@ -626,9 +645,16 @@ export default function IssueCheckFormat() {
     { value: "pending", label: "Pending" },
     { value: "inprogress", label: "In Progress" },
     { value: "onhold", label: "On Hold" },
-    { value: "wrongmaterial", label: "Wrong Material" },
     { value: "completed", label: "Checked" },
   ];
+
+  // "Pending" and "Wrong Material" are shown/filtered as one combined bucket —
+  // a card's individual badge/border can still say "Wrong Material", but the
+  // stat chip and dropdown filter treat them as "Pending".
+  const isPendingBucket = (doc) => {
+    const c = statusClass(doc);
+    return c === "pending" || c === "wrongmaterial";
+  };
 
   const visible = documents.filter(doc => {
     const q = search.toLowerCase();
@@ -638,16 +664,17 @@ export default function IssueCheckFormat() {
     ].some(v => (v || "").toLowerCase().includes(q));
 
     const matchType = filterType === "ALL" || doc.jobType === filterType;
-    const matchStatus = filterStatus === "ALL" || statusClass(doc) === filterStatus;
+    const matchStatus =
+      filterStatus === "ALL" ||
+      (filterStatus === "pending" ? isPendingBucket(doc) : statusClass(doc) === filterStatus);
 
     return matchSearch && matchType && matchStatus;
   });
 
   const total = documents.length;
-  const pending = documents.filter(d => statusClass(d) === "pending").length;
+  const pending = documents.filter(isPendingBucket).length;
   const inProg = documents.filter(d => statusClass(d) === "inprogress").length;
   const onHold = documents.filter(d => statusClass(d) === "onhold").length;
-  const wrongMaterial = documents.filter(d => statusClass(d) === "wrongmaterial").length;
   const completed = documents.filter(d => statusClass(d) === "completed").length;
 
   // clicking a stat chip filters the grid by that status (Total clears the filter)
@@ -757,13 +784,6 @@ export default function IssueCheckFormat() {
           onClick={() => handleStatClick("onhold")}
         >
           <strong style={{ color: "#c2410c" }}>{onHold}</strong> On Hold
-        </button>
-        <button
-          type="button"
-          className={`ip-stat-chip red ip-stat-chip-clickable ${filterStatus === "wrongmaterial" ? "active" : ""}`}
-          onClick={() => handleStatClick("wrongmaterial")}
-        >
-          <strong style={{ color: "#ef4444" }}>{wrongMaterial}</strong> Wrong Material
         </button>
         <button
           type="button"
