@@ -2,15 +2,10 @@ import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import "./IssuePick.css";
 
 // const API_BASE = "http://localhost:8080/api/pick-portal";
-// // Master Setup API — same base the Admin Dashboard's "Master Setup → Picker"
-// // panel saves to. We read from here so Held By / Picked By / Emergency Pick By
-// // always match whatever names are entered in Admin Dashboard, live from the DB.
 // const SETUP_API = "http://localhost:8080/api/admin-setup";
 const API_BASE = "https://time-tracker-system-production.up.railway.app/api/pick-portal";
-
 const SETUP_API = "https://time-tracker-system-production.up.railway.app/api/admin-setup";
 const AUTO_REFRESH = 10000;
-const PICKER_REFRESH = 15000;
 
 const HOLD_REASONS = [
   "Printer not available",
@@ -41,13 +36,11 @@ function formatDuration(seconds) {
   return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
 }
 
-// Groups documents by their request date and numbers each group starting
-// from 1, then combines that with the date to build a unique Request ID
-// like 20260816/0001. Resets automatically whenever the date changes.
-// (Same logic as the Print Portal, so IDs read consistently across portals.)
+// Same scheme as Print Portal — groups by request date, numbers within the
+// day, e.g. 20260816/0001. Resets automatically when the date changes.
 function computeRequestIds(documents) {
   const dateKeyOf = (doc) => {
-    if (doc.requestDate)     return String(doc.requestDate).substring(0, 10);
+    if (doc.requestDate) return String(doc.requestDate).substring(0, 10);
     if (doc.createdDatetime) return String(doc.createdDatetime).substring(0, 10);
     return null;
   };
@@ -64,12 +57,9 @@ function computeRequestIds(documents) {
     const compactDate = key === "unknown" ? "00000000" : key.replace(/-/g, "");
     group
       .slice()
-      .sort((a, b) => {
-        if (a.createdDatetime && b.createdDatetime) {
-          return new Date(a.createdDatetime) - new Date(b.createdDatetime);
-        }
-        return a.id - b.id;
-      })
+      .sort((a, b) => (a.createdDatetime && b.createdDatetime
+        ? new Date(a.createdDatetime) - new Date(b.createdDatetime)
+        : a.id - b.id))
       .forEach((doc, idx) => {
         idMap[doc.id] = `${compactDate}/${String(idx + 1).padStart(4, "0")}`;
       });
@@ -80,92 +70,23 @@ function computeRequestIds(documents) {
 
 function jobTypeColor(jt) {
   const map = {
-    balance:      "#a78bfa",
-    domestic:     "#34d399",
-    cost_center:  "#f59e0b",
-    commercial:   "#3b82f6",
-    sales_order:  "#f472b6",
+    balance: "#a78bfa", domestic: "#34d399", cost_center: "#f59e0b",
+    commercial: "#3b82f6", sales_order: "#f472b6",
   };
   return map[(jt || "").toLowerCase().replace(/\s+/g, "_")] || "#7c8db0";
 }
 
-// ── Picker names + Divisions — live from Master Setup (DB) ─────────────────
-// NEW: instead of only pulling picker *names*, we now keep the full picker
-// record (name + divisionNo) so we can show "which division this picker
-// belongs to" next to their name, and so we can figure out which division a
-// document belongs to (based on who held/picked it).
-
-function usePickers() {
-  const [pickers, setPickers] = useState([]); // [{ pickerName, divisionNo, ... }]
-
-  const load = useCallback(() => {
-    fetch(`${SETUP_API}/pickers`)
-      .then(res => {
-        if (!res.ok) throw new Error(`Server error: ${res.status}`);
-        return res.json();
-      })
-      .then(data => setPickers(Array.isArray(data) ? data : []))
-      .catch(() => { /* keep last known list on transient errors */ });
-  }, []);
-
-  useEffect(() => {
-    load();
-    const id = setInterval(load, PICKER_REFRESH);
-    return () => clearInterval(id);
-  }, [load]);
-
-  return pickers;
-}
-
-function useDivisions() {
-  const [divisions, setDivisions] = useState([]); // [{ divisionNo, divisionName, ... }]
-
-  const load = useCallback(() => {
-    fetch(`${SETUP_API}/divisions`)
-      .then(res => {
-        if (!res.ok) throw new Error(`Server error: ${res.status}`);
-        return res.json();
-      })
-      .then(data => setDivisions(Array.isArray(data) ? data : []))
-      .catch(() => { /* keep last known list on transient errors */ });
-  }, []);
-
-  useEffect(() => {
-    load();
-    const id = setInterval(load, PICKER_REFRESH);
-    return () => clearInterval(id);
-  }, [load]);
-
-  return divisions;
-}
-
-// Works out which division a document "belongs to" — based on whichever
-// picker last touched it (Picked By, then Held By, then Handed Over By),
-// matched against the Picker master table's divisionNo.
-function docDivision(doc, pickerDivisionMap, divisionNameByNo) {
-  const candidates = [doc.pickedBy, doc.heldBy, doc.handedOverBy].filter(Boolean);
-  for (const name of candidates) {
-    const divNo = pickerDivisionMap[name];
-    if (divNo) {
-      return { divisionNo: divNo, divisionName: divisionNameByNo[divNo] || "" };
-    }
-  }
-  return null;
-}
-
-// ── Status helpers ────────────────────────────────────────────────────────────
-// Internal state machine (drives button enabling / accent colors):
-//   PENDING → [Handover] → HANDED_OVER → [Start] → IN_PROGRESS
-//   IN_PROGRESS → [Hold] → ON_HOLD → [Start = Resume] → IN_PROGRESS
-//   IN_PROGRESS / ON_HOLD → [End] → COMPLETED
-// (Handover step moved here from the Print Portal.)
+// ── Status helpers ───────────────────────────────────────────────────────────
+// PENDING → [Handover] → HANDED_OVER → [Start] → IN_PROGRESS
+// IN_PROGRESS → [Hold] → ON_HOLD → [Start = Resume] → IN_PROGRESS
+// IN_PROGRESS / ON_HOLD → [End] → COMPLETED
 
 function statusClass(s) {
   const v = (s || "").toLowerCase();
-  if (v.includes("hold"))     return "onhold";
+  if (v.includes("hold")) return "onhold";
   if (v.includes("progress")) return "inprogress";
   if (v.includes("complete") || v.includes("done")) return "completed";
-  if (v.includes("handed"))   return "handedover";
+  if (v.includes("handed")) return "handedover";
   return "pending";
 }
 
@@ -180,49 +101,35 @@ function statusLabel(s) {
   }[c];
 }
 
-// ── Generic Person Picker ──────────────────────────────────────────────────
-// Now driven purely by the `options` prop (Master Setup picker names).
-// "Other" free-text entry has been removed — only names that exist in the
-// Picker master table can be selected, so whatever gets saved to the DB
-// (heldBy / pickedBy / resolvedBy / handedOverBy) always matches Master Setup.
-// NEW: optional `divisionMap` (name -> divisionNo) shows each picker's
-// division right next to their name, so Held By / Picked By selection is
-// division-aware.
-
-function PersonPicker({ value, onChange, options, divisionMap }) {
-  if (!options || options.length === 0) {
-    return (
-      <div className="ip-popup-options">
-        <div style={{ color: "#7c8db0", fontSize: "0.8rem", padding: "8px 2px" }}>
-          No pickers set up yet. Add names in Admin Dashboard → Master Setup → Picker.
-        </div>
-      </div>
-    );
-  }
-
+// ── Person Picker (division-scoped — Only Master Data, no "Other") ─────────
+// Mirrors the Print Portal's PersonPicker exactly: the `people` list handed
+// in is already filtered down to whichever Division the current document
+// belongs to, so whatever gets picked here always matches Admin Master Setup
+// for that division.
+function PersonPicker({ value, onChange, people, loading }) {
   return (
     <div className="ip-popup-options">
-      {options.map(name => (
-        <button
-          key={name}
-          className={`ip-popup-option ${value === name ? "selected" : ""}`}
-          onClick={() => onChange(name)}
-        >
-          👤 {name}
-          {divisionMap && divisionMap[name] ? (
-            <span style={{ marginLeft: 6, fontSize: "0.72rem", color: "#7c8db0" }}>
-              · {divisionMap[name]}
-            </span>
-          ) : null}
-        </button>
-      ))}
+      {loading ? (
+        <div className="ip-popup-empty">Loading pickers…</div>
+      ) : people.length === 0 ? (
+        <div className="ip-popup-empty">No pickers found for this division in Master Setup</div>
+      ) : (
+        people.map(name => (
+          <button
+            key={name}
+            className={`ip-popup-option ${value === name ? "selected" : ""}`}
+            onClick={() => onChange(name)}
+          >
+            👤 {name}
+          </button>
+        ))
+      )}
     </div>
   );
 }
 
-// ── Popup: Handover (Step 1 — separate from Start) ────────────────────────────
-
-function HandoverPopup({ pickerNames, divisionMap, onConfirm, onCancel }) {
+// ── Popup: Handover (Step 1) ─────────────────────────────────────────────────
+function HandoverPopup({ onConfirm, onCancel, pickers, pickersLoading }) {
   const [handedOverBy, setHandedOverBy] = useState("");
 
   return (
@@ -235,7 +142,7 @@ function HandoverPopup({ pickerNames, divisionMap, onConfirm, onCancel }) {
         <p className="ip-popup-sub">Select who is handing over this document to pick</p>
 
         <span className="ip-popup-label">Handed Over By</span>
-        <PersonPicker value={handedOverBy} onChange={setHandedOverBy} options={pickerNames} divisionMap={divisionMap} />
+        <PersonPicker value={handedOverBy} onChange={setHandedOverBy} people={pickers} loading={pickersLoading} />
 
         <div className="ip-popup-foot">
           <button className="ip-btn ip-btn-outline" onClick={onCancel}>Cancel</button>
@@ -253,15 +160,14 @@ function HandoverPopup({ pickerNames, divisionMap, onConfirm, onCancel }) {
 }
 
 // ── Popup: Hold Reason + Held By ────────────────────────────────────────────
-
-function HoldPopup({ pickerNames, divisionMap, onConfirm, onCancel }) {
-  const [reason, setReason]   = useState("");
+function HoldPopup({ onConfirm, onCancel, pickers, pickersLoading }) {
+  const [reason, setReason] = useState("");
   const [otherReason, setOtherReason] = useState("");
-  const [heldBy, setHeldBy]   = useState("");
+  const [heldBy, setHeldBy] = useState("");
 
   const isOtherReason = reason === "Other";
-  const finalReason   = isOtherReason ? otherReason.trim() : reason;
-  const canConfirm     = !!finalReason && !!heldBy;
+  const finalReason = isOtherReason ? otherReason.trim() : reason;
+  const canConfirm = !!finalReason && !!heldBy;
 
   return (
     <div className="ip-popup-overlay">
@@ -272,9 +178,7 @@ function HoldPopup({ pickerNames, divisionMap, onConfirm, onCancel }) {
         </div>
         <p className="ip-popup-sub">Select a reason and who is putting this on hold</p>
 
-        <div style={{ marginBottom: 6, fontSize: "0.78rem", color: "#7c8db0", fontWeight: 600 }}>
-          Hold Reason
-        </div>
+        <span className="ip-popup-label">Hold Reason</span>
         <div className="ip-popup-options" style={{ marginBottom: 16 }}>
           {HOLD_REASONS.map(r => (
             <button
@@ -297,12 +201,10 @@ function HoldPopup({ pickerNames, divisionMap, onConfirm, onCancel }) {
           )}
         </div>
 
-        <div style={{ marginBottom: 6, fontSize: "0.78rem", color: "#7c8db0", fontWeight: 600 }}>
-          Held By
-        </div>
-        <PersonPicker value={heldBy} onChange={setHeldBy} options={pickerNames} divisionMap={divisionMap} />
+        <span className="ip-popup-label">Held By</span>
+        <PersonPicker value={heldBy} onChange={setHeldBy} people={pickers} loading={pickersLoading} />
 
-        <div className="ip-popup-foot" style={{ marginTop: 18 }}>
+        <div className="ip-popup-foot">
           <button className="ip-btn ip-btn-outline" onClick={onCancel}>Cancel</button>
           <button
             className="ip-btn ip-btn-hold-confirm"
@@ -317,9 +219,8 @@ function HoldPopup({ pickerNames, divisionMap, onConfirm, onCancel }) {
   );
 }
 
-// ── Popup: Picked By (End) ──────────────────────────────────────────────────
-
-function PickedByPopup({ pickerNames, divisionMap, onConfirm, onCancel }) {
+// ── Popup: Picked By (End) ───────────────────────────────────────────────────
+function PickedByPopup({ onConfirm, onCancel, pickers, pickersLoading }) {
   const [pickedBy, setPickedBy] = useState("");
 
   return (
@@ -331,7 +232,7 @@ function PickedByPopup({ pickerNames, divisionMap, onConfirm, onCancel }) {
         </div>
         <p className="ip-popup-sub">Select the person who completed this pick</p>
 
-        <PersonPicker value={pickedBy} onChange={setPickedBy} options={pickerNames} divisionMap={divisionMap} />
+        <PersonPicker value={pickedBy} onChange={setPickedBy} people={pickers} loading={pickersLoading} />
 
         <div className="ip-popup-foot" style={{ marginTop: 18 }}>
           <button className="ip-btn ip-btn-outline" onClick={onCancel}>Cancel</button>
@@ -349,8 +250,7 @@ function PickedByPopup({ pickerNames, divisionMap, onConfirm, onCancel }) {
 }
 
 // ── Popup: Emergency Pick Done (re-pick after Check reported an error) ──────
-
-function EmergencyPickDonePopup({ pickerNames, divisionMap, onConfirm, onCancel }) {
+function EmergencyPickDonePopup({ onConfirm, onCancel, pickers, pickersLoading }) {
   const [resolvedBy, setResolvedBy] = useState("");
 
   return (
@@ -362,7 +262,7 @@ function EmergencyPickDonePopup({ pickerNames, divisionMap, onConfirm, onCancel 
         </div>
         <p className="ip-popup-sub">Select who re-picked the correct material</p>
 
-        <PersonPicker value={resolvedBy} onChange={setResolvedBy} options={pickerNames} divisionMap={divisionMap} />
+        <PersonPicker value={resolvedBy} onChange={setResolvedBy} people={pickers} loading={pickersLoading} />
 
         <div className="ip-popup-foot" style={{ marginTop: 18 }}>
           <button className="ip-btn ip-btn-outline" onClick={onCancel}>Cancel</button>
@@ -379,13 +279,9 @@ function EmergencyPickDonePopup({ pickerNames, divisionMap, onConfirm, onCancel 
   );
 }
 
-// ── Popup: Edit (Held By / Picked By only) ──────────────────────────────────
-// NEW: mirrors the Print Portal's Edit action. Only heldBy and pickedBy
-// (End By) can be changed here — every other field on the document stays
-// read-only, since those come from earlier portals (Document / Print).
-
-function EditPopup({ doc, pickerNames, divisionMap, onConfirm, onCancel }) {
-  const [heldBy, setHeldBy]     = useState(doc?.heldBy || "");
+// ── Popup: Edit (Held By / Picked By only) — mirrors Print Portal's Edit ────
+function EditPopup({ doc, onConfirm, onCancel, pickers, pickersLoading }) {
+  const [heldBy, setHeldBy] = useState(doc?.heldBy || "");
   const [pickedBy, setPickedBy] = useState(doc?.pickedBy || "");
 
   return (
@@ -398,12 +294,12 @@ function EditPopup({ doc, pickerNames, divisionMap, onConfirm, onCancel }) {
         <p className="ip-popup-sub">Only Held By and Picked By (End By) can be changed here</p>
 
         <span className="ip-popup-label">Held By</span>
-        <PersonPicker value={heldBy} onChange={setHeldBy} options={pickerNames} divisionMap={divisionMap} />
+        <PersonPicker value={heldBy} onChange={setHeldBy} people={pickers} loading={pickersLoading} />
 
         <span className="ip-popup-label" style={{ marginTop: 14, display: "block" }}>
           Picked By (End By)
         </span>
-        <PersonPicker value={pickedBy} onChange={setPickedBy} options={pickerNames} divisionMap={divisionMap} />
+        <PersonPicker value={pickedBy} onChange={setPickedBy} people={pickers} loading={pickersLoading} />
 
         <div className="ip-popup-foot" style={{ marginTop: 18 }}>
           <button className="ip-btn ip-btn-outline" onClick={onCancel}>Cancel</button>
@@ -420,8 +316,7 @@ function EditPopup({ doc, pickerNames, divisionMap, onConfirm, onCancel }) {
 }
 
 // ── Popup: View Full Details ─────────────────────────────────────────────────
-
-function ViewDetailsPopup({ doc, requestId, division, onClose }) {
+function ViewDetailsPopup({ doc, requestId, divisionLabel, onClose }) {
   if (!doc) return null;
 
   const row = (label, value) => (
@@ -448,7 +343,7 @@ function ViewDetailsPopup({ doc, requestId, division, onClose }) {
           {row("Reservation No", doc.reservationNo)}
           {row("Entered By", doc.enteredBy)}
           {row("Job Type", doc.jobType)}
-          {row("Division", division ? `${division.divisionNo}${division.divisionName ? " — " + division.divisionName : ""}` : "—")}
+          {row("Division", divisionLabel || "—")}
           {row("Request Date", formatDate(doc.requestDate))}
           {row("Request Time", formatTime(doc.requestTime))}
         </div>
@@ -516,10 +411,6 @@ function ViewDetailsPopup({ doc, requestId, division, onClose }) {
 }
 
 // ── Popup: New Picking Error Alert (from Check Portal) ──────────────────────
-// Pops up once per new error (not on every poll) alongside the persistent
-// notification bar. Each item is clickable and jumps/scrolls to the matching
-// document card in the grid below.
-
 function PickingErrorAlertPopup({ docs, requestIdMap, onJump, onClose }) {
   return (
     <div className="ip-popup-overlay">
@@ -568,72 +459,40 @@ function PickingErrorAlertPopup({ docs, requestIdMap, onJump, onClose }) {
 }
 
 // ── Single Document Card ─────────────────────────────────────────────────────
-
 function DocumentCard({
-  doc, requestId, division,
+  doc, requestId, divisionLabel,
   onHandover, onStart, onHold, onEnd, onView, onEmergencyDone,
   onEdit, onDelete,
   cardRef, jumpHighlighted,
 }) {
-  const sc        = statusClass(doc.status);
-  const jColor    = jobTypeColor(doc.jobType);
-  const isPending    = sc === "pending";
-  const isHandedOver = sc === "handedover";   // handed over, not started yet
-  const isStarted    = sc === "inprogress";
-  const isOnHold      = sc === "onhold";
-  const isDone         = sc === "completed";
+  const sc = statusClass(doc.status);
+  const jColor = jobTypeColor(doc.jobType);
+  const isPending = sc === "pending";
+  const isHandedOver = sc === "handedover";
+  const isStarted = sc === "inprogress";
+  const isOnHold = sc === "onhold";
+  const isDone = sc === "completed";
 
   const canHandover = isPending;
-  const canStart     = isHandedOver || isOnHold;   // Start = also acts as Resume
-  const canHold       = isStarted;
-  const canEnd        = isStarted || isOnHold;
+  const canStart = isHandedOver || isOnHold;
+  const canHold = isStarted;
+  const canEnd = isStarted || isOnHold;
 
-  // Check Portal flags this document if a wrong-material issue was found
-  // during checking — surface it urgently back here on the Pick card,
-  // until it's been resolved with an Emergency Pick Done.
   const hasCheckError =
     (doc.hasWrongMaterial || "").toUpperCase() === "YES" && !doc.emergencyPickResolved;
 
   const cardClassName = `ip-card status-${sc}${hasCheckError ? " ip-card-emergency" : ""}`;
-  const cardStyle = hasCheckError
-    ? {
-        border: "2px solid #ef4444",
-        boxShadow: "0 0 0 1px rgba(239,68,68,0.35), 0 0 16px rgba(239,68,68,0.25)",
-        background: "rgba(239,68,68,0.06)",
-      }
-    : undefined;
-
-  // Extra pulsing ring shown briefly right after jumping here from the
-  // "New Picking Error" alert popup, so it's obvious which card it meant.
   const jumpStyle = jumpHighlighted
-    ? {
-        outline: "3px solid #facc15",
-        outlineOffset: 2,
-        transition: "outline-color 0.3s ease",
-      }
+    ? { outline: "3px solid #facc15", outlineOffset: 2, transition: "outline-color 0.3s ease" }
     : undefined;
 
   return (
-    <div ref={cardRef} className={cardClassName} style={{ ...cardStyle, ...jumpStyle }}>
+    <div ref={cardRef} className={cardClassName} style={jumpStyle}>
       {hasCheckError && (
-        <div
-          style={{
-            background: "#ef4444",
-            color: "#fff",
-            fontWeight: 700,
-            fontSize: "0.78rem",
-            padding: "6px 12px",
-            borderRadius: 6,
-            marginBottom: 10,
-            display: "flex",
-            alignItems: "center",
-            gap: 6,
-          }}
-        >
+        <div className="ip-emergency-banner">
           🚨 EMERGENCY PICK ERROR — Wrong Material Found at Check
         </div>
       )}
-      {/* ── Head ── */}
       <div className="ip-card-head">
         <div>
           <div className="ip-doc-no">{requestId || "—"}</div>
@@ -643,17 +502,15 @@ function DocumentCard({
           <div style={{ color: jColor, fontWeight: 700, fontSize: "0.78rem", marginTop: 2 }}>
             {doc.jobType || "—"}
           </div>
-          {/* NEW: Division shown just under Job Type, same placement as Print Portal */}
-          {division && (
-            <div style={{ color: "#7c8db0", fontWeight: 600, fontSize: "0.72rem", marginTop: 2 }}>
-              🏷 {division.divisionNo}{division.divisionName ? ` — ${division.divisionName}` : ""}
+          {divisionLabel && (
+            <div className="ip-doc-division-sub">
+              🏷 {divisionLabel}
             </div>
           )}
         </div>
         <span className={`ip-badge ${sc}`}>{statusLabel(doc.status)}</span>
       </div>
 
-      {/* ── Body ── */}
       <div className="ip-card-body">
         <div className="ip-detail-row">
           <span className="ip-detail-label">Job WBS</span>
@@ -669,17 +526,10 @@ function DocumentCard({
         </div>
 
         <div className="ip-times">
-          <div className="ip-time-row">
-            <span>Request Date</span>
-            <span>{formatDate(doc.requestDate)}</span>
-          </div>
-          <div className="ip-time-row">
-            <span>Request Time</span>
-            <span>{formatTime(doc.requestTime)}</span>
-          </div>
+          <div className="ip-time-row"><span>Request Date</span><span>{formatDate(doc.requestDate)}</span></div>
+          <div className="ip-time-row"><span>Request Time</span><span>{formatTime(doc.requestTime)}</span></div>
         </div>
 
-        {/* Handed Over info — shown from the moment Handover is confirmed */}
         {!isPending && doc.handedOverBy && (
           <div className="ip-handover-box">
             <div className="ip-handover-row">
@@ -689,25 +539,14 @@ function DocumentCard({
           </div>
         )}
 
-        {/* Hold info banner */}
         {(isOnHold || doc.holdReason) && (
           <div className="ip-hold-box">
-            <div className="ip-hold-row">
-              <span>⏸ Hold Reason</span>
-              <span>{doc.holdReason || "—"}</span>
-            </div>
-            <div className="ip-hold-row">
-              <span>Held By</span>
-              <span>👤 {doc.heldBy || "—"}</span>
-            </div>
-            <div className="ip-hold-row">
-              <span>Held At</span>
-              <span>{formatDateTime(doc.holdTime)}</span>
-            </div>
+            <div className="ip-hold-row"><span>⏸ Hold Reason</span><span>{doc.holdReason || "—"}</span></div>
+            <div className="ip-hold-row"><span>Held By</span><span>👤 {doc.heldBy || "—"}</span></div>
+            <div className="ip-hold-row"><span>Held At</span><span>{formatDateTime(doc.holdTime)}</span></div>
           </div>
         )}
 
-        {/* Duration + Picked By info (only when completed) */}
         {isDone && (
           <div className="ip-duration-box">
             <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
@@ -724,63 +563,40 @@ function DocumentCard({
         )}
       </div>
 
-      {/* ── Footer Buttons: Handover | Start | Hold | End | View | Edit | Delete ── */}
       <div className="ip-card-foot">
-        <button
-          className="ip-btn ip-btn-handover-action"
-          disabled={!canHandover}
-          onClick={() => onHandover(doc.id)}
-        >
-          🚀 Handover
-        </button>
-        <button
-          className="ip-btn ip-btn-start"
-          disabled={!canStart}
-          onClick={() => onStart(doc.id)}
-        >
-          {isOnHold ? "▶ Resume" : "▶ Start"}
-        </button>
-        <button
-          className="ip-btn ip-btn-hold"
-          disabled={!canHold}
-          onClick={() => onHold(doc.id)}
-        >
-          ⏸ Hold
-        </button>
-        <button
-          className="ip-btn ip-btn-end"
-          disabled={!canEnd}
-          onClick={() => onEnd(doc.id)}
-        >
-          ■ End
-        </button>
-        <button
-          className="ip-btn ip-btn-outline"
-          onClick={() => onView(doc.id)}
-          >
-          👁 View
-</button>
-        {/* NEW: Edit — only Held By / Picked By can be changed */}
-        <button
-          className="ip-btn ip-btn-outline"
-          onClick={() => onEdit(doc.id)}
-        >
-          ✏ Edit
-        </button>
-        {/* NEW: Delete */}
-        <button
-          className="ip-btn ip-btn-outline"
-          style={{ color: "#ef4444", borderColor: "#ef4444" }}
-          onClick={() => onDelete(doc.id)}
-        >
-          🗑 Delete
-        </button>
+        {isDone ? (
+          <>
+            <button className="ip-btn ip-btn-edit" onClick={() => onEdit(doc)}>
+              ✎ Edit
+            </button>
+            <button className="ip-btn ip-btn-delete" onClick={() => onDelete(doc.id)}>
+              🗑 Delete
+            </button>
+            <button className="ip-btn ip-btn-outline" onClick={() => onView(doc.id)}>
+              👁 View
+            </button>
+          </>
+        ) : (
+          <>
+            <button className="ip-btn ip-btn-handover-action" disabled={!canHandover} onClick={() => onHandover(doc.id)}>
+              🚀 Handover
+            </button>
+            <button className="ip-btn ip-btn-start" disabled={!canStart} onClick={() => onStart(doc.id)}>
+              {isOnHold ? "▶ Resume" : "▶ Start"}
+            </button>
+            <button className="ip-btn ip-btn-hold" disabled={!canHold} onClick={() => onHold(doc.id)}>
+              ⏸ Hold
+            </button>
+            <button className="ip-btn ip-btn-end" disabled={!canEnd} onClick={() => onEnd(doc.id)}>
+              ■ End
+            </button>
+            <button className="ip-btn ip-btn-outline" onClick={() => onView(doc.id)}>
+              👁 View
+            </button>
+          </>
+        )}
         {hasCheckError && (
-          <button
-            className="ip-btn"
-            style={{ background: "#ef4444", color: "#fff", fontWeight: 700 }}
-            onClick={() => onEmergencyDone(doc.id)}
-          >
+          <button className="ip-btn ip-btn-emergency" onClick={() => onEmergencyDone(doc.id)}>
             🚨 Emergency Pick Done
           </button>
         )}
@@ -790,101 +606,67 @@ function DocumentCard({
 }
 
 // ── Skeleton Card ────────────────────────────────────────────────────────────
-
 function SkeletonCard() {
   return (
     <div className="ip-card status-pending">
-      <div className="ip-card-head">
-        <div>
-          <div className="ip-skeleton" style={{ width: 100, height: 15, marginBottom: 6 }} />
-          <div className="ip-skeleton" style={{ width: 70, height: 11 }} />
-        </div>
-        <div className="ip-skeleton" style={{ width: 72, height: 22, borderRadius: 12 }} />
-      </div>
-      <div className="ip-card-body">
-        {[1,2,3,4].map(i => (
-          <div key={i} className="ip-detail-row">
-            <div className="ip-skeleton" style={{ width: 90, height: 11 }} />
-            <div className="ip-skeleton" style={{ width: 130, height: 11 }} />
-          </div>
-        ))}
+      <div className="ip-card-head" style={{ opacity: 0.6 }}>
+        <div style={{ height: 40, background: "#e2e8f0", borderRadius: 4, width: "100%" }} />
       </div>
     </div>
   );
 }
 
 // ── Main Component ───────────────────────────────────────────────────────────
-
-export default function IssuPrinFormt() {
-  const [documents,    setDocuments]    = useState([]);
-  const [loading,      setLoading]      = useState(true);
-  const [error,        setError]        = useState(null);
-  const [search,       setSearch]       = useState("");
-  const [filterType,   setFilterType]   = useState("ALL");
+export default function IssuPikFormt() {
+  const [documents, setDocuments] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [search, setSearch] = useState("");
+  const [filterType, setFilterType] = useState("ALL");
   const [filterStatus, setFilterStatus] = useState("ALL");
-  const [lastUpdated,  setLastUpdated]  = useState(null);
-  const [refreshing,   setRefreshing]   = useState(false);
+  const [lastUpdated, setLastUpdated] = useState(null);
+  const [refreshing, setRefreshing] = useState(false);
 
-  // Picker names + divisions — live from Admin Dashboard → Master Setup (DB).
-  const pickers   = usePickers();
-  const divisions = useDivisions();
+  // Divisions (Admin Master Data) — used only to label each card, exactly
+  // like the Print Portal does with divisionNoToName.
+  const [divisions, setDivisions] = useState([]);
 
-  const pickerNames = useMemo(
-    () => pickers.map(p => p.pickerName).filter(Boolean),
-    [pickers]
-  );
+  // Pickers shown in the currently open popup — scoped to that document's
+  // Division (Admin Master Data, division-wise), fetched fresh each time a
+  // popup opens — same pattern as the Print Portal's popupOperators.
+  const [popupPickers, setPopupPickers] = useState([]);
+  const [popupPickersLoading, setPopupPickersLoading] = useState(false);
 
-  // divisionNo -> divisionName
-  const divisionNameByNo = useMemo(() => {
-    const map = {};
-    divisions.forEach(d => { map[d.divisionNo] = d.divisionName; });
-    return map;
-  }, [divisions]);
+  const [activePopup, setActivePopup] = useState(null); // "handover" | "hold" | "end" | "view" | "emergency" | "edit" | null
+  const [activeId, setActiveId] = useState(null);
 
-  // pickerName -> divisionNo (used both for the "division wise" Held By /
-  // Picked By pickers, and to work out each document's division)
-  const pickerDivisionMap = useMemo(() => {
-    const map = {};
-    pickers.forEach(p => { if (p.pickerName && p.divisionNo) map[p.pickerName] = p.divisionNo; });
-    return map;
-  }, [pickers]);
+  // "New Picking Error" alert popup
+  const [errorAlertDocs, setErrorAlertDocs] = useState([]);
+  const [seenErrorIds, setSeenErrorIds] = useState(() => new Set());
 
-  // Popup state
-  const [activePopup,  setActivePopup]  = useState(null); // "handover" | "hold" | "end" | "view" | "emergency" | "edit" | null
-  const [activeId,     setActiveId]     = useState(null);
-
-  // "New Picking Error" alert popup (separate from activePopup — auto-triggered
-  // when Check Portal reports a fresh error, on top of the notification bar).
-  const [errorAlertDocs, setErrorAlertDocs] = useState([]); // docs waiting to be acknowledged
-  const [seenErrorIds,   setSeenErrorIds]   = useState(() => new Set()); // ids already alerted for
-
-  // Card scroll/highlight — used by the alert popup's "jump to card" click
   const cardRefs = useRef({});
   const [jumpHighlightId, setJumpHighlightId] = useState(null);
 
   const handleJumpToCard = (id) => {
-    setErrorAlertDocs([]); // close the alert popup
+    setErrorAlertDocs([]);
     const el = cardRefs.current[id];
     if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
     setJumpHighlightId(id);
     setTimeout(() => setJumpHighlightId(prev => (prev === id ? null : prev)), 2500);
   };
 
-  // ── Fetch ──
   const fetchDocuments = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
     else setRefreshing(true);
     setError(null);
     try {
-      const res  = await fetch(API_BASE);
+      const res = await fetch(API_BASE);
       if (!res.ok) throw new Error(`Server error: ${res.status}`);
       const data = await res.json();
-      // Only show documents that have already been given a Print Document Number
-      // in the Print Portal — undocumented ones stay hidden from Pick Portal.
+      // Only show documents that already have a Print Document Number.
       const withPrintDocNo = data.filter(
         d => d.printDocumentNo && String(d.printDocumentNo).trim() !== ""
       );
-
       setDocuments(withPrintDocNo);
       setLastUpdated(new Date());
     } catch (err) {
@@ -895,25 +677,77 @@ export default function IssuPrinFormt() {
     }
   }, []);
 
-  useEffect(() => { fetchDocuments(false); }, [fetchDocuments]);
+  const fetchDivisions = useCallback(async () => {
+    try {
+      const res = await fetch(`${SETUP_API}/divisions`);
+      if (res.ok) {
+        const data = await res.json();
+        setDivisions(data || []);
+      }
+    } catch (e) {
+      console.warn("Failed to load divisions", e);
+    }
+  }, []);
+
+  const divisionNoToName = useMemo(() => {
+    const map = {};
+    divisions.forEach(d => { map[d.divisionNo] = d.divisionName; });
+    return map;
+  }, [divisions]);
+
+  // Division-wise pickers — only the names added under that specific
+  // Division in Admin Master Setup → Picker. The backend's /pickers
+  // endpoint returns ALL pickers, so we fetch them all and filter
+  // client-side on divisionNo, exactly like the Print Portal does for
+  // /print-operators.
+  const fetchPickersForDivision = useCallback(async (divisionNo) => {
+    if (!divisionNo) {
+      setPopupPickers([]);
+      return;
+    }
+    setPopupPickersLoading(true);
+    try {
+      const res = await fetch(`${SETUP_API}/pickers`);
+      if (res.ok) {
+        const data = await res.json();
+        setPopupPickers(
+          (data || [])
+            .filter(p => {
+              const pDivisionNo = p.divisionNo || (p.division && p.division.divisionNo) || "";
+              return String(pDivisionNo) === String(divisionNo);
+            })
+            .map(p => p.pickerName || p.name || p.fullName)
+            .filter(Boolean)
+        );
+      } else {
+        setPopupPickers([]);
+      }
+    } catch (e) {
+      console.warn("Failed to load pickers for division", e);
+      setPopupPickers([]);
+    } finally {
+      setPopupPickersLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchDocuments(false);
+    fetchDivisions();
+  }, [fetchDocuments, fetchDivisions]);
 
   useEffect(() => {
     const id = setInterval(() => fetchDocuments(true), AUTO_REFRESH);
     return () => clearInterval(id);
   }, [fetchDocuments]);
 
-  // ── Open popups ──
-  const handleHandoverClick  = (id) => { setActiveId(id); setActivePopup("handover"); };
-  const handleHoldClick      = (id) => { setActiveId(id); setActivePopup("hold"); };
-  const handleEndClick       = (id) => { setActiveId(id); setActivePopup("end"); };
-  const handleViewClick      = (id) => { setActiveId(id); setActivePopup("view"); };
-  const handleEmergencyClick = (id) => { setActiveId(id); setActivePopup("emergency"); };
-  const handleEditClick      = (id) => { setActiveId(id); setActivePopup("edit"); };
-  const closePopup = () => { setActivePopup(null); setActiveId(null); };
+  const getDocById = useCallback((id) => documents.find(d => d.id === id), [documents]);
 
-  // Helper: throw with server-provided detail whenever a mutation PUT
-  // doesn't come back OK, so failures show up in the alert() instead of
-  // silently leaving the document (and its buttons) unchanged.
+  const closePopup = () => {
+    setActivePopup(null);
+    setActiveId(null);
+    setPopupPickers([]);
+  };
+
   const assertOk = async (res, action) => {
     if (!res.ok) {
       const body = await res.text().catch(() => "");
@@ -921,7 +755,46 @@ export default function IssuPrinFormt() {
     }
   };
 
-  // ── Confirm Handover ──
+  // ── Open popups — each pulls the division-scoped picker list first ──
+  const handleHandoverClick = async (id) => {
+    const doc = getDocById(id);
+    setActiveId(id);
+    setActivePopup("handover");
+    await fetchPickersForDivision(doc?.divisionNo);
+  };
+
+  const handleHoldClick = async (id) => {
+    const doc = getDocById(id);
+    setActiveId(id);
+    setActivePopup("hold");
+    await fetchPickersForDivision(doc?.divisionNo);
+  };
+
+  const handleEndClick = async (id) => {
+    const doc = getDocById(id);
+    setActiveId(id);
+    setActivePopup("end");
+    await fetchPickersForDivision(doc?.divisionNo);
+  };
+
+  const handleViewClick = (id) => { setActiveId(id); setActivePopup("view"); };
+
+  const handleEmergencyClick = async (id) => {
+    const doc = getDocById(id);
+    setActiveId(id);
+    setActivePopup("emergency");
+    await fetchPickersForDivision(doc?.divisionNo);
+  };
+
+  // Edit — reopens pre-filled with the completed document's values, exactly
+  // like the Print Portal's Edit action.
+  const handleEditClick = async (doc) => {
+    setActiveId(doc.id);
+    setActivePopup("edit");
+    await fetchPickersForDivision(doc?.divisionNo);
+  };
+
+  // ── Confirm handlers ──
   const handleHandoverConfirm = async (handedOverBy) => {
     const id = activeId; closePopup();
     try {
@@ -932,23 +805,17 @@ export default function IssuPrinFormt() {
       });
       await assertOk(res, "Handover");
       fetchDocuments(true);
-    } catch (err) {
-      alert(err.message);
-    }
+    } catch (err) { alert(err.message); }
   };
 
-  // ── Start / Resume ──
   const handleStart = async (id) => {
     try {
       const res = await fetch(`${API_BASE}/${id}/start`, { method: "PUT" });
       await assertOk(res, "Start");
       fetchDocuments(true);
-    } catch (err) {
-      alert(err.message);
-    }
+    } catch (err) { alert(err.message); }
   };
 
-  // ── Confirm Hold ──
   const handleHoldConfirm = async (holdReason, heldBy) => {
     const id = activeId; closePopup();
     try {
@@ -959,12 +826,9 @@ export default function IssuPrinFormt() {
       });
       await assertOk(res, "Hold");
       fetchDocuments(true);
-    } catch (err) {
-      alert(err.message);
-    }
+    } catch (err) { alert(err.message); }
   };
 
-  // ── Confirm End ──
   const handleEndConfirm = async (pickedBy) => {
     const id = activeId; closePopup();
     try {
@@ -975,12 +839,9 @@ export default function IssuPrinFormt() {
       });
       await assertOk(res, "End");
       fetchDocuments(true);
-    } catch (err) {
-      alert(err.message);
-    }
+    } catch (err) { alert(err.message); }
   };
 
-  // ── Confirm Emergency Pick Done (re-pick after Check reported wrong material) ──
   const handleEmergencyConfirm = async (resolvedBy) => {
     const id = activeId; closePopup();
     try {
@@ -991,14 +852,9 @@ export default function IssuPrinFormt() {
       });
       await assertOk(res, "Emergency Pick Done");
       fetchDocuments(true);
-    } catch (err) {
-      alert(err.message);
-    }
+    } catch (err) { alert(err.message); }
   };
 
-  // ── Confirm Edit (Held By / Picked By only) ──
-  // NEW: adjust the endpoint below (`/${id}/edit`) to match whatever your
-  // backend controller actually exposes, if it's named differently.
   const handleEditConfirm = async ({ heldBy, pickedBy }) => {
     const id = activeId; closePopup();
     try {
@@ -1009,30 +865,20 @@ export default function IssuPrinFormt() {
       });
       await assertOk(res, "Edit");
       fetchDocuments(true);
-    } catch (err) {
-      alert(err.message);
-    }
+    } catch (err) { alert(err.message); }
   };
 
-  // ── Delete ──
-  // NEW: adjust the endpoint below if your backend uses a different path.
   const handleDelete = async (id) => {
     if (!window.confirm("Delete this document from the Pick Portal? This cannot be undone.")) return;
     try {
       const res = await fetch(`${API_BASE}/${id}`, { method: "DELETE" });
       await assertOk(res, "Delete");
       fetchDocuments(true);
-    } catch (err) {
-      alert(err.message);
-    }
+    } catch (err) { alert(err.message); }
   };
 
-  // Request ID: date + daily sequence, e.g. 20260816/0001 — same scheme as Print Portal
   const requestIdMap = useMemo(() => computeRequestIds(documents), [documents]);
 
-  // Picking errors reported by Check Portal that are still unresolved —
-  // shown as a persistent notification bar at the top, same style as the
-  // Check Portal's own error bar.
   const activeCheckErrorDocs = useMemo(
     () => documents.filter(d =>
       (d.hasWrongMaterial || "").toUpperCase() === "YES" && !d.emergencyPickResolved
@@ -1040,10 +886,6 @@ export default function IssuPrinFormt() {
     [documents]
   );
 
-  // Whenever a NEW picking error shows up (one we haven't alerted for yet),
-  // queue it into the popup. Runs once per new error, not on every 10s poll —
-  // and if a doc's error later gets resolved and then re-flagged, it can
-  // alert again since it drops out of "seen" once resolved.
   useEffect(() => {
     setSeenErrorIds(prevSeen => {
       const newOnes = activeCheckErrorDocs.filter(d => !prevSeen.has(d.id));
@@ -1057,86 +899,73 @@ export default function IssuPrinFormt() {
     });
   }, [activeCheckErrorDocs]);
 
-  // ── Filters ──
   const jobTypes = ["ALL", ...new Set(documents.map(d => d.jobType).filter(Boolean))];
 
   const STATUS_FILTERS = [
-    { value: "ALL",        label: "All Status" },
-    { value: "pending",    label: "Pending" },
+    { value: "ALL", label: "All Status" },
+    { value: "pending", label: "Pending" },
     { value: "handedover", label: "Handovered" },
     { value: "inprogress", label: "In Progress" },
-    { value: "onhold",     label: "On Hold" },
-    { value: "completed",  label: "Pick Done" },
+    { value: "onhold", label: "On Hold" },
+    { value: "completed", label: "Pick Done" },
   ];
 
   const visible = documents.filter(doc => {
     const q = search.toLowerCase();
     const matchSearch = !q || [
-      String(doc.id), doc.jobwbs,
-      doc.reservationNo, doc.enteredBy, doc.jobType,
+      String(doc.id), doc.jobwbs, doc.reservationNo, doc.enteredBy, doc.jobType,
     ].some(v => (v || "").toLowerCase().includes(q));
 
-    const matchType   = filterType   === "ALL" || doc.jobType === filterType;
+    const matchType = filterType === "ALL" || doc.jobType === filterType;
     const matchStatus = filterStatus === "ALL" || statusClass(doc.status) === filterStatus;
 
     return matchSearch && matchType && matchStatus;
   });
 
-  // Stats
-  const total       = documents.length;
-  const pending     = documents.filter(d => statusClass(d.status) === "pending").length;
-  const handedOver  = documents.filter(d => statusClass(d.status) === "handedover").length;
-  const inProg      = documents.filter(d => statusClass(d.status) === "inprogress").length;
-  const onHold      = documents.filter(d => statusClass(d.status) === "onhold").length;
-  const completed   = documents.filter(d => statusClass(d.status) === "completed").length;
+  const total = documents.length;
+  const pending = documents.filter(d => statusClass(d.status) === "pending").length;
+  const handedOver = documents.filter(d => statusClass(d.status) === "handedover").length;
+  const inProg = documents.filter(d => statusClass(d.status) === "inprogress").length;
+  const onHold = documents.filter(d => statusClass(d.status) === "onhold").length;
+  const completed = documents.filter(d => statusClass(d.status) === "completed").length;
 
-  // NEW: clicking a stat chip filters the grid by that status.
-  // Clicking the same chip again clears the filter back to "All".
-  const toggleStatusFilter = (value) => {
-    setFilterStatus(prev => (prev === value ? "ALL" : value));
-  };
+  // clicking a stat chip filters the grid by that status (Total clears it)
+  const handleStatClick = (statusValue) => setFilterStatus(statusValue);
 
-  const chipStyle = (isActive) => ({
-    cursor: "pointer",
-    userSelect: "none",
-    outline: isActive ? "2px solid #3b82f6" : "none",
-    outlineOffset: 1,
-  });
-
-  // The doc currently open in the View / Edit popup
   const activeDoc = documents.find(d => d.id === activeId) || null;
+  const activeDivisionLabel = activeDoc?.divisionNo
+    ? `${activeDoc.divisionNo} — ${divisionNoToName[activeDoc.divisionNo] || ""}`
+    : null;
 
   return (
     <div className="ip-page">
-
-      {/* Popups */}
       {activePopup === "handover" && (
-        <HandoverPopup pickerNames={pickerNames} divisionMap={pickerDivisionMap} onConfirm={handleHandoverConfirm} onCancel={closePopup} />
+        <HandoverPopup onConfirm={handleHandoverConfirm} onCancel={closePopup} pickers={popupPickers} pickersLoading={popupPickersLoading} />
       )}
       {activePopup === "hold" && (
-        <HoldPopup pickerNames={pickerNames} divisionMap={pickerDivisionMap} onConfirm={handleHoldConfirm} onCancel={closePopup} />
+        <HoldPopup onConfirm={handleHoldConfirm} onCancel={closePopup} pickers={popupPickers} pickersLoading={popupPickersLoading} />
       )}
       {activePopup === "end" && (
-        <PickedByPopup pickerNames={pickerNames} divisionMap={pickerDivisionMap} onConfirm={handleEndConfirm} onCancel={closePopup} />
+        <PickedByPopup onConfirm={handleEndConfirm} onCancel={closePopup} pickers={popupPickers} pickersLoading={popupPickersLoading} />
       )}
       {activePopup === "view" && (
         <ViewDetailsPopup
           doc={activeDoc}
           requestId={activeId ? requestIdMap[activeId] : null}
-          division={activeDoc ? docDivision(activeDoc, pickerDivisionMap, divisionNameByNo) : null}
+          divisionLabel={activeDivisionLabel}
           onClose={closePopup}
         />
       )}
       {activePopup === "emergency" && (
-        <EmergencyPickDonePopup pickerNames={pickerNames} divisionMap={pickerDivisionMap} onConfirm={handleEmergencyConfirm} onCancel={closePopup} />
+        <EmergencyPickDonePopup onConfirm={handleEmergencyConfirm} onCancel={closePopup} pickers={popupPickers} pickersLoading={popupPickersLoading} />
       )}
       {activePopup === "edit" && (
         <EditPopup
           doc={activeDoc}
-          pickerNames={pickerNames}
-          divisionMap={pickerDivisionMap}
           onConfirm={handleEditConfirm}
           onCancel={closePopup}
+          pickers={popupPickers}
+          pickersLoading={popupPickersLoading}
         />
       )}
       {errorAlertDocs.length > 0 && (
@@ -1148,8 +977,7 @@ export default function IssuPrinFormt() {
         />
       )}
 
-      {/* ── Header ── */}
-     <div className="ip-header">
+      <div className="ip-header">
         <div className="ip-header-left">
           <h1>LOGITRACK-WAREHOUSE TIME EFFICENCY TRACKER SYSTEM</h1>
           <h1>  Pick Portal</h1>
@@ -1162,45 +990,19 @@ export default function IssuPrinFormt() {
             )}
           </p>
         </div>
-        <button
-          className="ip-btn ip-btn-outline"
-          style={{ flex: "unset", padding: "8px 18px" }}
-          onClick={() => fetchDocuments(false)}
-        >
+        <button className="ip-btn ip-btn-outline" style={{ flex: "unset", padding: "8px 18px" }} onClick={() => fetchDocuments(false)}>
           ↻ Refresh
         </button>
       </div>
 
-      {/* ── Active Picking Error Notification Bar ── */}
       {activeCheckErrorDocs.length > 0 && (
-        <div
-          style={{
-            background: "rgba(239,68,68,0.15)",
-            border: "1px solid #ef4444",
-            borderRadius: 8,
-            padding: "12px 16px",
-            marginBottom: 18,
-            display: "flex",
-            flexDirection: "column",
-            gap: 8,
-          }}
-        >
-          <div style={{ color: "#ef4444", fontWeight: 700, fontSize: "0.9rem", display: "flex", alignItems: "center", gap: 8 }}>
+        <div className="ip-error-banner">
+          <div className="ip-error-banner-title">
             🚨 {activeCheckErrorDocs.length} Picking Error{activeCheckErrorDocs.length > 1 ? "s" : ""} Reported by Check Portal — needs Emergency Pick
           </div>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+          <div className="ip-error-banner-chips">
             {activeCheckErrorDocs.map(d => (
-              <span
-                key={d.id}
-                style={{
-                  background: "#ef4444",
-                  color: "#fff",
-                  fontWeight: 600,
-                  fontSize: "0.78rem",
-                  padding: "4px 10px",
-                  borderRadius: 6,
-                }}
-              >
+              <span key={d.id} className="ip-error-chip">
                 {requestIdMap[d.id] || "—"} · Doc No: {d.printDocumentNo || "—"}
               </span>
             ))}
@@ -1208,7 +1010,6 @@ export default function IssuPrinFormt() {
         </div>
       )}
 
-      {/* ── Toolbar ── */}
       <div className="ip-toolbar">
         <div className="ip-search-wrap">
           <span className="ip-search-icon">🔍</span>
@@ -1228,90 +1029,50 @@ export default function IssuPrinFormt() {
         </select>
       </div>
 
-      {/* ── Stats — NEW: each chip is now clickable and filters the grid ── */}
       <div className="ip-stats">
-        <div
-          className="ip-stat-chip blue"
-          style={chipStyle(filterStatus === "ALL")}
-          onClick={() => setFilterStatus("ALL")}
-          title="Show all documents"
-        >
+        <button type="button" className={`ip-stat-chip blue ip-stat-chip-clickable ${filterStatus === "ALL" ? "active" : ""}`} onClick={() => handleStatClick("ALL")}>
           Total <strong>{total}</strong>
-        </div>
-        <div
-          className="ip-stat-chip"
-          style={chipStyle(filterStatus === "pending")}
-          onClick={() => toggleStatusFilter("pending")}
-          title="Filter: Pending"
-        >
-          <strong style={{color:"#f59e0b"}}>{pending}</strong> Pending
-        </div>
-        <div
-          className="ip-stat-chip"
-          style={chipStyle(filterStatus === "handedover")}
-          onClick={() => toggleStatusFilter("handedover")}
-          title="Filter: Handovered"
-        >
-          <strong style={{color:"#3b82f6"}}>{handedOver}</strong> Handovered
-        </div>
-        <div
-          className="ip-stat-chip"
-          style={chipStyle(filterStatus === "inprogress")}
-          onClick={() => toggleStatusFilter("inprogress")}
-          title="Filter: In Progress"
-        >
-          <strong style={{color:"#3b82f6"}}>{inProg}</strong> In Progress
-        </div>
-        <div
-          className="ip-stat-chip"
-          style={chipStyle(filterStatus === "onhold")}
-          onClick={() => toggleStatusFilter("onhold")}
-          title="Filter: On Hold"
-        >
-          <strong style={{color:"#fb923c"}}>{onHold}</strong> On Hold
-        </div>
-        <div
-          className="ip-stat-chip green"
-          style={chipStyle(filterStatus === "completed")}
-          onClick={() => toggleStatusFilter("completed")}
-          title="Filter: Pick Done"
-        >
+        </button>
+        <button type="button" className={`ip-stat-chip ip-stat-chip-clickable ${filterStatus === "pending" ? "active" : ""}`} onClick={() => handleStatClick("pending")}>
+          <strong style={{ color: "#f59e0b" }}>{pending}</strong> Pending
+        </button>
+        <button type="button" className={`ip-stat-chip ip-stat-chip-clickable ${filterStatus === "handedover" ? "active" : ""}`} onClick={() => handleStatClick("handedover")}>
+          <strong style={{ color: "#3b82f6" }}>{handedOver}</strong> Handovered
+        </button>
+        <button type="button" className={`ip-stat-chip ip-stat-chip-clickable ${filterStatus === "inprogress" ? "active" : ""}`} onClick={() => handleStatClick("inprogress")}>
+          <strong style={{ color: "#1d4ed8" }}>{inProg}</strong> In Progress
+        </button>
+        <button type="button" className={`ip-stat-chip ip-stat-chip-clickable ${filterStatus === "onhold" ? "active" : ""}`} onClick={() => handleStatClick("onhold")}>
+          <strong style={{ color: "#c2410c" }}>{onHold}</strong> On Hold
+        </button>
+        <button type="button" className={`ip-stat-chip green ip-stat-chip-clickable ${filterStatus === "completed" ? "active" : ""}`} onClick={() => handleStatClick("completed")}>
           Done <strong>{completed}</strong>
-        </div>
-        <div className="ip-stat-chip">Showing <strong style={{color:"#a78bfa"}}>{visible.length}</strong> of {total}</div>
+        </button>
+        <div className="ip-stat-chip">Showing <strong style={{ color: "#a78bfa" }}>{visible.length}</strong> of {total}</div>
       </div>
 
-      {/* ── Error ── */}
       {error && (
-        <div style={{
-          background:"rgba(239,68,68,0.12)", border:"1px solid #ef4444",
-          borderRadius:8, padding:"12px 16px", color:"#fca5a5",
-          marginBottom:18, fontSize:"0.85rem",
-        }}>
-          ⚠ {error} —{" "}
-          <button onClick={() => fetchDocuments(false)}
-            style={{background:"none",border:"none",color:"#60a5fa",cursor:"pointer",textDecoration:"underline"}}>
-            retry
-          </button>
+        <div className="ip-error-inline">
+          ⚠ {error} — <button onClick={() => fetchDocuments(false)}>retry</button>
         </div>
       )}
 
-      {/* ── Grid ── */}
       <div className="ip-grid">
         {loading ? (
-          [1,2,3,4,5,6].map(i => <SkeletonCard key={i} />)
+          Array.from({ length: 6 }).map((_, i) => <SkeletonCard key={i} />)
         ) : visible.length === 0 ? (
-          <div className="ip-empty">
-            <div className="ip-empty-icon">📭</div>
-            <p>No documents found{search ? ` for "${search}"` : ""}.</p>
-          </div>
+          <div className="ip-empty">No documents found{search ? ` for "${search}"` : ""}.</div>
         ) : (
           visible.map(doc => (
             <DocumentCard
               key={doc.id}
               doc={doc}
               requestId={requestIdMap[doc.id]}
-              division={docDivision(doc, pickerDivisionMap, divisionNameByNo)}
+              divisionLabel={
+                doc.divisionNo
+                  ? `${doc.divisionNo} — ${divisionNoToName[doc.divisionNo] || ""}`
+                  : null
+              }
               onHandover={handleHandoverClick}
               onStart={handleStart}
               onHold={handleHoldClick}
