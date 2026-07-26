@@ -842,61 +842,46 @@ function JobCategoryPanel() {
 }
 
 // ── Document File No panel ───────────────────────────────────────────────
-// "Active" is no longer a manual checkbox. Every file's status is derived
-// automatically, live, from its own From Date / To Date range — a file is
-// "Active" whenever today falls between those two dates, for every file
-// independently (not just a single hand-picked one).
-function isFileActiveNow(row) {
-  const todayKey = toDateKey(new Date());
-  if (!row.fromDate || !row.toDate) return false;
-  const from = toDateKey(row.fromDate);
-  const to = toDateKey(row.toDate);
-  if (!from || !to) return false;
-  return todayKey >= from && todayKey <= to;
-}
-
+// Manual "Active" checkbox stays (per file), alongside From Date / To Date.
+// There is NO exclusivity rule here — any number of file numbers can be
+// marked Active at the same time, independently of one another.
 function FileNumberPanel() {
   const [rows, setRows] = useState([]);
-  const [form, setForm] = useState({ fileNo: "", fromDate: "", toDate: "" });
+  const [form, setForm] = useState({ fileNo: "", fromDate: "", toDate: "", active: false });
   const [editId, setEditId] = useState(null);
   const [err, setErr] = useState(null);
-  const now = useTick(30000); // recheck active status every 30s so it flips live as dates roll over
 
   const load = useCallback(() => { apiGet("/file-numbers").then(setRows).catch(e => setErr(e.message)); }, []);
   useEffect(() => { load(); const id = setInterval(load, AUTO_REFRESH); return () => clearInterval(id); }, [load]);
 
   const submit = async () => {
     try {
-      const active = isFileActiveNow(form);
-      const body = { ...form, active, createdBy: "admin" };
+      const body = { ...form, createdBy: "admin" };
       if (editId) await apiPut(`/file-numbers/${editId}`, body); else await apiPost("/file-numbers", body);
-      setForm({ fileNo: "", fromDate: "", toDate: "" }); setEditId(null); load();
+      setForm({ fileNo: "", fromDate: "", toDate: "", active: false }); setEditId(null); load();
     } catch (e) { setErr(e.message); }
   };
 
-  const displayRows = useMemo(() => rows.map(r => ({
-    ...r,
-    activeLabel: isFileActiveNow(r) ? "✅ Active" : "—",
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  })), [rows, now]);
-
   return (
     <div>
-      <h3 className="adm-setup-title"><Icon.fileno /> Document File No — every file's status is calculated automatically from its From Date / To Date, so more than one file can be active at the same time if their date ranges overlap</h3>
+      <h3 className="adm-setup-title"><Icon.fileno /> Document File No — mark as many file numbers Active at once as you need; From/To Date is stored alongside each one</h3>
       {err && <div className="adm-error">⚠ {err}</div>}
       <div className="adm-setup-form-grid">
         <input className="adm-config-input" placeholder="File No" value={form.fileNo} onChange={e => setForm({ ...form, fileNo: e.target.value })} />
         <input type="date" className="adm-date-input" value={form.fromDate} onChange={e => setForm({ ...form, fromDate: e.target.value })} />
         <input type="date" className="adm-date-input" value={form.toDate} onChange={e => setForm({ ...form, toDate: e.target.value })} />
+        <label className="adm-setup-checkbox-label">
+          <input type="checkbox" checked={form.active} onChange={e => setForm({ ...form, active: e.target.checked })} /> Active
+        </label>
       </div>
       <div className="adm-setup-form-row">
         <button className="adm-config-add-btn" onClick={submit}>{editId ? "Update" : "+ Create"}</button>
-        {editId && <button className="adm-xl-clear-btn" onClick={() => { setEditId(null); setForm({ fileNo: "", fromDate: "", toDate: "" }); }}>Cancel</button>}
+        {editId && <button className="adm-xl-clear-btn" onClick={() => { setEditId(null); setForm({ fileNo: "", fromDate: "", toDate: "", active: false }); }}>Cancel</button>}
       </div>
       <SetupTable
-        rows={displayRows}
+        rows={rows.map(r => ({ ...r, activeLabel: r.active ? "✅ Active" : "—" }))}
         cols={[{ key: "id", label: "ID" }, { key: "fileNo", label: "File No" }, { key: "fromDate", label: "From" }, { key: "toDate", label: "To" }, { key: "activeLabel", label: "Status" }, { key: "createdBy", label: "Created By" }]}
-        onEdit={r => { setEditId(r.id); setForm({ fileNo: r.fileNo || "", fromDate: r.fromDate || "", toDate: r.toDate || "" }); }}
+        onEdit={r => { setEditId(r.id); setForm({ fileNo: r.fileNo || "", fromDate: r.fromDate || "", toDate: r.toDate || "", active: !!r.active }); }}
         onDelete={id => apiDelete(`/file-numbers/${id}`).then(load)}
       />
     </div>
@@ -1098,34 +1083,31 @@ function ReportPanel({ documents, jobTypes }) {
 
 // ── Dashboard panel ───────────────────────────────────────────────────────
 
-// One job-type KPI card: total count + a live breakdown by division.
-function JobTypeCard({ jobType, documents, divisions, operatorDivisionMap }) {
-  const matching = documents.filter(d => (d.jobType || "").toLowerCase() === jobType.toLowerCase());
-  const total = matching.length;
+// Builds one flat KPI card PER job-type/division combination that actually
+// has jobs — e.g. "Balance — Division A" and "Balance — Division B" show
+// as two separate cards rather than one job-type card listing divisions
+// inside it. If a job type has no division data to split by, it falls
+// back to a single plain card for that job type.
+function buildJobTypeCards(jobTypes, documents, divisions, operatorDivisionMap) {
+  const cards = [];
+  jobTypes.forEach(jt => {
+    const matching = documents.filter(d => (d.jobType || "").toLowerCase() === jt.toLowerCase());
 
-  const byDivision = divisions
-    .map(div => ({
-      label: `${div.divisionNo} — ${div.divisionName}`,
-      count: matching.filter(d => docMatchesDivision(d, div.divisionNo, operatorDivisionMap)).length,
-    }))
-    .filter(row => row.count > 0);
+    const byDivision = divisions
+      .map(div => ({
+        key: `${jt}__${div.divisionNo}`,
+        label: `${jt} — ${div.divisionName}`,
+        value: matching.filter(d => docMatchesDivision(d, div.divisionNo, operatorDivisionMap)).length,
+      }))
+      .filter(row => row.value > 0);
 
-  return (
-    <div className="adm-kpi-card adm-jobtype-card">
-      <div className="adm-kpi-label">{jobType}</div>
-      <div className="adm-kpi-value">{total}</div>
-      {byDivision.length > 0 && (
-        <div className="adm-jobtype-divisions">
-          {byDivision.map(row => (
-            <div key={row.label} className="adm-jobtype-division-row">
-              <span>{row.label}</span>
-              <span>{row.count}</span>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
+    if (byDivision.length === 0) {
+      cards.push({ key: jt, label: jt, value: matching.length });
+    } else {
+      cards.push(...byDivision);
+    }
+  });
+  return cards;
 }
 
 function DashboardPanel({ documents, jobTypes, divisions, operatorDivisionMap }) {
@@ -1159,16 +1141,10 @@ function DashboardPanel({ documents, jobTypes, divisions, operatorDivisionMap })
       <p className="adm-subtitle">Live view, recalculates automatically as documents update.</p>
 
       <SectionTitle>Total Jobs by Job Type</SectionTitle>
-      <div className="adm-kpi-row">
+      <div className="adm-kpi-row adm-jobtype-grid">
         <KpiCard label="Total Jobs" value={documents.length} colorClass="accent" />
-        {jobTypes.map(jt => (
-          <JobTypeCard
-            key={jt}
-            jobType={jt}
-            documents={documents}
-            divisions={divisions}
-            operatorDivisionMap={operatorDivisionMap}
-          />
+        {buildJobTypeCards(jobTypes, documents, divisions, operatorDivisionMap).map(c => (
+          <KpiCard key={c.key} label={c.label} value={c.value} />
         ))}
       </div>
 

@@ -261,6 +261,19 @@
 .adm-kpi-value.orange  { color: #d97706; }
 .adm-kpi-value.red     { color: #dc2626; }
 
+/* Job-type KPI grid — dashboard's "Total Jobs by Job Type" section.
+   Each job-type/division combination gets its own card (no nesting),
+   laid out 6-per-row on desktop and collapsing down on smaller screens. */
+.adm-jobtype-grid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.adm-jobtype-grid .adm-kpi-card {
+  min-width: 0;
+}
+
 /* ── Triple stat cards (Total / Ongoing / Completed / Cancelled) ── */
 
 .adm-triple-row {
@@ -678,6 +691,23 @@
   color: #0f2b52;
 }
 
+/* Sidebar logout button — pinned to the bottom via marginTop:auto inline
+   style on the button itself; this just styles its appearance. */
+.adm-nav-logout {
+  border-top: 1px solid #e8f1fc;
+  margin-top: 8px;
+  padding-top: 12px;
+}
+
+.adm-nav-logout:hover {
+  background: #fff1f2;
+  color: #dc2626;
+}
+
+.adm-nav-logout:hover .adm-nav-icon {
+  color: #dc2626;
+}
+
 /* ═══════════════════════════════════════════════════════════════════════
    ── Responsive ──────────────────────────────────────────────────────────
    ═══════════════════════════════════════════════════════════════════════ */
@@ -687,6 +717,7 @@
   .adm-main { padding: 16px 18px; }
   .adm-kpi-card { min-width: 100px; }
   .adm-eff-card { min-width: 240px; }
+  .adm-jobtype-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 }
 
 /* Mobile: sidebar becomes an off-canvas drawer opened from a top bar */
@@ -749,6 +780,8 @@
   .adm-triple-card { flex: 1 1 100%; min-width: 0; }
   .adm-eff-card { flex: 1 1 100%; min-width: 0; }
 
+  .adm-jobtype-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+
   .adm-setup-tabrow { padding: 6px; gap: 5px; }
   .adm-setup-tab-btn { flex: 1 1 auto; justify-content: center; padding: 8px 10px; font-size: 0.7rem; }
   .adm-setup-panel-body { padding: 14px; }
@@ -766,4 +799,5 @@
   .adm-kpi-card { flex: 1 1 100%; }
   .adm-nav-btn { font-size: 0.78rem; }
   .adm-setup-tab-btn span:last-child { display: inline; }
+  .adm-jobtype-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
