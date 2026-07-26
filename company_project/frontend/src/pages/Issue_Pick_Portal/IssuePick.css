@@ -1,1609 +1,712 @@
-/* ===========================
-   PRINT PORTAL - WHITE & BLUE
-   =========================== */
-
-*{
-    margin:0;
-    padding:0;
-    box-sizing:border-box;
-    font-family:Segoe UI,Tahoma,Geneva,Verdana,sans-serif;
-}
-
-body{
-    background:#eef5ff;
-}
-
-.ip-page{
-    min-height:100vh;
-    background:#eef5ff;
-    padding:25px;
-}
-
-/* Header */
-
-.ip-header{
-    display:flex;
-    justify-content:space-between;
-    align-items:center;
-    background:#ffffff;
-    border-radius:15px;
-    padding:20px 30px;
-    box-shadow:0 8px 20px rgba(0,0,0,.08);
-    margin-bottom:20px;
-    border-left:6px solid #0d6efd;
-}
-
-.ip-header h1{
-    color:#0d6efd;
-}
-
-.ip-header p{
-    color:#666;
-}
-
-/* Toolbar */
-
-.ip-toolbar{
-    display:flex;
-    gap:15px;
-    margin-bottom:20px;
-    flex-wrap:wrap;
-}
-
-.ip-search-wrap{
-    flex:1;
-    position:relative;
-}
-
-.ip-search-icon{
-    position:absolute;
-    left:15px;
-    top:12px;
-}
-
-.ip-search{
-    width:100%;
-    padding:12px 15px 12px 40px;
-    border:1px solid #cbd5e1;
-    border-radius:10px;
-    background:white;
-}
-
-.ip-filter-select{
-    padding:12px;
-    border-radius:10px;
-    border:1px solid #cbd5e1;
-    background:white;
-}
-
-/* Stats */
-
-.ip-stats{
-    display:flex;
-    gap:15px;
-    flex-wrap:wrap;
-    margin-bottom:25px;
-}
-
-.ip-stat-chip{
-    background:white;
-    padding:15px 25px;
-    border-radius:12px;
-    box-shadow:0 5px 15px rgba(0,0,0,.08);
-    color:#0d6efd;
-    font-weight:600;
-}
-
-.ip-stat-chip strong{
-    font-size:20px;
-}
-
-/* Grid */
-
-.ip-grid{
-    display:grid;
-    grid-template-columns:repeat(auto-fill,minmax(350px,1fr));
-    gap:20px;
-}
-
-/* Card */
-
-.ip-card{
-    background:white;
-    border-radius:15px;
-    box-shadow:0 8px 20px rgba(0,0,0,.08);
-    overflow:hidden;
-    transition:.3s;
-    border-top:5px solid #0d6efd;
-}
-
-.ip-card:hover{
-    transform:translateY(-5px);
-}
-
-.ip-card-head{
-    padding:18px;
-    border-bottom:1px solid #eee;
-    display:flex;
-    justify-content:space-between;
-}
-
-.ip-doc-no{
-    font-size:22px;
-    font-weight:bold;
-    color:#0d6efd;
-}
-
-.ip-doc-number-sub{
-    color:#777;
-    font-size:13px;
-}
-
-.ip-card-body{
-    padding:18px;
-}
-
-.ip-detail-row{
-    display:flex;
-    justify-content:space-between;
-    margin-bottom:12px;
-}
-
-.ip-detail-label{
-    color:#555;
-    font-weight:600;
-}
-
-.ip-detail-value{
-    color:#111827;
-}
-
-.ip-times{
-    margin-top:15px;
-    padding:15px;
-    background:#f5f9ff;
-    border-radius:10px;
-}
-
-.ip-time-row{
-    display:flex;
-    justify-content:space-between;
-    margin-bottom:10px;
-}
-
-/* Hold */
-
-.ip-hold-box{
-    margin-top:15px;
-    background:#fff8e1;
-    border-left:4px solid orange;
-    padding:15px;
-    border-radius:10px;
-}
-
-.ip-hold-row{
-    display:flex;
-    justify-content:space-between;
-    margin-bottom:8px;
-}
-
-/* Done */
-
-.ip-print-done-box{
-    margin-top:15px;
-    background:#ecfff4;
-    border-left:4px solid #198754;
-    padding:15px;
-    border-radius:10px;
-}
-
-.ip-print-done-row{
-    display:flex;
-    justify-content:space-between;
-    margin-bottom:8px;
-}
-
-/* Footer */
-
-.ip-card-foot{
-    display:flex;
-    gap:10px;
-    padding:18px;
-    border-top:1px solid #eee;
-}
-
-/* Buttons */
-
-.ip-btn{
-    flex:1;
-    border:none;
-    cursor:pointer;
-    padding:12px;
-    border-radius:10px;
-    color:white;
-    font-weight:600;
-    transition:.3s;
-}
-
-.ip-btn:hover{
-    opacity:.9;
-}
-
-.ip-btn-start{
-    background:#0d6efd;
-}
-
-.ip-btn-hold{
-    background:#ffc107;
-    color:black;
-}
-
-.ip-btn-end{
-    background:#198754;
-}
-
-.ip-btn-outline{
-    background:white;
-    color:#0d6efd;
-    border:2px solid #0d6efd;
-}
-
-/* Badge */
-
-.ip-badge{
-    padding:6px 12px;
-    border-radius:20px;
-    color:white;
-    font-size:12px;
-    font-weight:bold;
-}
-
-.ip-badge.pending{
-    background:#ffc107;
-    color:black;
-}
-
-.ip-badge.inprogress{
-    background:#0d6efd;
-}
-
-.ip-badge.onhold{
-    background:#fd7e14;
-}
-
-.ip-badge.completed{
-    background:#198754;
-}
-
-/* Popup */
-
-.ip-popup-overlay{
-    position:fixed;
-    inset:0;
-    background:rgba(0,0,0,.35);
-    display:flex;
-    justify-content:center;
-    align-items:center;
-    z-index:999;
-}
-
-.ip-popup{
-    width:500px;
-    max-width:95%;
-    background:white;
-    border-radius:15px;
-    padding:25px;
-}
-
-.ip-popup-head{
-    display:flex;
-    justify-content:space-between;
-    margin-bottom:15px;
-}
-
-.ip-popup-input,
-.ip-popup-text-input{
-    width:100%;
-    padding:12px;
-    margin-top:10px;
-    border:1px solid #ccc;
-    border-radius:8px;
-}
-
-.ip-popup-option{
-    width:100%;
-    margin-top:8px;
-    padding:10px;
-    border:none;
-    background:#eef5ff;
-    border-radius:8px;
-    cursor:pointer;
-}
-
-.ip-popup-option.selected{
-    background:#0d6efd;
-    color:white;
-}
-/* ===== FORCE WHITE THEME ===== */
-
-.ip-page{
-    background:#f5f9ff !important;
-}
-
-.ip-card{
-    background:#ffffff !important;
-    color:#111827 !important;
-    border:1px solid #dbeafe !important;
-    box-shadow:0 8px 20px rgba(0,0,0,.08)!important;
-}
-
-.ip-card-head{
-    background:#ffffff !important;
-    border-bottom:1px solid #e5e7eb !important;
-}
-
-.ip-card-body{
-    background:#ffffff !important;
-}
-
-.ip-card-foot{
-    background:#ffffff !important;
-    border-top:1px solid #e5e7eb !important;
-}
-
-.ip-times{
-    background:#f8fbff !important;
-}
-
-.ip-hold-box{
-    background:#fff8e8 !important;
-}
-
-.ip-print-done-box{
-    background:#eef8ff !important;
-}
-
-.ip-detail-label,
-.ip-time-row span:first-child,
-.ip-doc-number-sub{
-    color:#6b7280 !important;
-}
-
-.ip-detail-value,
-.ip-doc-no,
-.ip-time-row span:last-child{
-    color:#111827 !important;
-}
-
-.ip-card *{
-    color:#111827;
-}
-
-.ip-card .ip-btn{
-    color:white !important;
-}
-/* =========================
-   FORCE WHITE UI
-========================= */
-
-/* Page */
-.ip-page{
-    background:#f3f8ff !important;
-}
-
-/* Header */
-.ip-header{
-    background:#ffffff !important;
-    color:#111827 !important;
-}
-
-/* Search */
-.ip-search-wrap{
-    background:#ffffff !important;
-    border:1px solid #d1d5db !important;
-    border-radius:10px;
-}
-
-.ip-search{
-    background:#ffffff !important;
-    color:#111827 !important;
-}
-
-.ip-search::placeholder{
-    color:#6b7280 !important;
-}
-
-/* Filters */
-.ip-filter-select{
-    background:#ffffff !important;
-    color:#111827 !important;
-    border:1px solid #d1d5db !important;
-}
-
-/* Stats */
-.ip-stat-chip{
-    background:#ffffff !important;
-    color:#111827 !important;
-    border:1px solid #dbeafe !important;
-}
-
-/* Cards */
-
-.ip-card{
-    background:#ffffff !important;
-    color:#111827 !important;
-}
-
-.ip-card-head,
-.ip-card-body,
-.ip-card-foot{
-    background:#ffffff !important;
-}
-
-/* EVERYTHING inside cards black */
-
-.ip-card *,
-.ip-card-head *,
-.ip-card-body *,
-.ip-card-foot *{
-    color:#111827 !important;
-}
-
-/* Labels */
-
-.ip-detail-label,
-.ip-doc-number-sub,
-.ip-time-row span:first-child{
-    color:#6b7280 !important;
-}
-
-/* Values */
-
-.ip-detail-value,
-.ip-doc-no,
-.ip-time-row span:last-child{
-    color:#111827 !important;
-    font-weight:600;
-}
-
-/* Small boxes */
-
-.ip-times{
-    background:#f8fafc !important;
-}
-
-.ip-hold-box{
-    background:#fff8e6 !important;
-}
-
-.ip-print-done-box{
-    background:#eef7ff !important;
-}
-
-/* Buttons */
-
-.ip-btn-start{
-    background:#2563eb !important;
-    color:#fff !important;
-}
-
-.ip-btn-hold{
-    background:#f59e0b !important;
-    color:#fff !important;
-}
-
-.ip-btn-end{
-    background:#16a34a !important;
-    color:#fff !important;
-}
-
-/* Badges */
-
-.ip-badge{
-    color:#fff !important;
-}
-
-/* Toolbar */
-
-.ip-toolbar{
-    background:transparent !important;
-}
-
-/* Refresh button */
-
-.ip-btn-outline{
-    background:#ffffff !important;
-    color:#2563eb !important;
-    border:1px solid #2563eb !important;
-}
-
-/* ===== TOP STATUS CHIPS ===== */
-
-.ip-stat-chip{
-    background:#ffffff !important;
-    border:2px solid #dbeafe !important;
-    color:#111827 !important;
-    font-weight:600;
-}
-
-/* Total */
-.ip-stat-chip.blue{
-    border-color:#2563eb !important;
-    color:#2563eb !important;
-}
-
-.ip-stat-chip.blue strong{
-    color:#2563eb !important;
-}
-
-/* Pending */
-.ip-stat-chip:nth-child(2){
-    border-color:#f59e0b !important;
-    color:#f59e0b !important;
-}
-
-.ip-stat-chip:nth-child(2) strong{
-    color:#f59e0b !important;
-}
-
-/* In Progress */
-.ip-stat-chip:nth-child(3){
-    border-color:#2563eb !important;
-    color:#2563eb !important;
-}
-
-.ip-stat-chip:nth-child(3) strong{
-    color:#2563eb !important;
-}
-
-/* On Hold */
-.ip-stat-chip:nth-child(4){
-    border-color:#ea580c !important;
-    color:#ea580c !important;
-}
-
-.ip-stat-chip:nth-child(4) strong{
-    color:#ea580c !important;
-}
-
-/* Completed */
-.ip-stat-chip.green{
-    border-color:#16a34a !important;
-    color:#16a34a !important;
-}
-
-.ip-stat-chip.green strong{
-    color:#16a34a !important;
-}
-/* ===== STATUS BADGES ===== */
-
-.ip-badge.pending{
-    background:#f59e0b !important;
-    color:#ffffff !important;
-}
-
-.ip-badge.inprogress{
-    background:#2563eb !important;
-    color:#ffffff !important;
-}
-
-.ip-badge.onhold{
-    background:#ea580c !important;
-    color:#ffffff !important;
-}
-
-.ip-badge.completed{
-    background:#16a34a !important;
-    color:#ffffff !important;
-}
-/* ==========================
-   LOGITRACK HEADER DESIGN
-========================== */
-
-.ip-header{
-    background:linear-gradient(
-        135deg,
-        #020617,
-        #1d4ed8
-    ) !important;
-
-    border-radius:14px;
-    padding:18px 25px !important;
-    color:white;
-}
-
-
-/* Brand */
-
-.ip-brand h1{
-
-    font-size:26px;
-    font-weight:900;
-    letter-spacing:1px;
-    color:white !important;
-
-    text-transform:uppercase;
-}
-
-
-.ip-brand p{
-
-    margin-top:5px;
-    font-size:14px;
-    font-weight:700;
-    letter-spacing:2px;
-
-    color:#bfdbfe !important;
-
-}
-
-
-/* Updated Time */
-
-.ip-update-time{
-
-    display:inline-block;
-    margin-top:8px;
-
-    font-size:12px;
-    color:#dbeafe;
-
-}
-
-
-
-/* Refresh Button Small Right Side */
-
-.ip-header .ip-btn-outline{
-
-    width:85px;
-    height:32px;
-
-    padding:0 !important;
-
-    font-size:12px;
-    font-weight:700;
-
-    border-radius:8px;
-
-    background:white !important;
-    color:#1d4ed8 !important;
-
-    border:none !important;
-
-}
-
-
-/* Hover */
-
-.ip-header .ip-btn-outline:hover{
-
-    background:#dbeafe !important;
-}
-/* ===================================
-   PICK PORTAL WHITE POPUP FIX
-=================================== */
-
-
-/* Popup main box */
-
-.ip-popup{
-    background:#ffffff !important;
-    color:#111827 !important;
-    border-radius:16px;
-    box-shadow:0 15px 40px rgba(0,0,0,0.25);
-}
-
-
-/* Popup header */
-
-.ip-popup-head span{
-    color:#111827 !important;
-    font-weight:700;
-}
-
-.ip-popup-close{
-    color:#111827 !important;
-}
-
-
-/* Popup description */
-
-.ip-popup-sub{
-    color:#6b7280 !important;
-}
-
-
-/* Popup labels */
-
-.ip-popup-label{
-    color:#111827 !important;
-    font-weight:600;
-}
-
-
-/* Person buttons */
-
-.ip-popup-option{
-    background:#f1f5f9 !important;
-    color:#111827 !important;
-    border:1px solid #dbeafe;
-}
-
-.ip-popup-option.selected{
-    background:#2563eb !important;
-    color:#ffffff !important;
-}
-
-
-/* Input */
-
-.ip-popup-input,
-.ip-popup-text-input{
-    background:#ffffff !important;
-    color:#111827 !important;
-    border:1px solid #cbd5e1 !important;
-}
-
-
-/* Popup footer buttons */
-
-.ip-btn-outline{
-    background:#ffffff !important;
-    color:#111827 !important;
-    border:1px solid #2563eb !important;
-}
-
-
-/* ===================================
-   PICKING ERROR POPUP ONLY
-=================================== */
-
-
-/* Error popup item */
-
-.ip-popup button[style]{
-    color:#111827 !important;
-}
-
-
-/* Error popup inner text */
-
-.ip-popup button[style] div{
-    color:#111827 !important;
-}
-
-
-/* Error reason text */
-
-.ip-popup button[style] div:last-child{
-    color:#4b5563 !important;
-}
-
-
-/* ===================================
-   VIEW BUTTON BLACK TEXT
-=================================== */
-
-.ip-btn-outline{
-    color:#111827 !important;
-}
-
-.ip-btn-outline:hover{
-    background:#eff6ff !important;
-    color:#111827 !important;
-}
-
-
-/* ===================================
-   CARD ALL TEXT BLACK
-=================================== */
-
-.ip-card,
-.ip-card *{
-    color:#111827 !important;
-}
-
-
-/* Keep buttons white text */
-
-.ip-btn-start,
-.ip-btn-hold,
-.ip-btn-end,
-.ip-btn-handover-action,
-.ip-btn-done{
-    color:white !important;
-}
-/* ======================================
-   PICK PORTAL WHITE POPUP + BLACK TEXT
-====================================== */
-
-
-/* View Button Text Black */
-
-.ip-btn-outline{
-    background:#ffffff !important;
-    color:#000000 !important;
-    border:1px solid #2563eb !important;
-}
+/* ─── Pick Portal – restyled to match Check Portal's dark theme ─────── */
+
+:root {
+  --ip-bg:          #0f1724;
+  --ip-surface:     #1a2540;
+  --ip-surface2:    #243052;
+  --ip-border:      #2e3f66;
+  --ip-accent:      #3b82f6;
+  --ip-accent-soft: rgba(59, 130, 246, 0.15);
+  --ip-green:       #22c55e;
+  --ip-amber:       #f59e0b;
+  --ip-orange:      #fb923c;
+  --ip-red:         #ef4444;
+  --ip-purple:      #a855f7;
+  --ip-text:        #e2e8f0;
+  --ip-muted:       #7c8db0;
+  --ip-radius:      10px;
+  --ip-shadow:      0 4px 20px rgba(0,0,0,0.35);
+  --ip-font:        'Inter', 'Segoe UI', sans-serif;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+  font-family: var(--ip-font);
+}
+
+body {
+  background: var(--ip-bg);
+}
+
+.ip-page {
+  min-height: 100vh;
+  background: var(--ip-bg);
+  color: var(--ip-text);
+  padding: 28px 24px 48px;
+  box-sizing: border-box;
+}
+
+/* ─── Header ──────────────────────────────────────────────────────── */
+
+.ip-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: var(--ip-surface);
+  border: 1px solid var(--ip-border);
+  border-radius: 14px;
+  padding: 18px 25px;
+  box-shadow: var(--ip-shadow);
+  margin-bottom: 28px;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.ip-header-left h1,
+.ip-header h1,
+.ip-brand h1 {
+  font-size: 1.45rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  color: #fff !important;
+  text-transform: uppercase;
+  margin: 0 0 2px;
+}
+
+.ip-header-left p,
+.ip-header p,
+.ip-brand p {
+  font-size: 0.82rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: var(--ip-muted) !important;
+  margin: 0;
+}
+
+.ip-update-time {
+  display: inline-block;
+  margin-top: 8px;
+  font-size: 0.75rem;
+  color: var(--ip-muted);
+}
+
+/* Header refresh button */
+.ip-header .ip-btn-outline {
+  width: 85px;
+  height: 32px;
+  padding: 0 !important;
+  font-size: 0.75rem;
+  font-weight: 700;
+  border-radius: 8px;
+  background: var(--ip-accent) !important;
+  color: #fff !important;
+  border: none !important;
+}
+
+.ip-header .ip-btn-outline:hover {
+  background: #2563eb !important;
+}
+
+/* ─── Toolbar ─────────────────────────────────────────────────────── */
 
-.ip-btn-outline:hover{
-    background:#eff6ff !important;
-    color:#000000 !important;
+.ip-toolbar {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 22px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.ip-search-wrap {
+  position: relative;
+  flex: 1;
+  min-width: 200px;
 }
 
-
-/* Popup Main */
-
-.ip-popup{
-    background:#ffffff !important;
-    color:#000000 !important;
-    border-radius:16px;
-    box-shadow:0 15px 40px rgba(0,0,0,.25);
-}
-
-
-/* Popup all letters black */
-
-.ip-popup,
-.ip-popup *{
-    color:#000000 !important;
-}
-
-
-/* Popup Header */
-
-.ip-popup-head span{
-    color:#000000 !important;
-    font-weight:700;
-}
-
-
-.ip-popup-sub{
-    color:#555555 !important;
-}
-
-
-/* Close Button */
-
-.ip-popup-close{
-    color:#000000 !important;
-    background:none;
-    border:none;
-}
-
-
-/* Popup Labels */
-
-.ip-popup-label{
-    color:#000000 !important;
-    font-weight:700;
-}
-
-
-/* Person / Reason Buttons */
-
-.ip-popup-option{
-    background:#f8fafc !important;
-    color:#000000 !important;
-    border:1px solid #dbeafe !important;
-}
-
-
-.ip-popup-option.selected{
-    background:#2563eb !important;
-    color:#ffffff !important;
-}
-
-
-/* Input fields */
-
-.ip-popup-input,
-.ip-popup-text-input{
-    background:#ffffff !important;
-    color:#000000 !important;
-    border:1px solid #cbd5e1 !important;
-}
-
-
-.ip-popup-input::placeholder,
-.ip-popup-text-input::placeholder{
-    color:#64748b !important;
-}
-
-
-/* Popup Footer */
-
-.ip-popup-foot{
-    color:#000000 !important;
-}
-
-
-/* View Details boxes */
-
-.ip-hold-box{
-    background:#f8fbff !important;
-    border:1px solid #dbeafe !important;
-}
-
-
-.ip-hold-row span:first-child{
-    color:#555555 !important;
-    font-weight:600;
-}
-
-
-.ip-hold-row span:last-child{
-    color:#000000 !important;
-    font-weight:600;
-}
-
-
-/* Duration box */
-
-.ip-duration-box{
-    background:#f8fbff !important;
-}
-
-
-.ip-duration-label{
-    color:#555555 !important;
-}
-
-
-.ip-duration-value{
-    color:#000000 !important;
-}
-
-
-/* Picking Error popup buttons */
-
-.ip-popup button{
-    color:#000000;
-}
-
-
-.ip-popup .ip-btn{
-    color:#ffffff !important;
+.ip-search-icon {
+  position: absolute;
+  left: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--ip-muted);
+  font-size: 0.9rem;
+  pointer-events: none;
 }
 
+.ip-search {
+  width: 100%;
+  background: var(--ip-surface) !important;
+  border: 1px solid var(--ip-border) !important;
+  border-radius: var(--ip-radius);
+  color: var(--ip-text) !important;
+  padding: 9px 12px 9px 36px;
+  font-size: 0.875rem;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.ip-search:focus { border-color: var(--ip-accent) !important; }
+.ip-search::placeholder { color: var(--ip-muted) !important; }
 
-/* Emergency popup */
-
-.ip-popup .ip-btn-outline{
-    color:#000000 !important;
-}
-.ip-card,
-.ip-card *{
-    color:#111827 !important;
+.ip-filter-select {
+  background: var(--ip-surface) !important;
+  border: 1px solid var(--ip-border) !important;
+  border-radius: var(--ip-radius);
+  color: var(--ip-text) !important;
+  padding: 9px 14px;
+  font-size: 0.875rem;
+  outline: none;
+  cursor: pointer;
 }
-/* =====================================
-   PICK PORTAL FINAL COLOR FIX
-===================================== */
 
+.ip-filter-select:focus { border-color: var(--ip-accent) !important; }
 
-/* Card text normal black */
-.ip-card{
-    color:#111827 !important;
-}
+/* ─── Stat chips ──────────────────────────────────────────────────── */
 
-.ip-card *{
-    color:inherit;
+.ip-stats {
+  display: flex;
+  gap: 14px;
+  margin-bottom: 22px;
+  flex-wrap: wrap;
 }
 
-
-/* Labels */
-.ip-detail-label,
-.ip-time-row span:first-child{
-    color:#64748b !important;
-    font-weight:600;
+.ip-stat-chip {
+  background: var(--ip-surface) !important;
+  border: 1px solid var(--ip-border) !important;
+  border-radius: 20px;
+  padding: 8px 18px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--ip-muted) !important;
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 
+.ip-stat-chip strong { color: var(--ip-text) !important; font-size: 1rem; }
 
-/* Values */
-.ip-detail-value,
-.ip-time-row span:last-child{
-    color:#111827 !important;
-    font-weight:700;
-}
+.ip-stat-chip.blue,
+.ip-stat-chip:nth-child(3) { border-color: var(--ip-accent) !important; color: var(--ip-accent) !important; }
+.ip-stat-chip.blue strong,
+.ip-stat-chip:nth-child(3) strong { color: var(--ip-accent) !important; }
 
+.ip-stat-chip:nth-child(2) { border-color: var(--ip-amber) !important; color: var(--ip-amber) !important; }
+.ip-stat-chip:nth-child(2) strong { color: var(--ip-amber) !important; }
 
-/* Request / Entered By / Picked By boxes */
-.ip-handover-box,
-.ip-duration-box,
-.ip-times,
-.ip-hold-box{
+.ip-stat-chip:nth-child(4) { border-color: var(--ip-orange) !important; color: var(--ip-orange) !important; }
+.ip-stat-chip:nth-child(4) strong { color: var(--ip-orange) !important; }
 
-    border-radius:10px;
-    border:1px solid #dbeafe;
-}
+.ip-stat-chip.green { border-color: var(--ip-green) !important; color: var(--ip-green) !important; }
+.ip-stat-chip.green strong { color: var(--ip-green) !important; }
 
+/* ─── Grid & Card ─────────────────────────────────────────────────── */
 
-/* Request date time box */
-.ip-times{
-    background:#f8fbff !important;
-    border-left:4px solid #2563eb !important;
+.ip-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+  gap: 20px;
 }
-
 
-/* Hold box */
-.ip-hold-box{
-    background:#fffaf0 !important;
-    border-left:4px solid #f59e0b !important;
+.ip-card {
+  background: var(--ip-surface) !important;
+  color: var(--ip-text) !important;
+  border: 1px solid var(--ip-border) !important;
+  border-radius: var(--ip-radius);
+  box-shadow: var(--ip-shadow) !important;
+  overflow: hidden;
+  transition: transform 0.18s, box-shadow 0.18s;
+  display: flex;
+  flex-direction: column;
 }
-
-
-/* Picked By / Duration box */
-.ip-duration-box{
 
-    background:#eff6ff !important;
-    border-left:4px solid #2563eb !important;
+.ip-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 8px 32px rgba(0,0,0,0.45) !important;
 }
 
-
-.ip-duration-label{
-    color:#64748b !important;
-    font-size:12px;
-    font-weight:700;
+.ip-card::before {
+  content: '';
+  display: block;
+  height: 4px;
+  width: 100%;
+  background: var(--ip-accent);
 }
 
+.ip-card.status-pending::before    { background: var(--ip-amber); }
+.ip-card.status-inprogress::before { background: var(--ip-accent); }
+.ip-card.status-onhold::before     { background: var(--ip-orange); }
+.ip-card.status-completed::before  { background: var(--ip-green); }
 
-.ip-duration-value{
-    color:#2563eb !important;
-    font-weight:800;
+.ip-card-head {
+  padding: 18px;
+  background: var(--ip-surface) !important;
+  border-bottom: 1px solid var(--ip-border) !important;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
 }
-
-
-/* =====================================
-   VIEW BUTTON
-===================================== */
-
-
-.ip-card-foot .ip-btn-outline{
-
-    background:white !important;
-    color:black !important;
 
-    border:2px solid #2563eb !important;
-
-    font-weight:700;
-
+.ip-doc-no {
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: #fff !important;
 }
-
 
-.ip-card-foot .ip-btn-outline:hover{
-
-    background:#eff6ff !important;
-    color:#000 !important;
-
+.ip-doc-number-sub {
+  color: var(--ip-muted) !important;
+  font-size: 0.78rem;
 }
-
-
-/* =====================================
-   JOB TYPE COLOR KEEP
-===================================== */
 
-
-.ip-card-head div div[style]{
-
-    font-weight:700 !important;
-
+.ip-card-body {
+  padding: 18px;
+  background: var(--ip-surface) !important;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
 }
-
-
-/* =====================================
-   PICKED BY PERSON COLOR
-===================================== */
-
 
-.ip-duration-box span:last-child{
-
-    color:#2563eb !important;
-    font-weight:800 !important;
-
+.ip-detail-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 0.85rem;
+  margin-bottom: 0;
 }
-
 
-/* =====================================
-   HEADER TITLE WHITE
-===================================== */
-
-
-.ip-header h1{
-    color:white !important;
+.ip-detail-label {
+  color: var(--ip-muted) !important;
+  font-weight: 600;
+  min-width: 110px;
+  flex-shrink: 0;
+  font-size: 0.78rem;
 }
 
-
-.ip-header p{
-    color:#dbeafe !important;
+.ip-detail-value {
+  color: var(--ip-text) !important;
+  font-weight: 500;
+  word-break: break-word;
 }
-/* =====================================
-   FINAL PICK PORTAL WHITE THEME FIX
-===================================== */
-
 
-/* CARD TEXT ONLY */
+/* Card, all inherited text stays theme text color */
+.ip-card * { color: inherit; }
 .ip-card .ip-detail-label,
 .ip-card .ip-time-row span:first-child,
-.ip-card .ip-doc-number-sub{
-    color:#64748b !important;
-}
-
-
+.ip-card .ip-doc-number-sub { color: var(--ip-muted) !important; }
 .ip-card .ip-detail-value,
 .ip-card .ip-doc-no,
-.ip-card .ip-time-row span:last-child{
-    color:#000000 !important;
-    font-weight:700;
+.ip-card .ip-time-row span:last-child { color: var(--ip-text) !important; font-weight: 600; }
+
+/* ─── Times / info boxes ──────────────────────────────────────────── */
+
+.ip-times {
+  margin-top: 4px;
+  background: var(--ip-surface2) !important;
+  border: 1px solid var(--ip-border);
+  border-left: 3px solid var(--ip-accent) !important;
+  border-radius: 8px;
+  padding: 12px 14px;
 }
 
-
-/* ===============================
-   PICKED BY / DURATION BOX
-================================ */
-
-.ip-duration-box{
-    background:#ffffff !important;
-    border:1px solid #2563eb !important;
-    border-radius:10px;
-    padding:12px;
+.ip-time-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.8rem;
+  margin-bottom: 6px;
 }
 
+.ip-time-row:last-child { margin-bottom: 0; }
+.ip-time-row span:first-child { color: var(--ip-muted) !important; font-weight: 600; }
+.ip-time-row span:last-child  { color: var(--ip-text) !important; font-weight: 600; }
 
-.ip-duration-label{
-    color:#2563eb !important;
-    font-weight:700;
+/* Hold box */
+.ip-hold-box {
+  margin-top: 6px;
+  background: rgba(251, 146, 60, 0.08) !important;
+  border: 1px solid rgba(251, 146, 60, 0.35) !important;
+  border-left: 3px solid var(--ip-orange) !important;
+  border-radius: 8px;
+  padding: 12px 14px;
 }
 
-
-.ip-duration-box span,
-.ip-duration-value{
-    color:#000000 !important;
+.ip-hold-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.78rem;
+  margin-bottom: 6px;
 }
 
+.ip-hold-row:last-child { margin-bottom: 0; }
+.ip-hold-row span:first-child { color: var(--ip-orange) !important; font-weight: 600; }
+.ip-hold-row span:last-child  { color: var(--ip-text) !important; text-align: right; max-width: 60%; }
 
-
-/* ===============================
-   HOLD BOX
-================================ */
-
-.ip-hold-box{
-    background:#ffffff !important;
-    border:1px solid #f59e0b !important;
+/* Print done / check-done box */
+.ip-print-done-box {
+  margin-top: 6px;
+  background: var(--ip-accent-soft) !important;
+  border: 1px solid rgba(59,130,246,0.35) !important;
+  border-left: 3px solid var(--ip-accent) !important;
+  border-radius: 8px;
+  padding: 12px 14px;
 }
 
-
-.ip-hold-row span:first-child{
-    color:#f59e0b !important;
-    font-weight:700;
+.ip-print-done-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.8rem;
+  margin-bottom: 6px;
 }
 
+.ip-print-done-row:last-child { margin-bottom: 0; }
+.ip-print-done-row span:first-child { color: var(--ip-accent) !important; font-weight: 600; }
+.ip-print-done-row span:last-child  { color: var(--ip-text) !important; font-weight: 600; }
 
-.ip-hold-row span:last-child{
-    color:#000000 !important;
+/* Wrong material box (error state) */
+.ip-wrong-material-box {
+  margin-top: 6px;
+  background: rgba(239, 68, 68, 0.08);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  border-left: 3px solid var(--ip-red);
+  border-radius: 8px;
+  padding: 12px 14px;
 }
 
-
-
-/* ===============================
-   REQUEST DATE BOX
-================================ */
-
-.ip-times{
-    background:#ffffff !important;
-    border:1px solid #2563eb !important;
+.ip-wrong-material-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.78rem;
+  margin-bottom: 6px;
 }
 
+.ip-wrong-material-row:last-child { margin-bottom: 0; }
+.ip-wrong-material-row span:first-child { color: var(--ip-red); font-weight: 600; }
+.ip-wrong-material-row span:last-child  { color: var(--ip-text); text-align: right; max-width: 60%; }
 
-.ip-time-row span:first-child{
-    color:#2563eb !important;
-    font-weight:700;
+.ip-no-issue-box {
+  margin-top: 6px;
+  background: rgba(34, 197, 94, 0.08);
+  border: 1px solid rgba(34, 197, 94, 0.3);
+  border-radius: 8px;
+  padding: 10px 14px;
+  font-size: 0.8rem;
+  color: var(--ip-green);
+  font-weight: 600;
+  text-align: center;
 }
 
-
-.ip-time-row span:last-child{
-    color:#000000 !important;
-    font-weight:700;
+/* Picked By / Duration box */
+.ip-duration-box {
+  margin-top: 6px;
+  background: var(--ip-surface2) !important;
+  border: 1px solid var(--ip-border) !important;
+  border-left: 3px solid var(--ip-accent) !important;
+  border-radius: 8px;
+  padding: 12px 14px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
 }
 
-
-
-/* ===============================
-   VIEW BUTTON ALWAYS SAME
-================================ */
-
-.ip-card .ip-btn-outline{
-
-    background:#ffffff !important;
-    color:#000000 !important;
-
-    border:2px solid #2563eb !important;
-
-    font-weight:700;
-
+.ip-duration-label {
+  color: var(--ip-muted) !important;
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
 }
 
-
-.ip-card .ip-btn-outline:hover{
-
-    background:#eff6ff !important;
-    color:#000000 !important;
-
+.ip-duration-value,
+.ip-duration-box span:last-child {
+  color: var(--ip-accent) !important;
+  font-weight: 800;
 }
 
+/* ─── Footer / buttons ────────────────────────────────────────────── */
 
-/* remove click/focus color change */
-
-.ip-card .ip-btn-outline:focus,
-.ip-card .ip-btn-outline:active{
-
-    background:#ffffff !important;
-    color:#000000 !important;
-
+.ip-card-foot {
+  display: flex;
+  gap: 10px;
+  padding: 16px 18px;
+  background: var(--ip-surface) !important;
+  border-top: 1px solid var(--ip-border) !important;
 }
 
-
-
-/* ===============================
-   POPUP ONLY
-================================ */
-
-
-.ip-popup,
-.ip-popup *{
-    color:#000000 !important;
+.ip-btn {
+  flex: 1;
+  border: none;
+  cursor: pointer;
+  padding: 10px 0;
+  border-radius: 8px;
+  font-size: 0.85rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  transition: opacity 0.15s, transform 0.12s;
 }
 
+.ip-btn:active { transform: scale(0.97); }
+.ip-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+.ip-btn:hover:not(:disabled) { opacity: 0.88; }
 
-.ip-popup .ip-btn{
-    color:#ffffff !important;
+.ip-btn-start  { background: var(--ip-accent); color: #fff !important; }
+.ip-btn-hold   { background: var(--ip-orange); color: #1a0f00 !important; }
+.ip-btn-hold:disabled { background: #4b3a26; color: var(--ip-muted) !important; }
+.ip-btn-end    { background: var(--ip-green); color: #fff !important; }
+.ip-btn-done   { background: var(--ip-green); color: #fff !important; }
+
+.ip-btn-handover,
+.ip-btn-handover-action {
+  background: var(--ip-purple) !important;
+  color: #fff !important;
+  font-weight: 700 !important;
+  border: none !important;
 }
-/* ===========================
-   VIEW BUTTON FIX - ALWAYS WHITE BG BLACK TEXT
-=========================== */
 
+.ip-btn-handover:hover,
+.ip-btn-handover-action:hover { background: #9333ea !important; }
+
+/* View / outline button — same treatment in card and popup */
+.ip-btn-outline,
 .ip-card .ip-btn-outline,
+.ip-popup-foot .ip-btn-outline {
+  background: transparent !important;
+  color: var(--ip-muted) !important;
+  border: 1px solid var(--ip-border) !important;
+  font-weight: 700 !important;
+}
+
+.ip-btn-outline:hover:not(:disabled),
 .ip-card .ip-btn-outline:hover,
 .ip-card .ip-btn-outline:focus,
 .ip-card .ip-btn-outline:active {
-    background: #ffffff !important;
-    color: #000000 !important;
-    border: 2px solid #2563eb !important;
-    font-weight: 700 !important;
-    opacity: 1 !important;
+  background: var(--ip-surface2) !important;
+  color: var(--ip-text) !important;
 }
 
-/* Icon + text inside View button */
-.ip-card .ip-btn-outline * {
-    color: #000000 !important;
-}
-/* =====================================
-   FINAL BUTTON COLOR FIX
-===================================== */
+.ip-card .ip-btn-outline * { color: inherit !important; }
 
+/* ─── Badges ──────────────────────────────────────────────────────── */
 
-/* =========================
-   HANDOVER BUTTON
-========================= */
-
-.ip-btn-handover,
-.ip-btn-handover-action{
-
-    background:#9333ea !important;   /* Purple */
-    color:#ffffff !important;
-
-    font-weight:800 !important;
-
-    border:none !important;
+.ip-badge {
+  padding: 3px 10px;
+  border-radius: 12px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
 }
 
+.ip-badge.pending    { background: rgba(245,158,11,0.15) !important; color: var(--ip-amber) !important; }
+.ip-badge.inprogress { background: var(--ip-accent-soft) !important; color: var(--ip-accent) !important; }
+.ip-badge.onhold     { background: rgba(251,146,60,0.15) !important; color: var(--ip-orange) !important; }
+.ip-badge.completed  { background: rgba(34,197,94,0.15) !important;  color: var(--ip-green) !important; }
 
-.ip-btn-handover:hover,
-.ip-btn-handover-action:hover{
+/* ─── Popup ───────────────────────────────────────────────────────── */
 
-    background:#7e22ce !important;
-    color:#ffffff !important;
+.ip-popup-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.65);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 999;
+  backdrop-filter: blur(3px);
 }
 
-
-
-/* =========================
-   VIEW BUTTON
-========================= */
-
-.ip-card .ip-btn-outline{
-
-    background:#6b7280 !important;   /* Gray */
-
-    color:#000000 !important;
-
-    border:2px solid #4b5563 !important;
-
-    font-weight:800 !important;
+.ip-popup {
+  width: 420px;
+  max-width: 92vw;
+  background: var(--ip-surface) !important;
+  color: var(--ip-text) !important;
+  border: 1px solid var(--ip-border);
+  border-radius: 14px;
+  padding: 26px;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.6);
 }
 
+.ip-popup * { color: inherit; }
 
-
-.ip-card .ip-btn-outline:hover,
-.ip-card .ip-btn-outline:focus,
-.ip-card .ip-btn-outline:active{
-
-    background:#6b7280 !important;
-
-    color:#000000 !important;
-
+.ip-popup-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
 }
 
-
-
-/* View icon + text */
-
-.ip-card .ip-btn-outline *{
-
-    color:#000000 !important;
-
+.ip-popup-head span {
+  color: #fff !important;
+  font-weight: 700;
+  font-size: 1rem;
 }
 
-
-
-/* =========================
-   ALL NORMAL TEXT BLACK
-========================= */
-
-.ip-card .ip-detail-value,
-.ip-card .ip-doc-no,
-.ip-card .ip-time-row span:last-child,
-.ip-card .ip-hold-row span:last-child{
-
-    color:#000000 !important;
-
+.ip-popup-close {
+  background: var(--ip-surface2) !important;
+  color: var(--ip-muted) !important;
+  border: none !important;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  font-size: 1rem;
+  font-weight: 700;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
+.ip-popup-close:hover { background: rgba(239,68,68,0.15) !important; color: var(--ip-red) !important; }
+.ip-popup-close * { color: inherit !important; }
 
-
-/* Labels */
-
-.ip-card .ip-detail-label,
-.ip-card .ip-time-row span:first-child,
-.ip-card .ip-hold-row span:first-child{
-
-    color:#64748b !important;
-
+.ip-popup-sub {
+  color: var(--ip-muted) !important;
+  font-size: 0.8rem;
+  margin: 0 0 18px;
 }
 
-
-
-/* =========================
-   KEEP ACTION BUTTON TEXT WHITE
-========================= */
-
-.ip-btn-start,
-.ip-btn-hold,
-.ip-btn-end,
-.ip-btn-handover-action,
-.ip-btn-handover,
-.ip-btn-done{
-
-    color:#ffffff !important;
-
-}
-/* =====================================
-   FINAL BUTTON COLOR FIX
-===================================== */
-
-
-/* =========================
-   HANDOVER BUTTON
-========================= */
-
-.ip-btn-handover,
-.ip-btn-handover-action{
-
-    background:#9333ea !important;   /* Purple */
-    color:#ffffff !important;
-
-    font-weight:800 !important;
-
-    border:none !important;
+.ip-popup-label {
+  color: var(--ip-muted) !important;
+  font-size: 0.78rem;
+  font-weight: 600;
+  margin-bottom: 6px;
+  display: block;
 }
 
+.ip-popup-field { margin-bottom: 16px; }
 
-.ip-btn-handover:hover,
-.ip-btn-handover-action:hover{
-
-    background:#7e22ce !important;
-    color:#ffffff !important;
+.ip-popup-input,
+.ip-popup-text-input {
+  width: 100%;
+  background: var(--ip-surface2) !important;
+  color: var(--ip-text) !important;
+  border: 1px solid var(--ip-border) !important;
+  border-radius: 8px;
+  padding: 10px 14px;
+  margin-top: 8px;
+  outline: none;
 }
 
+.ip-popup-input:focus,
+.ip-popup-text-input:focus { border-color: var(--ip-accent) !important; }
+.ip-popup-input::placeholder,
+.ip-popup-text-input::placeholder { color: var(--ip-muted) !important; }
 
-
-/* =========================
-   VIEW BUTTON
-========================= */
-
-.ip-card .ip-btn-outline{
-
-    background:#6b7280 !important;   /* Gray */
-
-    color:#000000 !important;
-
-    border:2px solid #4b5563 !important;
-
-    font-weight:800 !important;
+.ip-popup-options {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 220px;
+  overflow-y: auto;
 }
 
-
-
-.ip-card .ip-btn-outline:hover,
-.ip-card .ip-btn-outline:focus,
-.ip-card .ip-btn-outline:active{
-
-    background:#6b7280 !important;
-
-    color:#000000 !important;
-
+.ip-popup-option {
+  width: 100%;
+  background: var(--ip-surface2) !important;
+  color: var(--ip-text) !important;
+  border: 1px solid var(--ip-border) !important;
+  border-radius: 8px;
+  padding: 10px 14px;
+  text-align: left;
+  cursor: pointer;
+  transition: all 0.15s;
 }
 
-
-
-/* View icon + text */
-
-.ip-card .ip-btn-outline *{
-
-    color:#000000 !important;
-
+.ip-popup-option:hover {
+  background: rgba(59,130,246,0.15) !important;
+  border-color: rgba(59,130,246,0.4) !important;
+  color: #fff !important;
 }
 
-
-
-/* =========================
-   ALL NORMAL TEXT BLACK
-========================= */
-
-.ip-card .ip-detail-value,
-.ip-card .ip-doc-no,
-.ip-card .ip-time-row span:last-child,
-.ip-card .ip-hold-row span:last-child{
-
-    color:#000000 !important;
-
+.ip-popup-option.selected {
+  background: rgba(59,130,246,0.2) !important;
+  border-color: var(--ip-accent) !important;
+  color: var(--ip-accent) !important;
+  font-weight: 600;
 }
 
-
-
-/* Labels */
-
-.ip-card .ip-detail-label,
-.ip-card .ip-time-row span:first-child,
-.ip-card .ip-hold-row span:first-child{
-
-    color:#64748b !important;
-
+.ip-popup-foot {
+  display: flex;
+  gap: 10px;
+  margin-top: 20px;
 }
 
-
-
-/* =========================
-   KEEP ACTION BUTTON TEXT WHITE
-========================= */
-
-.ip-btn-start,
-.ip-btn-hold,
-.ip-btn-end,
-.ip-btn-handover-action,
-.ip-btn-handover,
-.ip-btn-done{
-
-    color:#ffffff !important;
-
-}
-/* =========================
-   CLOSE BUTTON FINAL FIX
-========================= */
-
-.ip-popup-close,
-.ip-popup-close:hover,
-.ip-popup-close:focus,
-.ip-popup-close:active{
-
-    background:#6b7280 !important;   /* Gray */
-    color:#000000 !important;        /* Black text/icon */
-
-    border:none !important;
-
-    width:35px;
-    height:35px;
-
-    border-radius:8px;
-
-    font-size:18px;
-    font-weight:800;
-
-    cursor:pointer;
-
-    display:flex;
-    align-items:center;
-    justify-content:center;
+.ip-btn-hold-confirm {
+  flex: 1;
+  padding: 10px 0;
+  background: var(--ip-orange);
+  color: #1a0f00 !important;
+  border: none;
+  border-radius: 8px;
+  font-weight: 700;
+  cursor: pointer;
 }
 
+.ip-btn-hold-confirm:hover:not(:disabled) { opacity: 0.88; }
+.ip-btn-hold-confirm:disabled { opacity: 0.4; cursor: not-allowed; }
 
-/* Close icon */
-.ip-popup-close *{
-    color:#000000 !important;
-}
-/* =====================================
-   CLOSE BUTTON - GRAY BACKGROUND BLACK TEXT
-===================================== */
+/* ─── Yes/No toggle ───────────────────────────────────────────────── */
 
-.ip-popup-close,
-.ip-popup .close-btn,
-.ip-popup button[aria-label="close"]{
+.ip-yesno-row { display: flex; gap: 10px; }
 
-    background:#6b7280 !important;   /* Gray */
-    color:#000000 !important;
-
-    border:none !important;
-    border-radius:8px;
-
-    font-weight:800 !important;
-
-    width:35px;
-    height:35px;
-
-    display:flex;
-    align-items:center;
-    justify-content:center;
-
-    cursor:pointer;
+.ip-yesno-btn {
+  flex: 1;
+  padding: 12px 0;
+  border-radius: 8px;
+  font-size: 0.9rem;
+  font-weight: 700;
+  cursor: pointer;
+  border: 1px solid var(--ip-border);
+  background: var(--ip-surface2);
+  color: var(--ip-text);
+  transition: all 0.15s;
 }
 
+.ip-yesno-btn:hover { background: rgba(255,255,255,0.05); }
 
-/* X icon black */
-.ip-popup-close *,
-.ip-popup .close-btn *{
-
-    color:#000000 !important;
-
+.ip-yesno-btn.yes.selected {
+  background: rgba(239, 68, 68, 0.18);
+  border-color: var(--ip-red);
+  color: var(--ip-red);
 }
 
-
-/* Hover */
-.ip-popup-close:hover,
-.ip-popup .close-btn:hover{
-
-    background:#4b5563 !important;
-    color:#000000 !important;
-
-}
-/* ==========================
-   POPUP CLOSE BUTTON ONLY
-========================== */
-
-.ip-popup-foot .ip-btn-outline{
-
-    background:#6b7280 !important;  /* Gray */
-    color:#000000 !important;
-
-    border:2px solid #4b5563 !important;
-
-    font-weight:800 !important;
-
+.ip-yesno-btn.no.selected {
+  background: rgba(34, 197, 94, 0.18);
+  border-color: var(--ip-green);
+  color: var(--ip-green);
 }
 
+/* ─── Empty / skeleton states ─────────────────────────────────────── */
 
-.ip-popup-foot .ip-btn-outline:hover,
-.ip-popup-foot .ip-btn-outline:focus,
-.ip-popup-foot .ip-btn-outline:active{
-
-    background:#6b7280 !important;
-    color:#000000 !important;
-
+.ip-empty {
+  grid-column: 1 / -1;
+  text-align: center;
+  padding: 64px 24px;
+  color: var(--ip-muted);
 }
 
+.ip-empty-icon { font-size: 2.8rem; margin-bottom: 12px; }
+.ip-empty p { font-size: 0.9rem; margin: 0; }
 
-/* Close button text */
-.ip-popup-foot .ip-btn-outline *{
+.ip-skeleton {
+  background: linear-gradient(90deg, var(--ip-surface) 25%, var(--ip-surface2) 50%, var(--ip-surface) 75%);
+  background-size: 200% 100%;
+  animation: ip-shimmer 1.4s infinite;
+  border-radius: 6px;
+}
 
-    color:#000000 !important;
+@keyframes ip-shimmer {
+  0%   { background-position: -200% 0; }
+  100% { background-position:  200% 0; }
+}
 
+/* ─── Alert banner (picking error) ───────────────────────────────── */
+
+.ip-alert-banner {
+  background: rgba(239, 68, 68, 0.12);
+  border: 1px solid rgba(239, 68, 68, 0.4);
+  border-radius: 10px;
+  padding: 14px 18px;
+  margin-bottom: 16px;
+  color: var(--ip-red);
+}
+
+/* ─── Responsive ──────────────────────────────────────────────────── */
+
+@media (max-width: 640px) {
+  .ip-page { padding: 16px 14px 32px; }
+  .ip-grid { grid-template-columns: 1fr; }
+  .ip-header { flex-direction: column; align-items: flex-start; }
 }
