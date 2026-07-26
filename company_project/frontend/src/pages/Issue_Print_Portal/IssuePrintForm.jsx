@@ -265,7 +265,7 @@ function DocumentCard({ doc, requestId, divisionLabel, onStart, onHold, onEnd, o
           </div>
           {divisionLabel && (
             <div className="ip-doc-division-sub">
-              🏢 {divisionLabel}
+               {divisionLabel}
             </div>
           )}
         </div>
@@ -390,20 +390,34 @@ export default function IssuPrinFormt() {
     }
   }, []);
 
+  const divisionNoToName = useMemo(() => {
+    const map = {};
+    divisions.forEach(d => { map[d.divisionNo] = d.divisionName; });
+    return map;
+  }, [divisions]);
+
   // Division-wise operators — only the operators added under that
-  // specific Division in Admin Master Data
+  // specific Division in Admin Master Data.
+  // NOTE: the backend's /print-operators endpoint returns ALL operators
+  // (there is no dedicated "by division" endpoint), so we fetch them all
+  // and filter client-side by divisionName — the same way Job Categories
+  // are matched to a Division in the Document Portal form.
   const fetchOperatorsForDivision = useCallback(async (divisionNo) => {
-    if (!divisionNo) {
+    const divisionName = divisionNoToName[divisionNo];
+
+    if (!divisionNo || !divisionName) {
       setPopupOperators([]);
       return;
     }
+
     setPopupOperatorsLoading(true);
     try {
-      const res = await fetch(`${SETUP_API}/print-operators/division/${divisionNo}`);
+      const res = await fetch(`${SETUP_API}/print-operators`);
       if (res.ok) {
         const data = await res.json();
         setPopupOperators(
           (data || [])
+            .filter(op => (op.divisionName || op.division || "") === divisionName)
             .map(op => op.operatorNicName || op.operatorName || op.name || op.fullName)
             .filter(Boolean)
         );
@@ -416,7 +430,7 @@ export default function IssuPrinFormt() {
     } finally {
       setPopupOperatorsLoading(false);
     }
-  }, []);
+  }, [divisionNoToName]);
 
   useEffect(() => {
     fetchDocuments(false);
@@ -429,12 +443,6 @@ export default function IssuPrinFormt() {
     }, AUTO_REFRESH);
     return () => clearInterval(id);
   }, [fetchDocuments]);
-
-  const divisionNoToName = useMemo(() => {
-    const map = {};
-    divisions.forEach(d => { map[d.divisionNo] = d.divisionName; });
-    return map;
-  }, [divisions]);
 
   const getDocById = useCallback(
     (id) => documents.find(d => d.id === id),
