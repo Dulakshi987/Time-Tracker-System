@@ -100,6 +100,29 @@ function statusLabel(s) {
   }[c];
 }
 
+// Color palette for status badges + action buttons. bg/text used for solid
+// badges & active buttons, border used for outlined/inactive buttons.
+const STATUS_COLORS = {
+  pending:    { bg: "#f59e0b", text: "#1a1206", border: "#f59e0b" }, // amber
+  inprogress: { bg: "#3b82f6", text: "#eaf2ff", border: "#3b82f6" }, // blue
+  onhold:     { bg: "#fb923c", text: "#1a1206", border: "#fb923c" }, // orange
+  completed:  { bg: "#22c55e", text: "#06210f", border: "#22c55e" }, // green
+  cancelled:  { bg: "#ef4444", text: "#2a0a0a", border: "#ef4444" }, // red
+};
+
+function statusColor(s) {
+  return STATUS_COLORS[statusClass(s)] || STATUS_COLORS.pending;
+}
+
+// Action button colors — Delivered / Hold / Cancel / Handover / Reactivate.
+const ACTION_COLORS = {
+  delivered:  { bg: "#22c55e", text: "#06210f" }, // green
+  hold:       { bg: "#fb923c", text: "#1a1206" }, // orange
+  cancel:     { bg: "#ef4444", text: "#2a0a0a" }, // red
+  handover:   { bg: "#3b82f6", text: "#eaf2ff" }, // blue
+  reactivate: { bg: "#a855f7", text: "#f4ecff" }, // purple
+};
+
 function yn(v) {
   if (v === true || v === "YES" || v === "Yes" || v === "yes") return "Yes";
   if (v === false || v === "NO" || v === "No" || v === "no") return "No";
@@ -679,13 +702,18 @@ function ViewDrawer({ doc, divisionLabel, onClose, onChangeVehicle }) {
 // Handed Over, the Delivered / Hold / Cancel action buttons AND the Delete
 // button all lock (become non-clickable) for that row.
 //
-// Handover rule (UPDATED): Handover is only clickable while the row's
-// status is On Hold or Cancelled — and only if it hasn't already been
-// handed over. For every other status (Pending, In Progress, Delivered)
-// the Handover button stays disabled, while Hold / Cancel / Delivered
-// remain normally clickable.
+// Handover rule: Handover is only clickable while the row's status is
+// On Hold or Cancelled — and only if it hasn't already been handed over.
+// For every other status (Pending, In Progress, Delivered) the Handover
+// button stays disabled, while Hold / Cancel / Delivered remain normally
+// clickable.
+//
+// Reactivate rule (NEW): once Handover is confirmed, the same button
+// automatically switches into a "Reactivate" button (still clickable, in
+// purple). Clicking Reactivate clears the handover + unlocks the row again,
+// so Delivered / Hold / Cancel / Delete all become clickable once more.
 
-function DocumentRow({ doc, requestId, divisionLabel, onView, onDelivered, onHold, onCancelled, onHandover, onEdit, onDelete }) {
+function DocumentRow({ doc, requestId, divisionLabel, onView, onDelivered, onHold, onCancelled, onHandover, onReactivate, onEdit, onDelete }) {
   const sc = statusClass(doc.deliveryStatus);
   const isHandedOver = !!doc.handoverBy;
 
@@ -697,6 +725,15 @@ function DocumentRow({ doc, requestId, divisionLabel, onView, onDelivered, onHol
 
   const pending = daysPending(doc);
   const isOverdue = pending !== null && pending > OVERDUE_DAYS && sc !== "completed";
+  const sColor = statusColor(doc.deliveryStatus);
+
+  const actionBtnStyle = (key, isActive, disabled) => {
+    const c = ACTION_COLORS[key];
+    if (disabled) return { opacity: 0.35, cursor: "not-allowed" };
+    return isActive
+      ? { backgroundColor: c.bg, color: c.text, borderColor: c.bg }
+      : { borderColor: c.bg, color: c.bg };
+  };
 
   return (
     <tr className={`ip-row status-${sc} ${isOverdue ? "overdue" : ""}`}>
@@ -722,7 +759,14 @@ function DocumentRow({ doc, requestId, divisionLabel, onView, onDelivered, onHol
           </span>
         )}
       </td>
-      <td><span className={`ip-badge ${sc}`}>{statusLabel(doc.deliveryStatus)}</span></td>
+      <td>
+        <span
+          className={`ip-badge ${sc}`}
+          style={{ backgroundColor: sColor.bg, color: sColor.text, borderColor: sColor.border }}
+        >
+          {statusLabel(doc.deliveryStatus)}
+        </span>
+      </td>
       <td>
         <button className="ip-btn-view" onClick={() => onView(doc)}>👁 View</button>
       </td>
@@ -734,6 +778,7 @@ function DocumentRow({ doc, requestId, divisionLabel, onView, onDelivered, onHol
             title={isLocked ? lockedTitle : "Delete"}
             disabled={isLocked}
             onClick={() => onDelete(doc.id)}
+            style={isLocked ? { opacity: 0.35, cursor: "not-allowed" } : { borderColor: "#ef4444", color: "#ef4444" }}
           >
             🗑
           </button>
@@ -746,6 +791,7 @@ function DocumentRow({ doc, requestId, divisionLabel, onView, onDelivered, onHol
             disabled={isLocked}
             title={isLocked ? lockedTitle : "Delivered"}
             onClick={() => onDelivered(doc.id)}
+            style={actionBtnStyle("delivered", sc === "completed", isLocked)}
           >
             ✅
           </button>
@@ -754,6 +800,7 @@ function DocumentRow({ doc, requestId, divisionLabel, onView, onDelivered, onHol
             disabled={isLocked}
             title={isLocked ? lockedTitle : "Hold"}
             onClick={() => onHold(doc.id)}
+            style={actionBtnStyle("hold", sc === "onhold", isLocked)}
           >
             ⏸
           </button>
@@ -762,25 +809,37 @@ function DocumentRow({ doc, requestId, divisionLabel, onView, onDelivered, onHol
             disabled={isLocked}
             title={isLocked ? lockedTitle : "Cancelled"}
             onClick={() => onCancelled(doc.id)}
+            style={actionBtnStyle("cancel", sc === "cancelled", isLocked)}
           >
             ✕
           </button>
         </div>
       </td>
       <td className="ip-td-handover">
-        <button
-          className={`ip-mini-btn ip-mini-handover ip-mini-btn-standalone ${isHandedOver ? "active" : ""}`}
-          disabled={!canHandover}
-          title={
-            isHandedOver
-              ? `Handed over by ${doc.handoverBy}`
-              : (canHandover ? "Handover" : "Handover available only after Hold or Cancel")
-          }
-          onClick={() => onHandover(doc.id)}
-        >
-          <span className="ip-handover-icon">🤝</span>
-          <span className="ip-handover-label">{isHandedOver ? "Handed Over" : "Handover"}</span>
-        </button>
+        {isHandedOver ? (
+          <button
+            className="ip-mini-btn ip-mini-handover ip-mini-btn-standalone active"
+            title={`Handed over by ${doc.handoverBy} — click to reactivate`}
+            onClick={() => onReactivate(doc.id)}
+            style={{ backgroundColor: ACTION_COLORS.reactivate.bg, color: ACTION_COLORS.reactivate.text, borderColor: ACTION_COLORS.reactivate.bg }}
+          >
+            <span className="ip-handover-icon">🔄</span>
+            <span className="ip-handover-label">Reactivate</span>
+          </button>
+        ) : (
+          <button
+            className="ip-mini-btn ip-mini-handover ip-mini-btn-standalone"
+            disabled={!canHandover}
+            title={canHandover ? "Handover" : "Handover available only after Hold or Cancel"}
+            onClick={() => onHandover(doc.id)}
+            style={canHandover
+              ? { borderColor: ACTION_COLORS.handover.bg, color: ACTION_COLORS.handover.bg }
+              : { opacity: 0.35, cursor: "not-allowed" }}
+          >
+            <span className="ip-handover-icon">🤝</span>
+            <span className="ip-handover-label">Handover</span>
+          </button>
+        )}
       </td>
     </tr>
   );
@@ -811,6 +870,7 @@ export default function IssueDeliveryForm() {
   const [search,       setSearch]       = useState("");
   const [filterType,   setFilterType]   = useState("ALL");
   const [filterStatus, setFilterStatus] = useState("ALL");
+  const [statFilter,   setStatFilter]   = useState("ALL"); // ALL | pending | onhold | completed | cancelled — driven by the stat chips
   const [lastUpdated,  setLastUpdated]  = useState(null);
   const [refreshing,   setRefreshing]   = useState(false);
 
@@ -969,6 +1029,25 @@ export default function IssueDeliveryForm() {
     }
   };
 
+  // Reactivate — reverses a Handover. Clears doc.handoverBy/handoverTime and
+  // unlocks Delivered / Hold / Cancel / Delete for this row again.
+  // NOTE: this calls PUT {API_BASE}/{id}/reactivate with no body.
+  // Add this endpoint on the backend (mirroring /handover): it should clear
+  // handoverBy + handoverTime so the row is no longer "handed over". If you
+  // also want Delivered/Hold/Cancel to be freely re-clickable even while the
+  // status is still On Hold / Cancelled, the backend should reset
+  // deliveryStatus back to a re-actionable state (e.g. "pending") too.
+  const handleReactivateClick = async (id) => {
+    if (!window.confirm("Reactivate this document? This will unlock Delivered / Hold / Cancel for this row again.")) return;
+    try {
+      const res = await fetch(`${API_BASE}/${id}/reactivate`, { method: "PUT" });
+      if (!res.ok) throw new Error(`Server error: ${res.status}`);
+      fetchDocuments(true);
+    } catch (err) {
+      alert("Reactivate failed: " + err.message);
+    }
+  };
+
   const handleEditConfirm = async ({ heldBy, cancelledBy, deliveredBy }) => {
     const id = activeId; closePopup();
     try {
@@ -1031,8 +1110,9 @@ export default function IssueDeliveryForm() {
 
     const matchType   = filterType   === "ALL" || doc.jobType === filterType;
     const matchStatus = filterStatus === "ALL" || doc.deliveryStatus === filterStatus;
+    const matchStat   = statFilter   === "ALL" || statusClass(doc.deliveryStatus) === statFilter;
 
-    return matchSearch && matchType && matchStatus;
+    return matchSearch && matchType && matchStatus && matchStat;
   });
 
   // Stats
@@ -1147,11 +1227,64 @@ export default function IssueDeliveryForm() {
 
       {/* ── Stats ── */}
       <div className="ip-stats">
-        <div className="ip-stat-chip blue">Total <strong>{total}</strong></div>
-        <div className="ip-stat-chip"><strong style={{color:"#f59e0b"}}>{pending}</strong> Pending</div>
-        <div className="ip-stat-chip"><strong style={{color:"#fb923c"}}>{onHold}</strong> On Hold</div>
-        <div className="ip-stat-chip green">Delivered <strong>{completed}</strong></div>
-        <div className="ip-stat-chip"><strong style={{color:"#ef4444"}}>{cancelled}</strong> Cancelled</div>
+        <button
+          className="ip-stat-chip blue"
+          onClick={() => setStatFilter("ALL")}
+          style={{
+            cursor: "pointer",
+            border: statFilter === "ALL" ? "2px solid #3b82f6" : "1px solid transparent",
+            fontWeight: statFilter === "ALL" ? 700 : 400,
+          }}
+        >
+          Total <strong>{total}</strong>
+        </button>
+        <button
+          className="ip-stat-chip"
+          onClick={() => setStatFilter(prev => prev === "pending" ? "ALL" : "pending")}
+          style={{
+            cursor: "pointer",
+            border: statFilter === "pending" ? `2px solid ${STATUS_COLORS.pending.bg}` : "1px solid transparent",
+            backgroundColor: statFilter === "pending" ? STATUS_COLORS.pending.bg : undefined,
+            color: statFilter === "pending" ? STATUS_COLORS.pending.text : "#f59e0b",
+          }}
+        >
+          <strong style={{ color: statFilter === "pending" ? STATUS_COLORS.pending.text : "#f59e0b" }}>{pending}</strong> Pending
+        </button>
+        <button
+          className="ip-stat-chip"
+          onClick={() => setStatFilter(prev => prev === "onhold" ? "ALL" : "onhold")}
+          style={{
+            cursor: "pointer",
+            border: statFilter === "onhold" ? `2px solid ${STATUS_COLORS.onhold.bg}` : "1px solid transparent",
+            backgroundColor: statFilter === "onhold" ? STATUS_COLORS.onhold.bg : undefined,
+            color: statFilter === "onhold" ? STATUS_COLORS.onhold.text : "#fb923c",
+          }}
+        >
+          <strong style={{ color: statFilter === "onhold" ? STATUS_COLORS.onhold.text : "#fb923c" }}>{onHold}</strong> On Hold
+        </button>
+        <button
+          className="ip-stat-chip green"
+          onClick={() => setStatFilter(prev => prev === "completed" ? "ALL" : "completed")}
+          style={{
+            cursor: "pointer",
+            border: statFilter === "completed" ? `2px solid ${STATUS_COLORS.completed.bg}` : "1px solid transparent",
+            fontWeight: statFilter === "completed" ? 700 : 400,
+          }}
+        >
+          Delivered <strong>{completed}</strong>
+        </button>
+        <button
+          className="ip-stat-chip"
+          onClick={() => setStatFilter(prev => prev === "cancelled" ? "ALL" : "cancelled")}
+          style={{
+            cursor: "pointer",
+            border: statFilter === "cancelled" ? `2px solid ${STATUS_COLORS.cancelled.bg}` : "1px solid transparent",
+            backgroundColor: statFilter === "cancelled" ? STATUS_COLORS.cancelled.bg : undefined,
+            color: statFilter === "cancelled" ? STATUS_COLORS.cancelled.text : "#ef4444",
+          }}
+        >
+          <strong style={{ color: statFilter === "cancelled" ? STATUS_COLORS.cancelled.text : "#ef4444" }}>{cancelled}</strong> Cancelled
+        </button>
         <div className="ip-stat-chip">Showing <strong style={{color:"#a78bfa"}}>{visible.length}</strong> of {total}</div>
       </div>
 
@@ -1212,6 +1345,7 @@ export default function IssueDeliveryForm() {
                   onHold={handleHoldClick}
                   onCancelled={handleCancelClick}
                   onHandover={handleHandoverClick}
+                  onReactivate={handleReactivateClick}
                   onEdit={handleEditClick}
                   onDelete={handleDelete}
                 />
