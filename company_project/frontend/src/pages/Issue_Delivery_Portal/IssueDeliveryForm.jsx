@@ -1,14 +1,10 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import "./IssueDelivery.css";
 
 // const API_BASE = "http://localhost:8080/api/delivery-portal";
-// // Master Setup API — same base the Admin Dashboard's "Master Setup → Delivery"
-// // panel saves to. We read from here so Held By / Cancelled By / Delivered By
-// // always match whatever names are entered in Admin Dashboard, live from the DB.
 // const SETUP_API = "http://localhost:8080/api/admin-setup";
 
 const API_BASE = "https://time-tracker-system-production.up.railway.app/api/delivery-portal";
-
 const SETUP_API = "https://time-tracker-system-production.up.railway.app/api/admin-setup";
 const AUTO_REFRESH = 10000;
 const OPERATOR_REFRESH = 15000;
@@ -52,10 +48,6 @@ const OVERDUE_DAYS = 30;
 function getRequestDateTime(doc) {
   if (!doc.requestDate) return null;
   const rawTime = (doc.requestTime || "00:00:00").trim();
-  // Zero-pad H:MM / H:MM:SS style times (e.g. "9:39" -> "09:39:00") so the
-  // combined string is valid ISO — a bare "9:39" makes `new Date(...)`
-  // silently return an Invalid Date in some browsers, which then shows as
-  // "—" in the Pending column even though the request date is perfectly fine.
   const parts = rawTime.split(":");
   const hh = (parts[0] || "0").padStart(2, "0");
   const mm = (parts[1] || "0").padStart(2, "0");
@@ -67,8 +59,6 @@ function daysPending(doc) {
   const raw = getRequestDateTime(doc);
   let requested = raw ? new Date(raw) : null;
 
-  // Fallback: if the request date/time couldn't be parsed (bad format from
-  // backend, etc.), use when the document was entered instead of showing "—".
   if (!requested || isNaN(requested.getTime())) {
     if (doc.createdDatetime) requested = new Date(doc.createdDatetime);
   }
@@ -116,14 +106,46 @@ function yn(v) {
   return v || "—";
 }
 
-// ── Delivery operator names — live from Master Setup (DB) ──────────────────
-// Replaces the old hardcoded PEOPLE_OPTIONS list. Reads the same
-// "/delivery-operators" table that Admin Dashboard → Master Setup → Delivery
-// writes to, so adding / editing / deleting a delivery operator there shows
-// up here automatically (polled).
+// Same numbering scheme as the other portals — groups by request date,
+// numbers within the day, e.g. 20260816/0001. Resets automatically when
+// the date changes.
+function computeRequestIds(documents) {
+  const dateKeyOf = (doc) => {
+    if (doc.requestDate) return String(doc.requestDate).substring(0, 10);
+    if (doc.createdDatetime) return String(doc.createdDatetime).substring(0, 10);
+    return null;
+  };
 
-function useDeliveryOperatorNames() {
-  const [names, setNames] = useState([]);
+  const groups = {};
+  documents.forEach(doc => {
+    const key = dateKeyOf(doc) || "unknown";
+    if (!groups[key]) groups[key] = [];
+    groups[key].push(doc);
+  });
+
+  const idMap = {};
+  Object.entries(groups).forEach(([key, group]) => {
+    const compactDate = key === "unknown" ? "00000000" : key.replace(/-/g, "");
+    group
+      .slice()
+      .sort((a, b) => (a.createdDatetime && b.createdDatetime
+        ? new Date(a.createdDatetime) - new Date(b.createdDatetime)
+        : a.id - b.id))
+      .forEach((doc, idx) => {
+        idMap[doc.id] = `${compactDate}/${String(idx + 1).padStart(4, "0")}`;
+      });
+  });
+
+  return idMap;
+}
+
+// ── Delivery operators — live from Master Setup (DB), division-aware ───────
+// Returns the raw operator records (name + divisionNo) so callers can filter
+// by whichever Division the current document belongs to — same pattern as
+// the Pick Portal's division-scoped picker list.
+
+function useDeliveryOperators() {
+  const [operators, setOperators] = useState([]);
 
   const load = useCallback(() => {
     fetch(`${SETUP_API}/delivery-operators`)
@@ -131,13 +153,7 @@ function useDeliveryOperatorNames() {
         if (!res.ok) throw new Error(`Server error: ${res.status}`);
         return res.json();
       })
-      .then(data => {
-        setNames(
-          (Array.isArray(data) ? data : [])
-            .map(p => p.operatorName)
-            .filter(Boolean)
-        );
-      })
+      .then(data => setOperators(Array.isArray(data) ? data : []))
       .catch(() => { /* keep last known list on transient errors */ });
   }, []);
 
@@ -147,22 +163,16 @@ function useDeliveryOperatorNames() {
     return () => clearInterval(id);
   }, [load]);
 
-  return names;
+  return operators;
 }
 
 // ── Generic Person Picker ──────────────────────────────────────────────────
-// Now driven purely by the `options` prop (Master Setup delivery operator
-// names). "Other" free-text entry has been removed — only names that exist
-// in the Delivery Operators master table can be selected, so whatever gets
-// saved to the DB (heldBy / cancelledBy / deliveredBy) always matches
-// Master Setup.
-
 function PersonPicker({ value, onChange, options }) {
   if (!options || options.length === 0) {
     return (
       <div className="ip-popup-options">
-        <div style={{ color: "#7c8db0", fontSize: "0.8rem", padding: "8px 2px" }}>
-          No delivery operators set up yet. Add names in Admin Dashboard → Master Setup → Delivery.
+        <div className="ip-popup-empty">
+          No delivery operators set up for this division yet. Add names in Admin Dashboard → Master Setup → Delivery.
         </div>
       </div>
     );
@@ -317,7 +327,7 @@ function DeliveryDonePopup({ operatorNames, onConfirm, onCancel }) {
     <div className="ip-popup-overlay">
       <div className="ip-popup">
         <div className="ip-popup-head">
-          <span> Delivery Done</span>
+          <span>✅ Delivery Done</span>
           <button className="ip-popup-close" onClick={onCancel}>✕</button>
         </div>
         <p className="ip-popup-sub">Select who delivered this document</p>
@@ -354,9 +364,6 @@ function DeliveryDonePopup({ operatorNames, onConfirm, onCancel }) {
 }
 
 // ── Popup: Change (Request) Vehicle No ──────────────────────────────────────
-// Separate from "Delivery Vehicle No" — this edits the vehicle number that
-// was originally entered against the request itself.
-
 function ChangeVehiclePopup({ doc, mode, onConfirm, onCancel }) {
   const isDelivery = mode === "delivery";
   const initialValue = isDelivery ? (doc.deliveryVehicleNo || "") : (doc.vehicleNo || "");
@@ -403,6 +410,44 @@ function ChangeVehiclePopup({ doc, mode, onConfirm, onCancel }) {
   );
 }
 
+// ── Popup: Edit (Held By / Cancelled By / Delivered By) ─────────────────────
+function EditPopup({ doc, operatorNames, onConfirm, onCancel }) {
+  const [heldBy, setHeldBy]           = useState(doc?.deliveryHeldBy || "");
+  const [cancelledBy, setCancelledBy] = useState(doc?.deliveryCancelledBy || "");
+  const [deliveredBy, setDeliveredBy] = useState(doc?.deliveredBy || "");
+
+  return (
+    <div className="ip-popup-overlay">
+      <div className="ip-popup">
+        <div className="ip-popup-head">
+          <span>✏ Edit Document</span>
+          <button className="ip-popup-close" onClick={onCancel}>✕</button>
+        </div>
+        <p className="ip-popup-sub">Update Held By, Cancelled By, or Delivered By</p>
+
+        <span className="ip-popup-label">Held By</span>
+        <PersonPicker value={heldBy} onChange={setHeldBy} options={operatorNames} />
+
+        <span className="ip-popup-label" style={{ marginTop: 14, display: "block" }}>Cancelled By</span>
+        <PersonPicker value={cancelledBy} onChange={setCancelledBy} options={operatorNames} />
+
+        <span className="ip-popup-label" style={{ marginTop: 14, display: "block" }}>Delivered By</span>
+        <PersonPicker value={deliveredBy} onChange={setDeliveredBy} options={operatorNames} />
+
+        <div className="ip-popup-foot" style={{ marginTop: 18 }}>
+          <button className="ip-btn ip-btn-outline" onClick={onCancel}>Cancel</button>
+          <button
+            className="ip-btn ip-btn-done"
+            onClick={() => onConfirm({ heldBy, cancelledBy, deliveredBy })}
+          >
+            💾 Save Changes
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── View Drawer helpers ──────────────────────────────────────────────────
 
 function DetailRow({ label, value }) {
@@ -425,7 +470,7 @@ function Section({ icon, title, children, accent }) {
 
 // ── Side Drawer: full document trail ─────────────────────────────────────
 
-function ViewDrawer({ doc, onClose, onChangeVehicle }) {
+function ViewDrawer({ doc, divisionLabel, onClose, onChangeVehicle }) {
   const sc = statusClass(doc.deliveryStatus);
   const pending = daysPending(doc);
   const isOverdue = pending !== null && pending > OVERDUE_DAYS && sc !== "completed";
@@ -446,6 +491,7 @@ function ViewDrawer({ doc, onClose, onChangeVehicle }) {
           {/* Request info */}
           <Section icon="" title="Request Details">
             <DetailRow label="Customer" value={doc.customerName} />
+            <DetailRow label="Division" value={divisionLabel} />
             <DetailRow label="Job Type" value={
               <span style={{ color: jobTypeColor(doc.jobType), fontWeight: 700 }}>{doc.jobType || "—"}</span>
             } />
@@ -585,8 +631,11 @@ function ViewDrawer({ doc, onClose, onChangeVehicle }) {
 }
 
 // ── Table Row ─────────────────────────────────────────────────────────────
+// Inline vehicle-edit icons were removed from the table cells — Change is
+// still available inside the View drawer. Edit (Held/Cancelled/Delivered By)
+// and Delete now live in their own "Manage" column, next to View.
 
-function DocumentRow({ doc, onView, onDelivered, onHold, onCancelled, onChangeVehicle }) {
+function DocumentRow({ doc, requestId, divisionLabel, onView, onDelivered, onHold, onCancelled, onEdit, onDelete }) {
   const sc      = statusClass(doc.deliveryStatus);
   const isFinal = sc === "completed"; // only locked once delivered — hold & cancel stay editable
   const pending = daysPending(doc);
@@ -594,7 +643,8 @@ function DocumentRow({ doc, onView, onDelivered, onHold, onCancelled, onChangeVe
 
   return (
     <tr className={`ip-row status-${sc} ${isOverdue ? "overdue" : ""}`}>
-      <td className="ip-td-id">{doc.id}</td>
+      <td className="ip-td-id">{requestId || "—"}</td>
+      <td className="ip-td-division">{divisionLabel || "—"}</td>
       <td>{doc.jobwbs || "—"}</td>
       <td className="ip-td-docno">{doc.printDocumentNo ? doc.printDocumentNo : `Doc #${doc.id}`}</td>
       <td>{doc.customerName || "—"}</td>
@@ -603,16 +653,10 @@ function DocumentRow({ doc, onView, onDelivered, onHold, onCancelled, onChangeVe
       </td>
       <td className="ip-td-requested">
         <div>{doc.requestedBy || "—"}</div>
-        <div className="ip-td-vehicle">
-          🚐 {doc.vehicleNo || "—"}
-          <button className="ip-inline-edit-btn" title="Change Vehicle No" onClick={() => onChangeVehicle(doc, "request")}>✏️</button>
-        </div>
+        <div className="ip-td-vehicle">🚐 {doc.vehicleNo || "—"}</div>
       </td>
       <td className="ip-td-requested">
-        <div className="ip-td-vehicle">
-          🚐 {doc.deliveryVehicleNo || "—"}
-          <button className="ip-inline-edit-btn" title="Change Delivery Vehicle No" onClick={() => onChangeVehicle(doc, "delivery")}>✏️</button>
-        </div>
+        <div className="ip-td-vehicle">🚐 {doc.deliveryVehicleNo || "—"}</div>
       </td>
       <td>
         {pending === null ? "—" : (
@@ -624,6 +668,12 @@ function DocumentRow({ doc, onView, onDelivered, onHold, onCancelled, onChangeVe
       <td><span className={`ip-badge ${sc}`}>{statusLabel(doc.deliveryStatus)}</span></td>
       <td>
         <button className="ip-btn-view" onClick={() => onView(doc)}>👁 View</button>
+      </td>
+      <td>
+        <div className="ip-row-manage">
+          <button className="ip-mini-manage ip-mini-edit" title="Edit" onClick={() => onEdit(doc)}>✎</button>
+          <button className="ip-mini-manage ip-mini-delete" title="Delete" onClick={() => onDelete(doc.id)}>🗑</button>
+        </div>
       </td>
       <td>
         <div className="ip-row-actions">
@@ -659,10 +709,12 @@ function DocumentRow({ doc, onView, onDelivered, onHold, onCancelled, onChangeVe
 
 // ── Skeleton Row ─────────────────────────────────────────────────────────────
 
+const COLUMN_COUNT = 13;
+
 function SkeletonRow() {
   return (
     <tr className="ip-row">
-      {Array.from({ length: 11 }).map((_, i) => (
+      {Array.from({ length: COLUMN_COUNT }).map((_, i) => (
         <td key={i}>
           <div className="ip-skeleton" style={{ width: "80%", height: 12 }} />
         </td>
@@ -683,10 +735,15 @@ export default function IssueDeliveryForm() {
   const [lastUpdated,  setLastUpdated]  = useState(null);
   const [refreshing,   setRefreshing]   = useState(false);
 
-  // Delivery operator names — live from Admin Dashboard → Master Setup → Delivery (DB).
-  const deliveryOperatorNames = useDeliveryOperatorNames();
+  // Divisions (Admin Master Data) — used to label each row/card and to
+  // scope which delivery operators show up in the popups below.
+  const [divisions, setDivisions] = useState([]);
 
-  const [activePopup,  setActivePopup]  = useState(null); // "hold" | "delivered" | "cancel" | "vehicle" | null
+  // Delivery operator names — live from Admin Dashboard → Master Setup →
+  // Delivery (DB), kept as raw records so they can be filtered by division.
+  const deliveryOperators = useDeliveryOperators();
+
+  const [activePopup,  setActivePopup]  = useState(null); // "hold" | "delivered" | "cancel" | "vehicle" | "edit" | null
   const [activeId,     setActiveId]     = useState(null);
   const [vehicleDoc,   setVehicleDoc]   = useState(null);
   const [vehicleMode,  setVehicleMode]  = useState("request"); // "request" | "delivery"
@@ -711,17 +768,58 @@ export default function IssueDeliveryForm() {
     }
   }, []);
 
-  useEffect(() => { fetchDocuments(false); }, [fetchDocuments]);
+  const fetchDivisions = useCallback(async () => {
+    try {
+      const res = await fetch(`${SETUP_API}/divisions`);
+      if (res.ok) {
+        const data = await res.json();
+        setDivisions(data || []);
+      }
+    } catch (e) {
+      console.warn("Failed to load divisions", e);
+    }
+  }, []);
+
+  const divisionNoToName = useMemo(() => {
+    const map = {};
+    divisions.forEach(d => { map[d.divisionNo] = d.divisionName; });
+    return map;
+  }, [divisions]);
+
+  const divisionLabelFor = useCallback((doc) => (
+    doc?.divisionNo ? `${doc.divisionNo} — ${divisionNoToName[doc.divisionNo] || ""}` : null
+  ), [divisionNoToName]);
+
+  // Division-scoped operator names — only the names added under that
+  // specific Division in Admin Master Setup → Delivery.
+  const getOperatorNamesForDivision = useCallback((divisionNo) => {
+    if (!divisionNo) return [];
+    return deliveryOperators
+      .filter(p => {
+        const pDivisionNo = p.divisionNo || (p.division && p.division.divisionNo) || "";
+        return String(pDivisionNo) === String(divisionNo);
+      })
+      .map(p => p.operatorName || p.name || p.fullName)
+      .filter(Boolean);
+  }, [deliveryOperators]);
+
+  useEffect(() => {
+    fetchDocuments(false);
+    fetchDivisions();
+  }, [fetchDocuments, fetchDivisions]);
 
   useEffect(() => {
     const id = setInterval(() => fetchDocuments(true), AUTO_REFRESH);
     return () => clearInterval(id);
   }, [fetchDocuments]);
 
+  const getDocById = useCallback((id) => documents.find(d => d.id === id), [documents]);
+
   const handleDeliveredClick = (id) => { setActiveId(id); setActivePopup("delivered"); };
   const handleHoldClick      = (id) => { setActiveId(id); setActivePopup("hold"); };
   const handleCancelClick    = (id) => { setActiveId(id); setActivePopup("cancel"); };
   const handleChangeVehicle  = (doc, mode = "request") => { setVehicleDoc(doc); setVehicleMode(mode); setActivePopup("vehicle"); };
+  const handleEditClick      = (doc) => { setActiveId(doc.id); setActivePopup("edit"); };
   const closePopup = () => { setActivePopup(null); setActiveId(null); setVehicleDoc(null); setVehicleMode("request"); };
 
   // keep the view drawer's data in sync after a refresh
@@ -773,10 +871,35 @@ export default function IssueDeliveryForm() {
     }
   };
 
+  const handleEditConfirm = async ({ heldBy, cancelledBy, deliveredBy }) => {
+    const id = activeId; closePopup();
+    try {
+      const res = await fetch(`${API_BASE}/${id}/edit`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ heldBy, cancelledBy, deliveredBy }),
+      });
+      if (!res.ok) throw new Error(`Server error: ${res.status}`);
+      fetchDocuments(true);
+    } catch (err) {
+      alert("Edit failed: " + err.message);
+    }
+  };
+
+  const handleDelete = async (id) => {
+    if (!window.confirm("Delete this document from the Delivery Portal? This cannot be undone.")) return;
+    try {
+      const res = await fetch(`${API_BASE}/${id}`, { method: "DELETE" });
+      if (!res.ok) throw new Error(`Server error: ${res.status}`);
+      fetchDocuments(true);
+    } catch (err) {
+      alert("Delete failed: " + err.message);
+    }
+  };
+
   // Updates either the *request* vehicle no (doc.vehicleNo) or the
   // *delivery* vehicle no (doc.deliveryVehicleNo, entered at "Delivery Done")
-  // depending on which pencil icon was clicked. Adjust the URLs below to
-  // match your backend routes if they differ.
+  // depending on which was chosen from the View drawer.
   const handleChangeVehicleConfirm = async (vehicleNo) => {
     const id = vehicleDoc?.id;
     const isDelivery = vehicleMode === "delivery";
@@ -827,23 +950,39 @@ export default function IssueDeliveryForm() {
   });
   const overdueCount = overdueDocs.length;
 
+  const requestIdMap = useMemo(() => computeRequestIds(documents), [documents]);
+
+  const activeDoc = getDocById(activeId);
+  const activeOperatorNames = useMemo(
+    () => getOperatorNamesForDivision(activeDoc?.divisionNo),
+    [activeDoc, getOperatorNamesForDivision]
+  );
+
   return (
     <div className="ip-page">
 
       {activePopup === "hold" && (
-        <HoldPopup operatorNames={deliveryOperatorNames} onConfirm={handleHoldConfirm} onCancel={closePopup} />
+        <HoldPopup operatorNames={activeOperatorNames} onConfirm={handleHoldConfirm} onCancel={closePopup} />
       )}
       {activePopup === "delivered" && (
-        <DeliveryDonePopup operatorNames={deliveryOperatorNames} onConfirm={handleDeliveryDoneConfirm} onCancel={closePopup} />
+        <DeliveryDonePopup operatorNames={activeOperatorNames} onConfirm={handleDeliveryDoneConfirm} onCancel={closePopup} />
       )}
       {activePopup === "cancel" && (
-        <CancelPopup operatorNames={deliveryOperatorNames} onConfirm={handleCancelConfirm} onCancel={closePopup} />
+        <CancelPopup operatorNames={activeOperatorNames} onConfirm={handleCancelConfirm} onCancel={closePopup} />
+      )}
+      {activePopup === "edit" && (
+        <EditPopup doc={activeDoc} operatorNames={activeOperatorNames} onConfirm={handleEditConfirm} onCancel={closePopup} />
       )}
       {activePopup === "vehicle" && vehicleDoc && (
         <ChangeVehiclePopup doc={vehicleDoc} mode={vehicleMode} onConfirm={handleChangeVehicleConfirm} onCancel={closePopup} />
       )}
       {viewDoc && (
-        <ViewDrawer doc={viewDoc} onClose={() => setViewDoc(null)} onChangeVehicle={handleChangeVehicle} />
+        <ViewDrawer
+          doc={viewDoc}
+          divisionLabel={divisionLabelFor(viewDoc)}
+          onClose={() => setViewDoc(null)}
+          onChangeVehicle={handleChangeVehicle}
+        />
       )}
 
       {/* ── Header ── */}
@@ -917,16 +1056,9 @@ export default function IssueDeliveryForm() {
 
       {/* ── Error ── */}
       {error && (
-        <div style={{
-          background:"rgba(239,68,68,0.12)", border:"1px solid #ef4444",
-          borderRadius:8, padding:"12px 16px", color:"#fca5a5",
-          marginBottom:18, fontSize:"0.85rem",
-        }}>
+        <div className="ip-error-inline">
           ⚠ {error} —{" "}
-          <button onClick={() => fetchDocuments(false)}
-            style={{background:"none",border:"none",color:"#60a5fa",cursor:"pointer",textDecoration:"underline"}}>
-            retry
-          </button>
+          <button onClick={() => fetchDocuments(false)}>retry</button>
         </div>
       )}
 
@@ -935,7 +1067,8 @@ export default function IssueDeliveryForm() {
         <table className="ip-table">
           <thead>
             <tr>
-              <th>ID</th>
+              <th>Req ID</th>
+              <th>Division</th>
               <th>WBS</th>
               <th>Doc No</th>
               <th>Customer</th>
@@ -945,6 +1078,7 @@ export default function IssueDeliveryForm() {
               <th>Pending</th>
               <th>Status</th>
               <th>View</th>
+              <th>Manage</th>
               <th>Actions</th>
             </tr>
           </thead>
@@ -953,7 +1087,7 @@ export default function IssueDeliveryForm() {
               Array.from({ length: 6 }).map((_, i) => <SkeletonRow key={i} />)
             ) : visible.length === 0 ? (
               <tr>
-                <td colSpan={11}>
+                <td colSpan={COLUMN_COUNT}>
                   <div className="ip-empty">
                     <div className="ip-empty-icon">📭</div>
                     <p>
@@ -969,11 +1103,14 @@ export default function IssueDeliveryForm() {
                 <DocumentRow
                   key={doc.id}
                   doc={doc}
+                  requestId={requestIdMap[doc.id]}
+                  divisionLabel={divisionLabelFor(doc)}
                   onView={setViewDoc}
                   onDelivered={handleDeliveredClick}
                   onHold={handleHoldClick}
                   onCancelled={handleCancelClick}
-                  onChangeVehicle={handleChangeVehicle}
+                  onEdit={handleEditClick}
+                  onDelete={handleDelete}
                 />
               ))
             )}
