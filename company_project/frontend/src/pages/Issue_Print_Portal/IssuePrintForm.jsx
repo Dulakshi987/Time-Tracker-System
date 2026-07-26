@@ -93,11 +93,13 @@ function statusLabel(s) {
 }
 
 // ── Person Picker (Only Master Data - No "Other") ───────────────────────────
-function PersonPicker({ value, onChange, people }) {
+function PersonPicker({ value, onChange, people, loading }) {
   return (
     <div className="ip-popup-options">
-      {people.length === 0 ? (
-        <div className="ip-popup-empty">No operators in Master Setup</div>
+      {loading ? (
+        <div className="ip-popup-empty">Loading operators…</div>
+      ) : people.length === 0 ? (
+        <div className="ip-popup-empty">No operators found for this division in Master Setup</div>
       ) : (
         people.map(name => (
           <button
@@ -114,7 +116,7 @@ function PersonPicker({ value, onChange, people }) {
 }
 
 // ── Hold Popup ─────────────────────────────────────────────────────────────
-function HoldPopup({ onConfirm, onCancel, printOperators }) {
+function HoldPopup({ onConfirm, onCancel, printOperators, operatorsLoading }) {
   const [reason, setReason] = useState("");
   const [otherReason, setOtherReason] = useState("");
   const [heldBy, setHeldBy] = useState("");
@@ -155,7 +157,7 @@ function HoldPopup({ onConfirm, onCancel, printOperators }) {
         </div>
 
         <span className="ip-popup-label">Held By</span>
-        <PersonPicker value={heldBy} onChange={setHeldBy} people={printOperators} />
+        <PersonPicker value={heldBy} onChange={setHeldBy} people={printOperators} loading={operatorsLoading} />
 
         <div className="ip-popup-foot">
           <button className="ip-btn ip-btn-outline" onClick={onCancel}>Cancel</button>
@@ -173,7 +175,7 @@ function HoldPopup({ onConfirm, onCancel, printOperators }) {
 }
 
 // ── Print Done Popup (also used for Edit of a completed document) ──────────
-function PrintDonePopup({ onConfirm, onCancel, printOperators, initialDocumentNo, initialPrintedBy, isEdit }) {
+function PrintDonePopup({ onConfirm, onCancel, printOperators, operatorsLoading, initialDocumentNo, initialPrintedBy, isEdit }) {
   const [documentNo, setDocumentNo] = useState(initialDocumentNo || "");
   const [printedBy, setPrintedBy] = useState(initialPrintedBy || "");
   const [docNoError, setDocNoError] = useState("");
@@ -220,7 +222,7 @@ function PrintDonePopup({ onConfirm, onCancel, printOperators, initialDocumentNo
         </div>
 
         <span className="ip-popup-label">Printed By</span>
-        <PersonPicker value={printedBy} onChange={setPrintedBy} people={printOperators} />
+        <PersonPicker value={printedBy} onChange={setPrintedBy} people={printOperators} loading={operatorsLoading} />
 
         <div className="ip-popup-foot">
           <button className="ip-btn ip-btn-outline" onClick={onCancel}>Cancel</button>
@@ -238,7 +240,7 @@ function PrintDonePopup({ onConfirm, onCancel, printOperators, initialDocumentNo
 }
 
 // ── Document Card ──────────────────────────────────────────────────────────
-function DocumentCard({ doc, requestId, onStart, onHold, onEnd, onEdit, onDelete }) {
+function DocumentCard({ doc, requestId, divisionLabel, onStart, onHold, onEnd, onEdit, onDelete }) {
   const sc = statusClass(doc.printStatus);
   const jColor = jobTypeColor(doc.jobType);
   const isPending = sc === "pending";
@@ -261,6 +263,11 @@ function DocumentCard({ doc, requestId, onStart, onHold, onEnd, onEdit, onDelete
           <div style={{ color: jColor, fontWeight: 700, fontSize: "0.78rem", marginTop: 2 }}>
             {doc.jobType || "—"}
           </div>
+          {divisionLabel && (
+            <div className="ip-doc-division-sub">
+              🏢 {divisionLabel}
+            </div>
+          )}
         </div>
         <span className={`ip-badge ${sc}`}>{statusLabel(doc.printStatus)}</span>
       </div>
@@ -333,7 +340,6 @@ function DocumentCard({ doc, requestId, onStart, onHold, onEnd, onEdit, onDelete
 // ── Main Component ─────────────────────────────────────────────────────────
 export default function IssuPrinFormt() {
   const [documents, setDocuments] = useState([]);
-  const [printOperators, setPrintOperators] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [search, setSearch] = useState("");
@@ -341,6 +347,14 @@ export default function IssuPrinFormt() {
   const [filterStatus, setFilterStatus] = useState("ALL");
   const [lastUpdated, setLastUpdated] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
+
+  // Divisions (Admin Master Data) — used to label each card with its Division
+  const [divisions, setDivisions] = useState([]);
+
+  // Operators shown in the currently open popup — scoped to that
+  // document's Division (Admin Master Data, division-wise)
+  const [popupOperators, setPopupOperators] = useState([]);
+  const [popupOperatorsLoading, setPopupOperatorsLoading] = useState(false);
 
   const [activePopup, setActivePopup] = useState(null);
   const [activeId, setActiveId] = useState(null);
@@ -364,35 +378,74 @@ export default function IssuPrinFormt() {
     }
   }, []);
 
-  const fetchPrintOperators = useCallback(async () => {
+  const fetchDivisions = useCallback(async () => {
     try {
-      const res = await fetch(`${SETUP_API}/print-operators`);
+      const res = await fetch(`${SETUP_API}/divisions`);
       if (res.ok) {
         const data = await res.json();
-        setPrintOperators(data.map(op => op.operatorName || op.name).filter(Boolean));
+        setDivisions(data || []);
       }
     } catch (e) {
-      console.warn("Failed to load print operators", e);
+      console.warn("Failed to load divisions", e);
+    }
+  }, []);
+
+  // Division-wise operators — only the operators added under that
+  // specific Division in Admin Master Data
+  const fetchOperatorsForDivision = useCallback(async (divisionNo) => {
+    if (!divisionNo) {
+      setPopupOperators([]);
+      return;
+    }
+    setPopupOperatorsLoading(true);
+    try {
+      const res = await fetch(`${SETUP_API}/print-operators/division/${divisionNo}`);
+      if (res.ok) {
+        const data = await res.json();
+        setPopupOperators(
+          (data || [])
+            .map(op => op.operatorNicName || op.operatorName || op.name || op.fullName)
+            .filter(Boolean)
+        );
+      } else {
+        setPopupOperators([]);
+      }
+    } catch (e) {
+      console.warn("Failed to load operators for division", e);
+      setPopupOperators([]);
+    } finally {
+      setPopupOperatorsLoading(false);
     }
   }, []);
 
   useEffect(() => {
     fetchDocuments(false);
-    fetchPrintOperators();
-  }, [fetchDocuments, fetchPrintOperators]);
+    fetchDivisions();
+  }, [fetchDocuments, fetchDivisions]);
 
   useEffect(() => {
     const id = setInterval(() => {
       fetchDocuments(true);
-      fetchPrintOperators();
     }, AUTO_REFRESH);
     return () => clearInterval(id);
-  }, [fetchDocuments, fetchPrintOperators]);
+  }, [fetchDocuments]);
+
+  const divisionNoToName = useMemo(() => {
+    const map = {};
+    divisions.forEach(d => { map[d.divisionNo] = d.divisionName; });
+    return map;
+  }, [divisions]);
+
+  const getDocById = useCallback(
+    (id) => documents.find(d => d.id === id),
+    [documents]
+  );
 
   const closePopup = () => {
     setActivePopup(null);
     setActiveId(null);
     setEditValues({ documentNo: "", printedBy: "" });
+    setPopupOperators([]);
   };
 
   const handleStart = async (id) => {
@@ -402,21 +455,30 @@ export default function IssuPrinFormt() {
     } catch (err) { alert("Start failed: " + err.message); }
   };
 
-  const handleHoldClick = (id) => { setActiveId(id); setActivePopup("hold"); };
-  const handleEndClick = (id) => {
+  const handleHoldClick = async (id) => {
+    const doc = getDocById(id);
+    setActiveId(id);
+    setActivePopup("hold");
+    await fetchOperatorsForDivision(doc?.divisionNo);
+  };
+
+  const handleEndClick = async (id) => {
+    const doc = getDocById(id);
     setActiveId(id);
     setEditValues({ documentNo: "", printedBy: "" });
     setActivePopup("end");
+    await fetchOperatorsForDivision(doc?.divisionNo);
   };
 
   // Edit — reopens the same popup pre-filled with the completed document's values
-  const handleEditClick = (doc) => {
+  const handleEditClick = async (doc) => {
     setActiveId(doc.id);
     setEditValues({
       documentNo: doc.printDocumentNo || "",
       printedBy: doc.printedBy || "",
     });
     setActivePopup("end");
+    await fetchOperatorsForDivision(doc?.divisionNo);
   };
 
   // Delete — removes the document entirely
@@ -497,14 +559,16 @@ export default function IssuPrinFormt() {
         <HoldPopup
           onConfirm={handleHoldConfirm}
           onCancel={closePopup}
-          printOperators={printOperators}
+          printOperators={popupOperators}
+          operatorsLoading={popupOperatorsLoading}
         />
       )}
       {activePopup === "end" && (
         <PrintDonePopup
           onConfirm={handlePrintDoneConfirm}
           onCancel={closePopup}
-          printOperators={printOperators}
+          printOperators={popupOperators}
+          operatorsLoading={popupOperatorsLoading}
           initialDocumentNo={editValues.documentNo}
           initialPrintedBy={editValues.printedBy}
           isEdit={!!editValues.documentNo || !!editValues.printedBy}
@@ -619,6 +683,11 @@ export default function IssuPrinFormt() {
               key={doc.id}
               doc={doc}
               requestId={requestIdMap[doc.id]}
+              divisionLabel={
+                doc.divisionNo
+                  ? `${doc.divisionNo} — ${divisionNoToName[doc.divisionNo] || ""}`
+                  : null
+              }
               onStart={handleStart}
               onHold={handleHoldClick}
               onEnd={handleEndClick}
