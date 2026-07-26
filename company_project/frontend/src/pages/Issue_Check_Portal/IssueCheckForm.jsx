@@ -20,7 +20,7 @@ const PICKING_ERROR_REASONS = [
   { key: "EXCESS", label: "Material Excess", createsError: false },
 ];
 
-// Minimum length required for a SKU / Description entry on a picking-error
+// Maximum length allowed for a SKU / Description entry on a picking-error
 // material row.
 const SKU_MAX_LENGTH = 8;
 
@@ -160,7 +160,7 @@ function HoldPopup({ people, peopleLoading, onConfirm, onCancel }) {
     setMaterials(prev => prev.map((m, i) => (i === idx ? { ...m, [field]: value } : m)));
 
   const filledMaterials = materials.filter(m => m.sku.trim().length > 0 && m.qty.trim().length > 0);
-  const invalidSkuMaterials = filledMaterials.filter(m => m.sku.trim().length < SKU_MAX_LENGTH);
+  const invalidSkuMaterials = filledMaterials.filter(m => m.sku.trim().length > SKU_MAX_LENGTH);
 
   const canConfirm =
     !!heldBy &&
@@ -217,17 +217,18 @@ function HoldPopup({ people, peopleLoading, onConfirm, onCancel }) {
 
             {materials.map((m, idx) => {
               const skuTrimmed = m.sku.trim();
-              const skuTooShort = skuTrimmed.length > 0 && skuTrimmed.length < SKU_MAX_LENGTH;
+              const skuTooLong = skuTrimmed.length > SKU_MAX_LENGTH;
               return (
                 <div key={idx} style={{ marginTop: 8 }}>
                   <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                     <input
                       className="ip-popup-text-input"
                       type="text"
-                      placeholder="SKU  (min 8 characters)"
+                      placeholder="SKU / Description (max 8 characters)"
                       value={m.sku}
+                      maxLength={SKU_MAX_LENGTH}
                       onChange={e => updateMaterialRow(idx, "sku", e.target.value)}
-                      style={{ flex: 2, borderColor: skuTooShort ? "#ef4444" : undefined }}
+                      style={{ flex: 2, borderColor: skuTooLong ? "#ef4444" : undefined }}
                     />
                     <input
                       className="ip-popup-text-input"
@@ -248,9 +249,9 @@ function HoldPopup({ people, peopleLoading, onConfirm, onCancel }) {
                       </button>
                     )}
                   </div>
-                  {skuTooShort && (
+                  {skuTooLong && (
                     <div style={{ color: "#ef4444", fontSize: "0.72rem", marginTop: 4 }}>
-                      SKU / Description must be at least {SKU_MIN_LENGTH} characters ({skuTrimmed.length}/{SKU_MIN_LENGTH})
+                      SKU / Description must be at most {SKU_MAX_LENGTH} characters ({skuTrimmed.length}/{SKU_MAX_LENGTH})
                     </div>
                   )}
                 </div>
