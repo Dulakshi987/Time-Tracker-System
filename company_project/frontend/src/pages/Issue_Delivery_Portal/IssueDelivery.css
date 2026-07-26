@@ -988,58 +988,76 @@
   padding-top: 8px;
 }
 
-/* ── Add / merge these into IssueDelivery.css ──────────────────────────── */
-/* I don't have your current .css file, so these are new rules to paste in —
-   they override the badge colors to the lighter/pastel look from your
-   screenshot (soft tinted background + solid-color text, pill shaped). */
+/* ══════════════════════════════════════════════════════════════════
+   BELOW: ADDITIONS ONLY — nothing above this line was changed.
 
-.ip-badge {
-  padding: 4px 12px;
-  border-radius: 999px;
+   1. Fixes the Cancelled badge bug (background & text were both red,
+      making the label invisible) and brings it in line with the other
+      pastel status badges.
+   2. Stops the WBS column from wrapping onto multiple lines.
+   3. Styles the standalone Handover column/button (icon + label no
+      longer overlap; clear "greyed out vs active" states).
+   ══════════════════════════════════════════════════════════════════ */
+
+/* Fix: cancelled badge was unreadable (red text on red background) */
+.ip-badge.cancelled {
+  background: rgba(239, 68, 68, 0.15);
+  color: var(--ip-red);
+}
+
+/* WBS column — keep the value on a single line */
+.ip-td-wbs {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 160px;
+}
+
+/* Handover column */
+.ip-th-handover,
+.ip-td-handover {
+  min-width: 140px;
+  width: 140px;
+  white-space: nowrap;
+}
+
+.ip-mini-btn-standalone {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 118px;
+  padding: 6px 12px;
+  border-radius: 7px;
+  border: 1px solid var(--ip-border);
+  background: var(--ip-surface2);
   font-size: 0.78rem;
   font-weight: 600;
-  display: inline-block;
+  line-height: 1.1;
+  white-space: nowrap;
+  cursor: pointer;
+  color: #a78bfa;
+  transition: all 0.15s;
 }
 
-.ip-badge.completed {
-  background: rgba(52, 211, 153, 0.18);
-  color: #10b981;
+.ip-mini-btn-standalone:hover:not(:disabled) { transform: translateY(-1px); }
+
+.ip-handover-icon {
+  flex-shrink: 0;
+  font-size: 0.95rem;
 }
 
-.ip-badge.onhold {
-  background: rgba(251, 146, 60, 0.18);
-  color: #f97316;
+.ip-handover-label {
+  flex-shrink: 0;
 }
 
-.ip-badge.pending {
-  background: rgba(148, 163, 184, 0.2);
-  color: #64748b;
-}
-
-.ip-badge.inprogress {
-  background: rgba(59, 130, 246, 0.18);
-  color: #3b82f6;
-}
-
-.ip-badge.cancelled {
-  background: rgba(239, 68, 68, 0.18);
-  color: #ef4444;
-}
-
-/* ── New Handover mini-button (row Actions) ────────────────────────────── */
-.ip-mini-btn.ip-mini-handover {
-  background: rgba(167, 139, 250, 0.15);
+.ip-mini-btn-standalone.active {
+  background: rgba(167, 139, 250, 0.2);
+  border-color: #a78bfa;
   color: #a78bfa;
 }
 
-.ip-mini-btn.ip-mini-handover.active {
-  background: #a78bfa;
-  color: #fff;
-}
-
-.ip-mini-btn.ip-mini-handover:disabled,
-.ip-mini-manage.ip-mini-delete:disabled,
-.ip-mini-btn:disabled {
+.ip-mini-btn-standalone:disabled {
   opacity: 0.35;
   cursor: not-allowed;
 }

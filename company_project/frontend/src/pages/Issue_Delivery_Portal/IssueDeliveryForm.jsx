@@ -678,10 +678,9 @@ function ViewDrawer({ doc, divisionLabel, onClose, onChangeVehicle }) {
 // Locking rule: once a document is Delivered, put On Hold, Cancelled, or
 // Handed Over, the Delivered / Hold / Cancel action buttons AND the Delete
 // button all lock (become non-clickable) for that row.
-// Handover lives in its own column (after Actions), separate from the
-// Delivered/Hold/Cancel cluster. It's only clickable while the row is NOT
-// on Hold, NOT Cancelled, NOT already Delivered, and hasn't already been
-// Handed Over — i.e. only while the row is still "live".
+// Handover itself is only clickable while the row is NOT on Hold, NOT
+// Cancelled, NOT already Delivered, and hasn't already been Handed Over —
+// i.e. only while the row is still "live".
 
 function DocumentRow({ doc, requestId, divisionLabel, onView, onDelivered, onHold, onCancelled, onHandover, onEdit, onDelete }) {
   const sc = statusClass(doc.deliveryStatus);
@@ -689,6 +688,7 @@ function DocumentRow({ doc, requestId, divisionLabel, onView, onDelivered, onHol
 
   const isLocked = sc === "completed" || sc === "onhold" || sc === "cancelled" || isHandedOver;
   const canHandover = sc !== "onhold" && sc !== "cancelled" && sc !== "completed" && !isHandedOver;
+  const lockedTitle = "Locked — Hold / Cancelled / Delivered / Handed Over";
 
   const pending = daysPending(doc);
   const isOverdue = pending !== null && pending > OVERDUE_DAYS && sc !== "completed";
@@ -697,7 +697,7 @@ function DocumentRow({ doc, requestId, divisionLabel, onView, onDelivered, onHol
     <tr className={`ip-row status-${sc} ${isOverdue ? "overdue" : ""}`}>
       <td className="ip-td-id">{requestId || "—"}</td>
       <td className="ip-td-division">{divisionLabel || "—"}</td>
-      <td>{doc.jobwbs || "—"}</td>
+      <td className="ip-td-wbs" title={doc.jobwbs || ""}>{doc.jobwbs || "—"}</td>
       <td className="ip-td-docno">{doc.printDocumentNo ? doc.printDocumentNo : `Doc #${doc.id}`}</td>
       <td>{doc.customerName || "—"}</td>
       <td className="ip-td-datetime">
@@ -726,7 +726,7 @@ function DocumentRow({ doc, requestId, divisionLabel, onView, onDelivered, onHol
           <button className="ip-mini-manage ip-mini-edit" title="Edit" onClick={() => onEdit(doc)}>✎</button>
           <button
             className="ip-mini-manage ip-mini-delete"
-            title={isLocked ? "Locked — cannot delete after Hold/Cancel/Delivered/Handover" : "Delete"}
+            title={isLocked ? lockedTitle : "Delete"}
             disabled={isLocked}
             onClick={() => onDelete(doc.id)}
           >
@@ -739,7 +739,7 @@ function DocumentRow({ doc, requestId, divisionLabel, onView, onDelivered, onHol
           <button
             className={`ip-mini-btn ip-mini-end ${sc === "completed" ? "active" : ""}`}
             disabled={isLocked}
-            title="Delivered"
+            title={isLocked ? lockedTitle : "Delivered"}
             onClick={() => onDelivered(doc.id)}
           >
             ✅
@@ -747,7 +747,7 @@ function DocumentRow({ doc, requestId, divisionLabel, onView, onDelivered, onHol
           <button
             className={`ip-mini-btn ip-mini-hold ${sc === "onhold" ? "active" : ""}`}
             disabled={isLocked}
-            title="Hold"
+            title={isLocked ? lockedTitle : "Hold"}
             onClick={() => onHold(doc.id)}
           >
             ⏸
@@ -755,21 +755,22 @@ function DocumentRow({ doc, requestId, divisionLabel, onView, onDelivered, onHol
           <button
             className={`ip-mini-btn ip-mini-cancel ${sc === "cancelled" ? "active" : ""}`}
             disabled={isLocked}
-            title="Cancelled"
+            title={isLocked ? lockedTitle : "Cancelled"}
             onClick={() => onCancelled(doc.id)}
           >
             ✕
           </button>
         </div>
       </td>
-      <td>
+      <td className="ip-td-handover">
         <button
           className={`ip-mini-btn ip-mini-handover ip-mini-btn-standalone ${isHandedOver ? "active" : ""}`}
           disabled={!canHandover}
-          title={isHandedOver ? `Handed over by ${doc.handoverBy}` : "Handover"}
+          title={isHandedOver ? `Handed over by ${doc.handoverBy}` : (canHandover ? "Handover" : "Locked — cannot handover while On Hold / Cancelled / Delivered")}
           onClick={() => onHandover(doc.id)}
         >
-          🤝 {isHandedOver ? "Handed Over" : "Handover"}
+          <span className="ip-handover-icon">🤝</span>
+          <span className="ip-handover-label">{isHandedOver ? "Handed Over" : "Handover"}</span>
         </button>
       </td>
     </tr>
@@ -1171,7 +1172,7 @@ export default function IssueDeliveryForm() {
               <th>View</th>
               <th>Manage</th>
               <th>Actions</th>
-              <th>Handover</th>
+              <th className="ip-th-handover">Handover</th>
             </tr>
           </thead>
           <tbody>
