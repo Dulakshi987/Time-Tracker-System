@@ -19,25 +19,6 @@ import DocumentForm      from "../Documents_Portal/DocumentForm";
 const MASTER_API   = "https://time-tracker-system-production.up.railway.app/api/print-portal";
 const SETUP_API    = "https://time-tracker-system-production.up.railway.app/api/admin-setup";
 const AUTO_REFRESH = 1000;
-const CONFIG_KEY    = "admin_job_types_config";
-
-const DEFAULT_JOB_TYPES = [
-  "Balance", "Domestic", "Cost Center", "Commercial", "Sales Order",
-];
-
-function loadJobTypes() {
-  try {
-    const raw = localStorage.getItem(CONFIG_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed) && parsed.length) return parsed;
-    }
-  } catch (e) { /* ignore */ }
-  return DEFAULT_JOB_TYPES;
-}
-function saveJobTypes(list) {
-  localStorage.setItem(CONFIG_KEY, JSON.stringify(list));
-}
 
 // ── Generic helpers ──────────────────────────────────────────────────────
 
@@ -364,6 +345,9 @@ const Icon = {
   fileno: (p) => (
     <svg {...ICON_PROPS} {...p}><rect x="4" y="3" width="16" height="18" rx="1.5"/><path d="M8 8h8M8 12h8M8 16h4"/></svg>
   ),
+  logout: (p) => (
+    <svg {...ICON_PROPS} {...p}><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><path d="M16 17l5-5-5-5"/><path d="M21 12H9"/></svg>
+  ),
 };
 
 // ── Sidebar ──────────────────────────────────────────────────────────────
@@ -382,22 +366,42 @@ const NAV_ITEMS = [
   { key: "report",      label: "Report",          icon: Icon.report },
 ];
 
+function handleLogout() {
+  try {
+    localStorage.removeItem("authToken");
+    localStorage.removeItem("token");
+    localStorage.removeItem("user");
+    sessionStorage.clear();
+  } catch (e) { /* ignore storage errors */ }
+  window.location.href = "/login";
+}
+
 function Sidebar({ active, onSelect, open, onClose }) {
   return (
     <>
       {open && <div className="adm-sidebar-scrim" onClick={onClose} />}
-      <div className={`adm-sidebar ${open ? "open" : ""}`}>
+      <div className={`adm-sidebar ${open ? "open" : ""}`} style={{ display: "flex", flexDirection: "column" }}>
         <div className="adm-sidebar-title">Fentons Admin</div>
-        {NAV_ITEMS.map(item => (
-          <button
-            key={item.key}
-            onClick={() => { onSelect(item.key); onClose && onClose(); }}
-            className={`adm-nav-btn ${active === item.key ? "active" : ""}`}
-          >
-            <span className="adm-nav-icon"><item.icon /></span>
-            <span>{item.label}</span>
-          </button>
-        ))}
+        <div style={{ flex: 1 }}>
+          {NAV_ITEMS.map(item => (
+            <button
+              key={item.key}
+              onClick={() => { onSelect(item.key); onClose && onClose(); }}
+              className={`adm-nav-btn ${active === item.key ? "active" : ""}`}
+            >
+              <span className="adm-nav-icon"><item.icon /></span>
+              <span>{item.label}</span>
+            </button>
+          ))}
+        </div>
+        <button
+          onClick={handleLogout}
+          className="adm-nav-btn adm-nav-logout"
+          style={{ marginTop: "auto" }}
+        >
+          <span className="adm-nav-icon"><Icon.logout /></span>
+          <span>Logout</span>
+        </button>
       </div>
     </>
   );
@@ -837,44 +841,62 @@ function JobCategoryPanel() {
   );
 }
 
-// ── Document File No panel (calendar from/to + single-active toggle) ────
+// ── Document File No panel ───────────────────────────────────────────────
+// "Active" is no longer a manual checkbox. Every file's status is derived
+// automatically, live, from its own From Date / To Date range — a file is
+// "Active" whenever today falls between those two dates, for every file
+// independently (not just a single hand-picked one).
+function isFileActiveNow(row) {
+  const todayKey = toDateKey(new Date());
+  if (!row.fromDate || !row.toDate) return false;
+  const from = toDateKey(row.fromDate);
+  const to = toDateKey(row.toDate);
+  if (!from || !to) return false;
+  return todayKey >= from && todayKey <= to;
+}
+
 function FileNumberPanel() {
   const [rows, setRows] = useState([]);
-  const [form, setForm] = useState({ fileNo: "", fromDate: "", toDate: "", active: false });
+  const [form, setForm] = useState({ fileNo: "", fromDate: "", toDate: "" });
   const [editId, setEditId] = useState(null);
   const [err, setErr] = useState(null);
+  const now = useTick(30000); // recheck active status every 30s so it flips live as dates roll over
 
   const load = useCallback(() => { apiGet("/file-numbers").then(setRows).catch(e => setErr(e.message)); }, []);
   useEffect(() => { load(); const id = setInterval(load, AUTO_REFRESH); return () => clearInterval(id); }, [load]);
 
   const submit = async () => {
     try {
-      const body = { ...form, createdBy: "admin" };
+      const active = isFileActiveNow(form);
+      const body = { ...form, active, createdBy: "admin" };
       if (editId) await apiPut(`/file-numbers/${editId}`, body); else await apiPost("/file-numbers", body);
-      setForm({ fileNo: "", fromDate: "", toDate: "", active: false }); setEditId(null); load();
+      setForm({ fileNo: "", fromDate: "", toDate: "" }); setEditId(null); load();
     } catch (e) { setErr(e.message); }
   };
 
+  const displayRows = useMemo(() => rows.map(r => ({
+    ...r,
+    activeLabel: isFileActiveNow(r) ? "✅ Active" : "—",
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  })), [rows, now]);
+
   return (
     <div>
-      <h3 className="adm-setup-title"><Icon.fileno /> Document File No — only ONE active file is ever shown in the Filing Portal</h3>
+      <h3 className="adm-setup-title"><Icon.fileno /> Document File No — every file's status is calculated automatically from its From Date / To Date, so more than one file can be active at the same time if their date ranges overlap</h3>
       {err && <div className="adm-error">⚠ {err}</div>}
       <div className="adm-setup-form-grid">
         <input className="adm-config-input" placeholder="File No" value={form.fileNo} onChange={e => setForm({ ...form, fileNo: e.target.value })} />
         <input type="date" className="adm-date-input" value={form.fromDate} onChange={e => setForm({ ...form, fromDate: e.target.value })} />
         <input type="date" className="adm-date-input" value={form.toDate} onChange={e => setForm({ ...form, toDate: e.target.value })} />
-        <label className="adm-setup-checkbox-label">
-          <input type="checkbox" checked={form.active} onChange={e => setForm({ ...form, active: e.target.checked })} /> Active
-        </label>
       </div>
       <div className="adm-setup-form-row">
         <button className="adm-config-add-btn" onClick={submit}>{editId ? "Update" : "+ Create"}</button>
-        {editId && <button className="adm-xl-clear-btn" onClick={() => { setEditId(null); setForm({ fileNo: "", fromDate: "", toDate: "", active: false }); }}>Cancel</button>}
+        {editId && <button className="adm-xl-clear-btn" onClick={() => { setEditId(null); setForm({ fileNo: "", fromDate: "", toDate: "" }); }}>Cancel</button>}
       </div>
       <SetupTable
-        rows={rows.map(r => ({ ...r, active: r.active ? "✅ Active" : "—" }))}
-        cols={[{ key: "id", label: "ID" }, { key: "fileNo", label: "File No" }, { key: "fromDate", label: "From" }, { key: "toDate", label: "To" }, { key: "active", label: "Status" }, { key: "createdBy", label: "Created By" }]}
-        onEdit={r => { setEditId(r.id); setForm({ fileNo: r.fileNo || "", fromDate: r.fromDate || "", toDate: r.toDate || "", active: !!r.active && r.active !== "—" }); }}
+        rows={displayRows}
+        cols={[{ key: "id", label: "ID" }, { key: "fileNo", label: "File No" }, { key: "fromDate", label: "From" }, { key: "toDate", label: "To" }, { key: "activeLabel", label: "Status" }, { key: "createdBy", label: "Created By" }]}
+        onEdit={r => { setEditId(r.id); setForm({ fileNo: r.fileNo || "", fromDate: r.fromDate || "", toDate: r.toDate || "" }); }}
         onDelete={id => apiDelete(`/file-numbers/${id}`).then(load)}
       />
     </div>
@@ -908,56 +930,6 @@ function MasterSetupPanel() {
         {["picker", "print", "check", "delivery", "filed"].includes(tab) && <OperatorPanel tabKey={tab} />}
         {tab === "jobcat" && <JobCategoryPanel />}
         {tab === "fileno" && <FileNumberPanel />}
-      </div>
-    </div>
-  );
-}
-
-// ── System Config panel (unchanged — job types for Dashboard KPI cards) ──
-
-function SystemConfigPanel({ jobTypes, setJobTypes }) {
-  const [newType, setNewType] = useState("");
-
-  const addType = () => {
-    const v = newType.trim();
-    if (!v || jobTypes.includes(v)) return;
-    const updated = [...jobTypes, v];
-    setJobTypes(updated);
-    saveJobTypes(updated);
-    setNewType("");
-  };
-  const removeType = (t) => {
-    const updated = jobTypes.filter(j => j !== t);
-    setJobTypes(updated);
-    saveJobTypes(updated);
-  };
-
-  return (
-    <div className="adm-config-wrap">
-      <h2 className="adm-title">System Config</h2>
-      <p className="adm-subtitle">
-        Job types entered here drive the "Total Jobs by Job Type" cards on the Dashboard.
-      </p>
-
-      <div className="adm-config-add-row">
-        <input
-          className="adm-config-input"
-          value={newType}
-          onChange={e => setNewType(e.target.value)}
-          placeholder="e.g. Balance, Domestic, Commercial..."
-          onKeyDown={e => e.key === "Enter" && addType()}
-        />
-        <button className="adm-config-add-btn" onClick={addType}>+ Add</button>
-      </div>
-
-      <div className="adm-config-list">
-        {jobTypes.map(t => (
-          <div key={t} className="adm-config-item">
-            <span className="adm-config-item-name">{t}</span>
-            <button className="adm-config-remove-btn" onClick={() => removeType(t)}>✕ Remove</button>
-          </div>
-        ))}
-        {jobTypes.length === 0 && <div className="adm-config-empty">No job types configured yet.</div>}
       </div>
     </div>
   );
@@ -1126,7 +1098,37 @@ function ReportPanel({ documents, jobTypes }) {
 
 // ── Dashboard panel ───────────────────────────────────────────────────────
 
-function DashboardPanel({ documents, jobTypes }) {
+// One job-type KPI card: total count + a live breakdown by division.
+function JobTypeCard({ jobType, documents, divisions, operatorDivisionMap }) {
+  const matching = documents.filter(d => (d.jobType || "").toLowerCase() === jobType.toLowerCase());
+  const total = matching.length;
+
+  const byDivision = divisions
+    .map(div => ({
+      label: `${div.divisionNo} — ${div.divisionName}`,
+      count: matching.filter(d => docMatchesDivision(d, div.divisionNo, operatorDivisionMap)).length,
+    }))
+    .filter(row => row.count > 0);
+
+  return (
+    <div className="adm-kpi-card adm-jobtype-card">
+      <div className="adm-kpi-label">{jobType}</div>
+      <div className="adm-kpi-value">{total}</div>
+      {byDivision.length > 0 && (
+        <div className="adm-jobtype-divisions">
+          {byDivision.map(row => (
+            <div key={row.label} className="adm-jobtype-division-row">
+              <span>{row.label}</span>
+              <span>{row.count}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function DashboardPanel({ documents, jobTypes, divisions, operatorDivisionMap }) {
   const print = portalCounts(documents, () => true, d => printStatusClass(d.printStatus));
   const pick = portalCounts(documents, d => !!d.printDocumentNo, d => pickStatusClass(d.status));
   const check = portalCounts(
@@ -1151,11 +1153,6 @@ function DashboardPanel({ documents, jobTypes }) {
   const checkEff    = operatorEfficiency(documents, "checkedBy", "checkDurationSeconds", d => checkStatusClass(d.checkStatus) === "completed");
   const deliveryEff = operatorEfficiency(documents, "deliveredBy", "deliveryDurationSeconds", d => deliveryStatusClass(d.deliveryStatus) === "completed");
 
-  const jobTypeCounts = jobTypes.map(t => ({
-    type: t,
-    count: documents.filter(d => (d.jobType || "").toLowerCase() === t.toLowerCase()).length,
-  }));
-
   return (
     <div>
       <h2 className="adm-title">Fentons Operation Efficiency Dashboard</h2>
@@ -1164,8 +1161,14 @@ function DashboardPanel({ documents, jobTypes }) {
       <SectionTitle>Total Jobs by Job Type</SectionTitle>
       <div className="adm-kpi-row">
         <KpiCard label="Total Jobs" value={documents.length} colorClass="accent" />
-        {jobTypeCounts.map(jt => (
-          <KpiCard key={jt.type} label={jt.type} value={jt.count} />
+        {jobTypes.map(jt => (
+          <JobTypeCard
+            key={jt}
+            jobType={jt}
+            documents={documents}
+            divisions={divisions}
+            operatorDivisionMap={operatorDivisionMap}
+          />
         ))}
       </div>
 
@@ -1218,7 +1221,13 @@ export default function AdminDashboard() {
   // name -> divisionNo, merged from the 4 operator master tables
   const [operatorDivisionMap, setOperatorDivisionMap] = useState({});
 
-  const [jobTypes, setJobTypes] = useState(loadJobTypes());
+  // ── Job types now come straight from the Job Category master data —
+  // add a category in Master Setup and it appears here automatically. ───
+  const [jobCategories, setJobCategories] = useState([]);
+  const jobTypes = useMemo(() => {
+    const names = jobCategories.map(c => c.categoryName).filter(Boolean);
+    return Array.from(new Set(names)).sort((a, b) => a.localeCompare(b));
+  }, [jobCategories]);
 
   const fetchDocuments = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
@@ -1241,6 +1250,14 @@ export default function AdminDashboard() {
       const list = await apiGet("/divisions");
       setDivisionsList(list);
     } catch (e) { /* non-fatal — filter just shows no divisions */ }
+  }, []);
+
+  // Job categories — drives the dashboard's "Total Jobs by Job Type" cards.
+  const fetchJobCategories = useCallback(async () => {
+    try {
+      const list = await apiGet("/job-categories");
+      setJobCategories(list);
+    } catch (e) { /* non-fatal */ }
   }, []);
 
   // Build the name -> divisionNo lookup by merging Picker, Print, Check,
@@ -1272,9 +1289,10 @@ export default function AdminDashboard() {
   useEffect(() => {
     fetchDivisions();
     fetchOperatorDivisions();
-    const id = setInterval(() => { fetchDivisions(); fetchOperatorDivisions(); }, AUTO_REFRESH * 5);
+    fetchJobCategories();
+    const id = setInterval(() => { fetchDivisions(); fetchOperatorDivisions(); fetchJobCategories(); }, AUTO_REFRESH * 5);
     return () => clearInterval(id);
-  }, [fetchDivisions, fetchOperatorDivisions]);
+  }, [fetchDivisions, fetchOperatorDivisions, fetchJobCategories]);
 
   const operators = useMemo(() => {
     const set = new Set();
@@ -1332,7 +1350,14 @@ export default function AdminDashboard() {
                 ⚠ {error} — <button onClick={() => fetchDocuments(false)}>retry</button>
               </div>
             )}
-            {!loading && !error && <DashboardPanel documents={filtered} jobTypes={jobTypes} />}
+            {!loading && !error && (
+              <DashboardPanel
+                documents={filtered}
+                jobTypes={jobTypes}
+                divisions={divisionsList}
+                operatorDivisionMap={operatorDivisionMap}
+              />
+            )}
           </>
         )}
 
