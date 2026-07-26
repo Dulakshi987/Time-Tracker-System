@@ -108,4 +108,22 @@ public class CheckPortalService {
     public void delete(Long id) {
         issueRepository.deleteById(id);
     }
+     // fields change; status, timestamps, and durations are left untouched.
+    public Issue editCheck(Long id, String heldBy, String checkedBy) {
+        Issue doc = getById(id);
+ 
+        if (heldBy != null && !heldBy.isBlank()) {
+            doc.setCheckHeldBy(heldBy);
+        }
+        if (checkedBy != null && !checkedBy.isBlank()) {
+            doc.setCheckedBy(checkedBy);
+        }
+ 
+        return issueRepository.save(doc);
+    }
+ 
+    public void delete(Long id) {
+        issueRepository.deleteById(id);
+    }
 }
+ 

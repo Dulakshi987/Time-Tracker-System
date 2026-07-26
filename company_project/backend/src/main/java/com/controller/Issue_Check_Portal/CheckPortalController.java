@@ -91,4 +91,14 @@ public class CheckPortalController {
         checkPortalService.delete(id);
         return ResponseEntity.noContent().build();
     }
+
+    @PutMapping("/{id}/edit")
+    public Issue editCheck(@PathVariable Long id, @RequestBody Map<String, String> body) {
+        return checkPortalService.editCheck(id, body.get("heldBy"), body.get("checkedBy"));
+    }
+
+    @DeleteMapping("/{id}")
+    public void deleteCheck(@PathVariable Long id) {
+        checkPortalService.delete(id);
+}
 }

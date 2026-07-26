@@ -3,27 +3,29 @@ import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import "./IssueCheck.css";
 
 // const API_BASE = "http://localhost:8080/api/check-portal";
-// // Master Setup API — same base the Admin Dashboard's "Master Setup → Check"
-// // panel saves to. We read from here so Held By / Checked By always match
-// // whatever names are entered in Admin Dashboard, live from the DB.
 // const SETUP_API = "http://localhost:8080/api/admin-setup";
 
 const API_BASE = "https://time-tracker-system-production.up.railway.app/api/check-portal";
-
 const SETUP_API = "https://time-tracker-system-production.up.railway.app/api/admin-setup";
 const AUTO_REFRESH = 10000;
-const OPERATOR_REFRESH = 15000;
 
 // Reasons a Picking Error can be logged under.
-// Only "Material Shortage" and "Material Excess" represent an actual
-// picking error that needs SKU/Qty capture + triggers the Emergency Pick
-// workflow (red banner, hasWrongMaterial flag, etc). "Collected Different
-// Material" is logged for record-keeping but does NOT create a picking
-// error / does not require SKU+Qty or trigger the emergency pick flow.
 const PICKING_ERROR_REASONS = [
   { key: "SHORTAGE", label: "Material Shortage", createsError: true },
   { key: "EXCESS", label: "Material Excess", createsError: true },
   { key: "DIFFERENT", label: "Collected Different Material", createsError: false },
+];
+
+// Status filters — normalized classes, shared between the dropdown and the
+// clickable stat chips so both always stay in sync. "wrongmaterial" is a
+// virtual filter (not a real checkStatus) that shows flagged documents.
+const STATUS_FILTERS = [
+  { value: "ALL", label: "All Status" },
+  { value: "pending", label: "Pending" },
+  { value: "inprogress", label: "In Progress" },
+  { value: "onhold", label: "On Hold" },
+  { value: "completed", label: "Check Done" },
+  { value: "wrongmaterial", label: "Wrong Material" },
 ];
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -59,9 +61,7 @@ function jobTypeColor(jt) {
 }
 
 // Groups documents by their request date and numbers each group starting
-// from 1, then combines that with the date to build a unique Request ID
-// like 20260816/0001. Same scheme as Pick Portal / Print Portal, so IDs
-// read consistently across all three portals.
+// from 1 — same scheme as Pick Portal / Print Portal.
 function computeRequestIds(documents) {
   const dateKeyOf = (doc) => {
     if (doc.requestDate)     return String(doc.requestDate).substring(0, 10);
@@ -108,87 +108,42 @@ function statusLabel(s) {
   return { pending: "Pending", inprogress: "In Progress", onhold: "On Hold", completed: "Check Done" }[c];
 }
 
-// ── Checker names — live from Master Setup (DB) ─────────────────────────────
-// Replaces the old hardcoded PEOPLE_OPTIONS list. Reads the same
-// "/check-operators" table that Admin Dashboard → Master Setup → Check
-// writes to, so adding / editing / deleting a checker there shows up here
-// automatically (polled).
+// ── Generic Person Picker — division scoped, mirrors Pick Portal exactly ───
+// Only names that exist in the Check Operators master table AND belong to
+// the current document's Division can be selected. No "Other" free text.
 
-function useCheckOperatorNames() {
-  const [names, setNames] = useState([]);
-
-  const load = useCallback(() => {
-    fetch(`${SETUP_API}/check-operators`)
-      .then(res => {
-        if (!res.ok) throw new Error(`Server error: ${res.status}`);
-        return res.json();
-      })
-      .then(data => {
-        setNames(
-          (Array.isArray(data) ? data : [])
-            .map(p => p.operatorName)
-            .filter(Boolean)
-        );
-      })
-      .catch(() => { /* keep last known list on transient errors */ });
-  }, []);
-
-  useEffect(() => {
-    load();
-    const id = setInterval(load, OPERATOR_REFRESH);
-    return () => clearInterval(id);
-  }, [load]);
-
-  return names;
-}
-
-// ── Generic Person Picker ──────────────────────────────────────────────────
-// Now driven purely by the `options` prop (Master Setup checker names).
-// "Other" free-text entry has been removed — only names that exist in the
-// Check Operators master table can be selected, so whatever gets saved to
-// the DB (heldBy / checkedBy) always matches Master Setup.
-
-function PersonPicker({ value, onChange, options }) {
-  if (!options || options.length === 0) {
-    return (
-      <div className="ip-popup-options">
-        <div style={{ color: "#7c8db0", fontSize: "0.8rem", padding: "8px 2px" }}>
-          No checkers set up yet. Add names in Admin Dashboard → Master Setup → Check.
-        </div>
-      </div>
-    );
-  }
-
+function PersonPicker({ value, onChange, people, loading }) {
   return (
     <div className="ip-popup-options">
-      {options.map(name => (
-        <button
-          key={name}
-          className={`ip-popup-option ${value === name ? "selected" : ""}`}
-          onClick={() => onChange(name)}
-        >
-          👤 {name}
-        </button>
-      ))}
+      {loading ? (
+        <div className="ip-popup-empty">Loading checkers…</div>
+      ) : !people || people.length === 0 ? (
+        <div className="ip-popup-empty">
+          No checkers found for this division in Master Setup.
+        </div>
+      ) : (
+        people.map(name => (
+          <button
+            key={name}
+            className={`ip-popup-option ${value === name ? "selected" : ""}`}
+            onClick={() => onChange(name)}
+          >
+            👤 {name}
+          </button>
+        ))
+      )}
     </div>
   );
 }
 
-// ── Popup: Hold + Picking Error (Held By, no reason field) ──────────────────
-// "Hold Reason" has been removed entirely. Holding now only asks:
-//   1) Is there a picking error, and if so which materials/quantities
-//      (any number of rows, added with "+ Add Material")
-//   2) Who is holding this (Held By, from Master Setup checkers)
+// ── Popup: Hold + Picking Error (Held By, division scoped) ──────────────────
 
-function HoldPopup({ operatorNames, onConfirm, onCancel }) {
+function HoldPopup({ people, peopleLoading, onConfirm, onCancel }) {
   const [heldBy, setHeldBy] = useState("");
-  const [pickingErrorKey, setPickingErrorKey] = useState(null); // "SHORTAGE" | "EXCESS" | "DIFFERENT" | "NONE" | null
+  const [pickingErrorKey, setPickingErrorKey] = useState(null);
   const [materials, setMaterials] = useState([{ sku: "", qty: "" }]);
 
   const selectedErrorReason = PICKING_ERROR_REASONS.find(r => r.key === pickingErrorKey) || null;
-  // Only "Material Shortage" and "Material Excess" actually create a picking
-  // error (and therefore require SKU/Qty rows). "Collected Different
-  // Material" is recorded but does not create a picking error.
   const needsDetails = !!selectedErrorReason && selectedErrorReason.createsError;
 
   const addMaterialRow    = () => setMaterials(prev => [...prev, { sku: "", qty: "" }]);
@@ -205,9 +160,6 @@ function HoldPopup({ operatorNames, onConfirm, onCancel }) {
 
   const handleConfirm = () => {
     const hasWrongMaterial = needsDetails ? "YES" : "NO";
-    // Multiple material rows are joined into one string per field so no
-    // backend/DB schema change is needed — "SKU-A; SKU-B" ↔ "5; 12" line up
-    // by position (same separator, same order).
     const skuJoined = needsDetails ? filledMaterials.map(m => m.sku.trim()).join("; ") : "";
     const qtyJoined = needsDetails ? filledMaterials.map(m => m.qty.trim()).join("; ") : "";
     onConfirm(
@@ -296,7 +248,7 @@ function HoldPopup({ operatorNames, onConfirm, onCancel }) {
         )}
 
         <span className="ip-popup-label">Held By</span>
-        <PersonPicker value={heldBy} onChange={setHeldBy} options={operatorNames} />
+        <PersonPicker value={heldBy} onChange={setHeldBy} people={people} loading={peopleLoading} />
 
         <div className="ip-popup-foot">
           <button className="ip-btn ip-btn-outline" onClick={onCancel}>Cancel</button>
@@ -313,9 +265,9 @@ function HoldPopup({ operatorNames, onConfirm, onCancel }) {
   );
 }
 
-// ── Popup: Check Done (Yes/No wrong material) ────────────────────────────────
+// ── Popup: Check Done (division scoped) ──────────────────────────────────────
 
-function CheckDonePopup({ operatorNames, onConfirm, onCancel }) {
+function CheckDonePopup({ people, peopleLoading, onConfirm, onCancel }) {
   const [checkedBy, setCheckedBy] = useState("");
   const canConfirm = !!checkedBy;
 
@@ -328,7 +280,7 @@ function CheckDonePopup({ operatorNames, onConfirm, onCancel }) {
         </div>
         <p className="ip-popup-sub">Select who completed this check</p>
 
-        <PersonPicker value={checkedBy} onChange={setCheckedBy} options={operatorNames} />
+        <PersonPicker value={checkedBy} onChange={setCheckedBy} people={people} loading={peopleLoading} />
 
         <div className="ip-popup-foot" style={{ marginTop: 18 }}>
           <button className="ip-btn ip-btn-outline" onClick={onCancel}>Cancel</button>
@@ -345,9 +297,46 @@ function CheckDonePopup({ operatorNames, onConfirm, onCancel }) {
   );
 }
 
+// ── Popup: Edit (Held By / Checked By only) — mirrors Pick Portal's Edit ───
+
+function EditPopup({ doc, people, peopleLoading, onConfirm, onCancel }) {
+  const [heldBy, setHeldBy] = useState(doc?.checkHeldBy || "");
+  const [checkedBy, setCheckedBy] = useState(doc?.checkedBy || "");
+
+  return (
+    <div className="ip-popup-overlay">
+      <div className="ip-popup">
+        <div className="ip-popup-head">
+          <span>✏ Edit Document</span>
+          <button className="ip-popup-close" onClick={onCancel}>✕</button>
+        </div>
+        <p className="ip-popup-sub">Only Held By and Checked By can be changed here</p>
+
+        <span className="ip-popup-label">Held By</span>
+        <PersonPicker value={heldBy} onChange={setHeldBy} people={people} loading={peopleLoading} />
+
+        <span className="ip-popup-label" style={{ marginTop: 14, display: "block" }}>
+          Checked By
+        </span>
+        <PersonPicker value={checkedBy} onChange={setCheckedBy} people={people} loading={peopleLoading} />
+
+        <div className="ip-popup-foot" style={{ marginTop: 18 }}>
+          <button className="ip-btn ip-btn-outline" onClick={onCancel}>Cancel</button>
+          <button
+            className="ip-btn ip-btn-done"
+            onClick={() => onConfirm({ heldBy, checkedBy })}
+          >
+            💾 Save Changes
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Popup: View Full Details (Print + Pick) ──────────────────────────────────
 
-function ViewDetailsPopup({ doc, onClose }) {
+function ViewDetailsPopup({ doc, requestId, divisionLabel, onClose }) {
   if (!doc) return null;
 
   const row = (label, value) => (
@@ -361,10 +350,24 @@ function ViewDetailsPopup({ doc, onClose }) {
     <div className="ip-popup-overlay">
       <div className="ip-popup">
         <div className="ip-popup-head">
-          <span>📋 Full Details</span>
+          <span>📋 Full Details — {requestId || "—"}</span>
           <button className="ip-popup-close" onClick={onClose}>✕</button>
         </div>
         <p className="ip-popup-sub">Complete history for this document</p>
+
+        <div style={{ marginBottom: 6, fontSize: "0.78rem", color: "#7c8db0", fontWeight: 600 }}>
+          Document Info
+        </div>
+        <div className="ip-hold-box" style={{ marginBottom: 14 }}>
+          {row("Job WBS", doc.jobwbs)}
+          {row("Reservation No", doc.reservationNo)}
+          {row("Requested By", doc.requestedBy)}
+          {row("Entered By", doc.enteredBy)}
+          {row("Job Type", doc.jobType)}
+          {row("Division", divisionLabel || "—")}
+          {row("Request Date", formatDate(doc.requestDate))}
+          {row("Request Time", formatTime(doc.requestTime))}
+        </div>
 
         <div style={{ marginBottom: 6, fontSize: "0.78rem", color: "#7c8db0", fontWeight: 600 }}>
           Print Portal
@@ -437,10 +440,6 @@ function ViewDetailsPopup({ doc, onClose }) {
 }
 
 // ── Popup: New Emergency Pick Done Alert (auto-triggered from Pick Portal) ──
-// Mirrors the Pick Portal's red "New Picking Error" alert popup, but in
-// green, and fires when Pick Portal confirms an Emergency Pick Done for a
-// document that was previously flagged with a wrong-material error. Clicking
-// an item jumps/scrolls to the matching card in the grid below.
 
 function ResolvedPickAlertPopup({ docs, requestIdMap, onJump, onClose }) {
   return (
@@ -490,7 +489,11 @@ function ResolvedPickAlertPopup({ docs, requestIdMap, onJump, onClose }) {
 
 // ── Single Document Card ─────────────────────────────────────────────────────
 
-function DocumentCard({ doc, requestId, onStart, onHold, onEnd, onView, cardRef, jumpHighlighted }) {
+function DocumentCard({
+  doc, requestId, divisionLabel,
+  onStart, onHold, onEnd, onView, onEdit, onDelete,
+  cardRef, jumpHighlighted,
+}) {
   const sc        = statusClass(doc.checkStatus);
   const jColor    = jobTypeColor(doc.jobType);
   const isPending = sc === "pending";
@@ -499,10 +502,7 @@ function DocumentCard({ doc, requestId, onStart, onHold, onEnd, onView, cardRef,
   const isDone    = sc === "completed";
 
   const isFlagged = (doc.hasWrongMaterial || "").toUpperCase() === "YES";
-  // Pick Portal hasn't re-picked yet — still an open picking error.
   const hasUnresolvedError = isFlagged && !doc.emergencyPickResolved && !isDone;
-  // Pick Portal has confirmed Emergency Pick Done — error is cleared,
-  // waiting on this Check to finish/confirm.
   const hasResolvedError = isFlagged && doc.emergencyPickResolved && !isDone;
 
   const cardClassName =
@@ -524,8 +524,6 @@ function DocumentCard({ doc, requestId, onStart, onHold, onEnd, onView, cardRef,
       }
     : undefined;
 
-  // Extra pulsing ring shown briefly right after jumping here from the
-  // "Emergency Pick Done" alert popup, so it's obvious which card it meant.
   const jumpStyle = jumpHighlighted
     ? {
         outline: "3px solid #facc15",
@@ -583,7 +581,15 @@ function DocumentCard({ doc, requestId, onStart, onHold, onEnd, onView, cardRef,
           <div style={{ color: jColor, fontWeight: 700, fontSize: "0.78rem", marginTop: 2 }}>
             {doc.jobType || "—"}
           </div>
+          {divisionLabel && (
+            <div className="ip-doc-division-sub">
+              {divisionLabel}
+            </div>
+          )}
         </div>
+        {/* Merged badge — a document that's both "pending"/whatever status AND
+            carrying an unresolved picking error only ever shows ONE badge:
+            the picking-error state takes priority over the plain status. */}
         <span className={`ip-badge ${hasUnresolvedError ? "onhold" : hasResolvedError ? "completed" : sc}`}>
           {hasUnresolvedError
             ? "🚨 Picking Error Pending"
@@ -623,7 +629,6 @@ function DocumentCard({ doc, requestId, onStart, onHold, onEnd, onView, cardRef,
           </div>
         </div>
 
-        {/* Hold info banner — Hold Reason removed, Held By / Held At only */}
         {(isOnHold || doc.checkHeldBy) && (
           <div className="ip-hold-box">
             <div className="ip-hold-row">
@@ -637,7 +642,6 @@ function DocumentCard({ doc, requestId, onStart, onHold, onEnd, onView, cardRef,
           </div>
         )}
 
-        {/* Wrong material info — reported at Hold time, shown as soon as it's known */}
         {isFlagged && (
           <div className="ip-wrong-material-box">
             <div className="ip-wrong-material-row">
@@ -657,7 +661,6 @@ function DocumentCard({ doc, requestId, onStart, onHold, onEnd, onView, cardRef,
           </div>
         )}
 
-        {/* Collected Different Material — logged, but not a picking error */}
         {!isFlagged && doc.pickingErrorReason && (
           <div className="ip-hold-box">
             <div className="ip-hold-row">
@@ -667,7 +670,6 @@ function DocumentCard({ doc, requestId, onStart, onHold, onEnd, onView, cardRef,
           </div>
         )}
 
-        {/* Check Done summary */}
         {isDone && (
           <>
             {!isFlagged && !doc.pickingErrorReason && (
@@ -688,35 +690,51 @@ function DocumentCard({ doc, requestId, onStart, onHold, onEnd, onView, cardRef,
         )}
       </div>
 
-      {/* ── Footer Buttons: Start | Hold | End | View ── */}
+      {/* ── Footer Buttons ── */}
       <div className="ip-card-foot">
-        <button
-          className="ip-btn ip-btn-start"
-          disabled={!(isPending || isOnHold)}
-          onClick={() => onStart(doc.id)}
-        >
-          {isOnHold ? "▶ Resume" : "▶ Start"}
-        </button>
-        <button
-          className="ip-btn ip-btn-hold"
-          disabled={!isStarted}
-          onClick={() => onHold(doc.id)}
-        >
-          ⏸ Hold
-        </button>
-        <button
-          className="ip-btn ip-btn-end"
-          disabled={!(isStarted || isOnHold)}
-          onClick={() => onEnd(doc.id)}
-        >
-          ■ End
-        </button>
-        <button
-          className="ip-btn ip-btn-outline"
-          onClick={() => onView(doc.id)}
-        >
-          👁 View
-        </button>
+        {isDone ? (
+          <>
+            <button className="ip-btn ip-btn-edit" onClick={() => onEdit(doc)}>
+              ✎ Edit
+            </button>
+            <button className="ip-btn ip-btn-delete" onClick={() => onDelete(doc.id)}>
+              🗑 Delete
+            </button>
+            <button className="ip-btn ip-btn-outline" onClick={() => onView(doc.id)}>
+              👁 View
+            </button>
+          </>
+        ) : (
+          <>
+            <button
+              className="ip-btn ip-btn-start"
+              disabled={!(isPending || isOnHold)}
+              onClick={() => onStart(doc.id)}
+            >
+              {isOnHold ? "▶ Resume" : "▶ Start"}
+            </button>
+            <button
+              className="ip-btn ip-btn-hold"
+              disabled={!isStarted}
+              onClick={() => onHold(doc.id)}
+            >
+              ⏸ Hold
+            </button>
+            <button
+              className="ip-btn ip-btn-end"
+              disabled={!(isStarted || isOnHold)}
+              onClick={() => onEnd(doc.id)}
+            >
+              ■ End
+            </button>
+            <button
+              className="ip-btn ip-btn-outline"
+              onClick={() => onView(doc.id)}
+            >
+              👁 View
+            </button>
+          </>
+        )}
       </div>
     </div>
   );
@@ -760,30 +778,33 @@ export default function IssueCheckForm() {
   const [lastUpdated,  setLastUpdated]  = useState(null);
   const [refreshing,   setRefreshing]   = useState(false);
 
-  // Checker names — live from Admin Dashboard → Master Setup → Check (DB).
-  const checkOperatorNames = useCheckOperatorNames();
+  // Divisions (Admin Master Data) — used to label each card and to scope
+  // which check-operators show up in the popups, exactly like Pick Portal.
+  const [divisions, setDivisions] = useState([]);
 
-  const [activePopup,  setActivePopup]  = useState(null); // "hold" | "end" | "view" | null
+  // Checker names shown in the currently open popup — scoped to that
+  // document's Division, fetched fresh each time a popup opens.
+  const [popupOperators,        setPopupOperators]        = useState([]);
+  const [popupOperatorsLoading, setPopupOperatorsLoading]  = useState(false);
+
+  const [activePopup,  setActivePopup]  = useState(null); // "hold" | "end" | "view" | "edit" | null
   const [activeId,     setActiveId]     = useState(null);
 
-  // "Emergency Pick Done" alert popup (separate from activePopup — auto-triggered
-  // when Pick Portal confirms a re-pick, on top of the persistent green bar).
-  const [resolvedAlertDocs, setResolvedAlertDocs] = useState([]); // docs waiting to be acknowledged
-  const [seenResolvedIds,   setSeenResolvedIds]   = useState(() => new Set()); // ids already alerted for
+  const [resolvedAlertDocs, setResolvedAlertDocs] = useState([]);
+  const [seenResolvedIds,   setSeenResolvedIds]   = useState(() => new Set());
 
-  // Card scroll/highlight — used by the alert popup's "jump to card" click
   const cardRefs = useRef({});
   const [jumpHighlightId, setJumpHighlightId] = useState(null);
 
   const handleJumpToCard = (id) => {
-    setResolvedAlertDocs([]); // close the alert popup
+    setResolvedAlertDocs([]);
     const el = cardRefs.current[id];
     if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
     setJumpHighlightId(id);
     setTimeout(() => setJumpHighlightId(prev => (prev === id ? null : prev)), 2500);
   };
 
-  // ── Fetch ──
+  // ── Fetch documents ──
   const fetchDocuments = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
     else setRefreshing(true);
@@ -792,9 +813,6 @@ export default function IssueCheckForm() {
       const res  = await fetch(API_BASE);
       if (!res.ok) throw new Error(`Server error: ${res.status}`);
       const data = await res.json();
-      // Only bring documents into Check Portal once BOTH conditions are met:
-      // 1) Pick Portal has marked the document as Pick Done (status = completed)
-      // 2) Print Portal has already entered a document number for it
       const readyForCheck = data.filter(d => {
         const pickDone = statusClass(d.status) === "completed";
         const hasDocNo = d.printDocumentNo && String(d.printDocumentNo).trim() !== "";
@@ -811,12 +829,69 @@ export default function IssueCheckForm() {
     }
   }, []);
 
-  useEffect(() => { fetchDocuments(false); }, [fetchDocuments]);
+  // ── Fetch divisions ──
+  const fetchDivisions = useCallback(async () => {
+    try {
+      const res = await fetch(`${SETUP_API}/divisions`);
+      if (res.ok) {
+        const data = await res.json();
+        setDivisions(data || []);
+      }
+    } catch (e) {
+      console.warn("Failed to load divisions", e);
+    }
+  }, []);
+
+  const divisionNoToName = useMemo(() => {
+    const map = {};
+    divisions.forEach(d => { map[d.divisionNo] = d.divisionName; });
+    return map;
+  }, [divisions]);
+
+  // Division-wise checkers — Master Setup's /check-operators endpoint
+  // returns ALL checkers, so we fetch them all and filter client-side on
+  // divisionNo, exactly like Pick Portal does for /pickers.
+  const fetchOperatorsForDivision = useCallback(async (divisionNo) => {
+    if (!divisionNo) {
+      setPopupOperators([]);
+      return;
+    }
+    setPopupOperatorsLoading(true);
+    try {
+      const res = await fetch(`${SETUP_API}/check-operators`);
+      if (res.ok) {
+        const data = await res.json();
+        setPopupOperators(
+          (data || [])
+            .filter(p => {
+              const pDivisionNo = p.divisionNo || (p.division && p.division.divisionNo) || "";
+              return String(pDivisionNo) === String(divisionNo);
+            })
+            .map(p => p.operatorName)
+            .filter(Boolean)
+        );
+      } else {
+        setPopupOperators([]);
+      }
+    } catch (e) {
+      console.warn("Failed to load checkers for division", e);
+      setPopupOperators([]);
+    } finally {
+      setPopupOperatorsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchDocuments(false);
+    fetchDivisions();
+  }, [fetchDocuments, fetchDivisions]);
 
   useEffect(() => {
     const id = setInterval(() => fetchDocuments(true), AUTO_REFRESH);
     return () => clearInterval(id);
   }, [fetchDocuments]);
+
+  const getDocById = useCallback((id) => documents.find(d => d.id === id), [documents]);
 
   // ── Start / Resume ──
   const handleStart = async (id) => {
@@ -828,44 +903,103 @@ export default function IssueCheckForm() {
     }
   };
 
-  const handleHoldClick = (id) => { setActiveId(id); setActivePopup("hold"); };
-  const handleEndClick  = (id) => { setActiveId(id); setActivePopup("end"); };
-  const handleViewClick = (id) => { setActiveId(id); setActivePopup("view"); };
-  const closePopup = () => { setActivePopup(null); setActiveId(null); };
+  const handleHoldClick = async (id) => {
+    const doc = getDocById(id);
+    setActiveId(id);
+    setActivePopup("hold");
+    await fetchOperatorsForDivision(doc?.divisionNo);
+  };
 
-  // Hold Reason removed — Hold now only carries heldBy + picking-error info.
+  const handleEndClick = async (id) => {
+    const doc = getDocById(id);
+    setActiveId(id);
+    setActivePopup("end");
+    await fetchOperatorsForDivision(doc?.divisionNo);
+  };
+
+  const handleViewClick = (id) => { setActiveId(id); setActivePopup("view"); };
+
+  // Edit — reopens pre-filled with the completed document's Held By / Checked By.
+  const handleEditClick = async (doc) => {
+    setActiveId(doc.id);
+    setActivePopup("edit");
+    await fetchOperatorsForDivision(doc?.divisionNo);
+  };
+
+  const closePopup = () => {
+    setActivePopup(null);
+    setActiveId(null);
+    setPopupOperators([]);
+  };
+
+  const assertOk = async (res, action) => {
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      throw new Error(`${action} failed: Server error ${res.status}${body ? " — " + body : ""}`);
+    }
+  };
+
   const handleHoldConfirm = async (heldBy, hasWrongMaterial, wrongMaterialSku, wrongMaterialQty, pickingErrorReason) => {
+    const id = activeId;
     closePopup();
     try {
-      await fetch(`${API_BASE}/${activeId}/hold`, {
+      const res = await fetch(`${API_BASE}/${id}/hold`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ heldBy, hasWrongMaterial, wrongMaterialSku, wrongMaterialQty, pickingErrorReason }),
       });
+      await assertOk(res, "Hold");
       fetchDocuments(true);
     } catch (err) {
-      alert("Hold failed: " + err.message);
+      alert(err.message);
     }
   };
 
   const handleCheckDoneConfirm = async (checkedBy) => {
+    const id = activeId;
     closePopup();
     try {
-      await fetch(`${API_BASE}/${activeId}/end`, {
+      const res = await fetch(`${API_BASE}/${id}/end`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ checkedBy }),
       });
+      await assertOk(res, "Check Done");
       fetchDocuments(true);
     } catch (err) {
-      alert("Check Done failed: " + err.message);
+      alert(err.message);
     }
   };
 
-  // Request ID: date + daily sequence, e.g. 20260816/0001 — same scheme as Pick/Print Portal
+  const handleEditConfirm = async ({ heldBy, checkedBy }) => {
+    const id = activeId;
+    closePopup();
+    try {
+      const res = await fetch(`${API_BASE}/${id}/edit`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ heldBy, checkedBy }),
+      });
+      await assertOk(res, "Edit");
+      fetchDocuments(true);
+    } catch (err) {
+      alert(err.message);
+    }
+  };
+
+  const handleDelete = async (id) => {
+    if (!window.confirm("Delete this document from the Check Portal? This cannot be undone.")) return;
+    try {
+      const res = await fetch(`${API_BASE}/${id}`, { method: "DELETE" });
+      await assertOk(res, "Delete");
+      fetchDocuments(true);
+    } catch (err) {
+      alert(err.message);
+    }
+  };
+
   const requestIdMap = useMemo(() => computeRequestIds(documents), [documents]);
 
-  // Picking errors still open — Pick Portal hasn't re-picked yet.
   const activeErrorDocs = useMemo(
     () => documents.filter(d => {
       const isFlagged = (d.hasWrongMaterial || "").toUpperCase() === "YES";
@@ -874,8 +1008,6 @@ export default function IssueCheckForm() {
     [documents]
   );
 
-  // Picking errors Pick Portal has just resolved (Emergency Pick Done
-  // confirmed) — still waiting for this Check to be finished/confirmed.
   const resolvedErrorDocs = useMemo(
     () => documents.filter(d => {
       const isFlagged = (d.hasWrongMaterial || "").toUpperCase() === "YES";
@@ -884,10 +1016,6 @@ export default function IssueCheckForm() {
     [documents]
   );
 
-  // Whenever a NEW Emergency Pick Done shows up (one we haven't alerted for
-  // yet), queue it into the popup. Runs once per new event, not on every 10s
-  // poll — and if a doc later gets checked/completed and then re-flagged, it
-  // can alert again since it drops out of "seen" once no longer pending.
   useEffect(() => {
     setSeenResolvedIds(prevSeen => {
       const newOnes = resolvedErrorDocs.filter(d => !prevSeen.has(d.id));
@@ -903,7 +1031,6 @@ export default function IssueCheckForm() {
 
   // ── Filters ──
   const jobTypes = ["ALL", ...new Set(documents.map(d => d.jobType).filter(Boolean))];
-  const statuses = ["ALL", ...new Set(documents.map(d => d.checkStatus).filter(Boolean))];
 
   const visible = documents.filter(doc => {
     const q = search.toLowerCase();
@@ -912,8 +1039,13 @@ export default function IssueCheckForm() {
       doc.reservationNo, doc.enteredBy, doc.jobType,
     ].some(v => (v || "").toLowerCase().includes(q));
 
-    const matchType   = filterType   === "ALL" || doc.jobType === filterType;
-    const matchStatus = filterStatus === "ALL" || doc.checkStatus === filterStatus;
+    const matchType = filterType === "ALL" || doc.jobType === filterType;
+
+    const isWrongMaterial = (doc.hasWrongMaterial || "").toUpperCase() === "YES";
+    const matchStatus =
+      filterStatus === "ALL" ? true :
+      filterStatus === "wrongmaterial" ? isWrongMaterial :
+      statusClass(doc.checkStatus) === filterStatus;
 
     const docDate = doc.requestDate;
     const matchFrom = !fromDate || (docDate && docDate >= fromDate);
@@ -931,19 +1063,48 @@ export default function IssueCheckForm() {
   const completed = documents.filter(d => statusClass(d.checkStatus) === "completed").length;
   const wrongCount = documents.filter(d => (d.hasWrongMaterial || "").toUpperCase() === "YES").length;
 
+  const handleStatClick = (statusValue) => setFilterStatus(statusValue);
+
   const viewingDoc = documents.find(d => d.id === activeId) || null;
+  const viewingDivisionLabel = viewingDoc?.divisionNo
+    ? `${viewingDoc.divisionNo} — ${divisionNoToName[viewingDoc.divisionNo] || ""}`
+    : null;
 
   return (
     <div className="ip-page">
 
       {activePopup === "hold" && (
-        <HoldPopup operatorNames={checkOperatorNames} onConfirm={handleHoldConfirm} onCancel={closePopup} />
+        <HoldPopup
+          people={popupOperators}
+          peopleLoading={popupOperatorsLoading}
+          onConfirm={handleHoldConfirm}
+          onCancel={closePopup}
+        />
       )}
       {activePopup === "end" && (
-        <CheckDonePopup operatorNames={checkOperatorNames} onConfirm={handleCheckDoneConfirm} onCancel={closePopup} />
+        <CheckDonePopup
+          people={popupOperators}
+          peopleLoading={popupOperatorsLoading}
+          onConfirm={handleCheckDoneConfirm}
+          onCancel={closePopup}
+        />
       )}
       {activePopup === "view" && (
-        <ViewDetailsPopup doc={viewingDoc} onClose={closePopup} />
+        <ViewDetailsPopup
+          doc={viewingDoc}
+          requestId={activeId ? requestIdMap[activeId] : null}
+          divisionLabel={viewingDivisionLabel}
+          onClose={closePopup}
+        />
+      )}
+      {activePopup === "edit" && (
+        <EditPopup
+          doc={viewingDoc}
+          people={popupOperators}
+          peopleLoading={popupOperatorsLoading}
+          onConfirm={handleEditConfirm}
+          onCancel={closePopup}
+        />
       )}
       {resolvedAlertDocs.length > 0 && (
         <ResolvedPickAlertPopup
@@ -1014,7 +1175,7 @@ export default function IssueCheckForm() {
         </div>
       )}
 
-      {/* ── Resolved Picking Error Notification Bar (green, real-time count) ── */}
+      {/* ── Resolved Picking Error Notification Bar ── */}
       {resolvedErrorDocs.length > 0 && (
         <div
           style={{
@@ -1070,7 +1231,7 @@ export default function IssueCheckForm() {
           {jobTypes.map(t => <option key={t} value={t}>{t === "ALL" ? "All Job Types" : t}</option>)}
         </select>
         <select className="ip-filter-select" value={filterStatus} onChange={e => setFilterStatus(e.target.value)}>
-          {statuses.map(s => <option key={s} value={s}>{s === "ALL" ? "All Status" : s}</option>)}
+          {STATUS_FILTERS.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
         </select>
         {/* <DateRangeFilter
           fromDate={fromDate}
@@ -1080,17 +1241,52 @@ export default function IssueCheckForm() {
         /> */}
       </div>
 
-      {/* ── Stats ── */}
+      {/* ── Stats — all clickable, filter the grid below ── */}
       <div className="ip-stats">
-        <div className="ip-stat-chip blue">Total <strong>{total}</strong></div>
-        <div className="ip-stat-chip"><strong style={{color:"#f59e0b"}}>{pending}</strong> Pending</div>
-        <div className="ip-stat-chip"><strong style={{color:"#3b82f6"}}>{inProg}</strong> In Progress</div>
-        <div className="ip-stat-chip"><strong style={{color:"#fb923c"}}>{onHold}</strong> On Hold</div>
-        <div className="ip-stat-chip green">Check Done <strong>{completed}</strong></div>
+        <button
+          type="button"
+          className={`ip-stat-chip blue ip-stat-chip-clickable ${filterStatus === "ALL" ? "active" : ""}`}
+          onClick={() => handleStatClick("ALL")}
+        >
+          Total <strong>{total}</strong>
+        </button>
+        <button
+          type="button"
+          className={`ip-stat-chip ip-stat-chip-clickable ${filterStatus === "pending" ? "active" : ""}`}
+          onClick={() => handleStatClick("pending")}
+        >
+          <strong style={{color:"#f59e0b"}}>{pending}</strong> Pending
+        </button>
+        <button
+          type="button"
+          className={`ip-stat-chip ip-stat-chip-clickable ${filterStatus === "inprogress" ? "active" : ""}`}
+          onClick={() => handleStatClick("inprogress")}
+        >
+          <strong style={{color:"#3b82f6"}}>{inProg}</strong> In Progress
+        </button>
+        <button
+          type="button"
+          className={`ip-stat-chip ip-stat-chip-clickable ${filterStatus === "onhold" ? "active" : ""}`}
+          onClick={() => handleStatClick("onhold")}
+        >
+          <strong style={{color:"#fb923c"}}>{onHold}</strong> On Hold
+        </button>
+        <button
+          type="button"
+          className={`ip-stat-chip green ip-stat-chip-clickable ${filterStatus === "completed" ? "active" : ""}`}
+          onClick={() => handleStatClick("completed")}
+        >
+          Check Done <strong>{completed}</strong>
+        </button>
         {wrongCount > 0 && (
-          <div className="ip-stat-chip" style={{ background: "rgba(239,68,68,0.15)", border: "1px solid #ef4444" }}>
+          <button
+            type="button"
+            className={`ip-stat-chip ip-stat-chip-clickable ${filterStatus === "wrongmaterial" ? "active" : ""}`}
+            style={{ background: "rgba(239,68,68,0.15)", border: "1px solid #ef4444" }}
+            onClick={() => handleStatClick("wrongmaterial")}
+          >
             <strong style={{ color: "#ef4444" }}>{wrongCount}</strong> ⚠️ Wrong Material
-          </div>
+          </button>
         )}
         <div className="ip-stat-chip">Showing <strong style={{color:"#a78bfa"}}>{visible.length}</strong> of {total}</div>
       </div>
@@ -1125,10 +1321,17 @@ export default function IssueCheckForm() {
               key={doc.id}
               doc={doc}
               requestId={requestIdMap[doc.id]}
+              divisionLabel={
+                doc.divisionNo
+                  ? `${doc.divisionNo} — ${divisionNoToName[doc.divisionNo] || ""}`
+                  : null
+              }
               onStart={handleStart}
               onHold={handleHoldClick}
               onEnd={handleEndClick}
               onView={handleViewClick}
+              onEdit={handleEditClick}
+              onDelete={handleDelete}
               cardRef={el => { cardRefs.current[doc.id] = el; }}
               jumpHighlighted={jumpHighlightId === doc.id}
             />
