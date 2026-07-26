@@ -148,11 +148,27 @@ function PersonPicker({ value, onChange, people, loading }) {
 
 function HoldPopup({ people, peopleLoading, onConfirm, onCancel }) {
   const [heldBy, setHeldBy] = useState("");
-  const [pickingErrorKey, setPickingErrorKey] = useState(null);
+  // Multi-select — several reasons can be picked at once (e.g. Shortage AND
+  // Collected Different Material together). "NONE" is exclusive with the
+  // real reasons: picking it clears any other selection, and picking any
+  // real reason clears "NONE".
+  const [pickingErrorKeys, setPickingErrorKeys] = useState([]);
   const [materials, setMaterials] = useState([{ sku: "", qty: "" }]);
 
-  const selectedErrorReason = PICKING_ERROR_REASONS.find(r => r.key === pickingErrorKey) || null;
-  const needsDetails = !!selectedErrorReason && selectedErrorReason.createsError;
+  const toggleReasonKey = (key) => {
+    setPickingErrorKeys(prev => {
+      if (key === "NONE") {
+        return prev.includes("NONE") ? [] : ["NONE"];
+      }
+      const withoutNone = prev.filter(k => k !== "NONE");
+      return withoutNone.includes(key)
+        ? withoutNone.filter(k => k !== key)
+        : [...withoutNone, key];
+    });
+  };
+
+  const selectedReasons = PICKING_ERROR_REASONS.filter(r => pickingErrorKeys.includes(r.key));
+  const needsDetails = selectedReasons.some(r => r.createsError);
 
   const addMaterialRow    = () => setMaterials(prev => [...prev, { sku: "", qty: "" }]);
   const removeMaterialRow = (idx) => setMaterials(prev => prev.filter((_, i) => i !== idx));
@@ -164,20 +180,19 @@ function HoldPopup({ people, peopleLoading, onConfirm, onCancel }) {
 
   const canConfirm =
     !!heldBy &&
-    pickingErrorKey !== null &&
+    pickingErrorKeys.length > 0 &&
     (!needsDetails || (filledMaterials.length > 0 && invalidSkuMaterials.length === 0));
 
   const handleConfirm = () => {
     const hasWrongMaterial = needsDetails ? "YES" : "NO";
     const skuJoined = needsDetails ? filledMaterials.map(m => m.sku.trim()).join("; ") : "";
     const qtyJoined = needsDetails ? filledMaterials.map(m => m.qty.trim()).join("; ") : "";
-    onConfirm(
-      heldBy,
-      hasWrongMaterial,
-      skuJoined,
-      qtyJoined,
-      pickingErrorKey === "NONE" ? "" : (selectedErrorReason ? selectedErrorReason.label : "")
-    );
+    // Multiple selected reasons are combined into one string for the DB —
+    // same field, just a comma-joined list when more than one is picked.
+    const reasonJoined = pickingErrorKeys.includes("NONE")
+      ? ""
+      : selectedReasons.map(r => r.label).join(", ");
+    onConfirm(heldBy, hasWrongMaterial, skuJoined, qtyJoined, reasonJoined);
   };
 
   return (
@@ -187,25 +202,23 @@ function HoldPopup({ people, peopleLoading, onConfirm, onCancel }) {
           <span>⏸ Hold Check</span>
           <button className="ip-popup-close" onClick={onCancel}>✕</button>
         </div>
-        <p className="ip-popup-sub">Select whether there's a picking error, and who is holding this</p>
+        <p className="ip-popup-sub">Select whether there's a picking error (you can pick more than one), and who is holding this</p>
 
         <span className="ip-popup-label">Picking Error?</span>
         <div className="ip-popup-options" style={{ marginBottom: 16 }}>
           {PICKING_ERROR_REASONS.map(r => (
             <button
               key={r.key}
-              className={`ip-popup-option ${pickingErrorKey === r.key ? "selected" : ""}`}
-              onClick={() => {
-                setPickingErrorKey(r.key);
-                if (!r.createsError) setMaterials([{ sku: "", qty: "" }]);
-              }}
+              className={`ip-popup-option ${pickingErrorKeys.includes(r.key) ? "selected" : ""}`}
+              onClick={() => toggleReasonKey(r.key)}
             >
+              {pickingErrorKeys.includes(r.key) ? "☑ " : "☐ "}
               {r.createsError ? "⚠️ " : "ℹ️ "}{r.label}
             </button>
           ))}
           <button
-            className={`ip-popup-option ${pickingErrorKey === "NONE" ? "selected" : ""}`}
-            onClick={() => { setPickingErrorKey("NONE"); setMaterials([{ sku: "", qty: "" }]); }}
+            className={`ip-popup-option ${pickingErrorKeys.includes("NONE") ? "selected" : ""}`}
+            onClick={() => toggleReasonKey("NONE")}
           >
             ✅ No Picking Error
           </button>
