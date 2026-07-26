@@ -189,10 +189,19 @@ function HoldPopup({ onConfirm, onCancel, checkers, checkersLoading }) {
 
 // ── Report Emergency Pick Error Popup ───────────────────────────────────────
 // Only captures fields that exist on the backend entity: wrong_material_sku,
-// wrong_material_qty, checked_by. has_wrong_material is set to "YES" on submit.
+// wrong_material_qty, checked_by (has_wrong_material is set to "YES" on
+// submit). The reason is restricted to Material Shortage / Different
+// Material — Emergency Pick is never valid for a Material Excess situation,
+// so that option is intentionally not offered here.
 const SKU_MIN_LENGTH = 8;
 
+const EMERGENCY_REASONS = [
+  "Material Shortage",
+  "Different Material",
+];
+
 function ReportIssuePopup({ onConfirm, onCancel, checkers, checkersLoading }) {
+  const [reason, setReason] = useState("");
   const [sku, setSku] = useState("");
   const [qty, setQty] = useState("");
   const [checkedBy, setCheckedBy] = useState("");
@@ -210,7 +219,7 @@ function ReportIssuePopup({ onConfirm, onCancel, checkers, checkersLoading }) {
     }
   };
 
-  const canConfirm = sku.trim().length >= SKU_MIN_LENGTH && !!qty && !!checkedBy;
+  const canConfirm = !!reason && sku.trim().length >= SKU_MIN_LENGTH && !!qty && !!checkedBy;
 
   return (
     <div className="ip-popup-overlay">
@@ -221,6 +230,19 @@ function ReportIssuePopup({ onConfirm, onCancel, checkers, checkersLoading }) {
         </div>
         <p className="ip-popup-sub">This will alert the Pick Portal for an emergency re-pick</p>
 
+        <span className="ip-popup-label">Reason</span>
+        <div className="ip-popup-options" style={{ marginBottom: 16 }}>
+          {EMERGENCY_REASONS.map(r => (
+            <button
+              key={r}
+              className={`ip-popup-option ${reason === r ? "selected" : ""}`}
+              onClick={() => setReason(r)}
+            >
+              {r}
+            </button>
+          ))}
+        </div>
+
         <div className="ip-popup-field">
           <span className="ip-popup-label">Wrong Material Code (min {SKU_MIN_LENGTH} characters)</span>
           <input
@@ -229,7 +251,6 @@ function ReportIssuePopup({ onConfirm, onCancel, checkers, checkersLoading }) {
             placeholder="Enter material code..."
             value={sku}
             onChange={handleSkuChange}
-            autoFocus
           />
           {skuError && <span className="ip-field-error">{skuError}</span>}
         </div>
@@ -254,7 +275,7 @@ function ReportIssuePopup({ onConfirm, onCancel, checkers, checkersLoading }) {
           <button
             className="ip-btn ip-btn-emergency"
             disabled={!canConfirm}
-            onClick={() => onConfirm({ sku: sku.trim(), qty, checkedBy })}
+            onClick={() => onConfirm({ reason, sku: sku.trim(), qty, checkedBy })}
           >
             🚨 Report Issue
           </button>
@@ -479,12 +500,13 @@ export default function IssueCheckFormat() {
     return map;
   }, [divisions]);
 
-  // Division-wise checkers — Master Setup has ONE shared "Operator Name
-  // Setup" table (Operator Name / NIC / Operator NIC Name / Division) that
-  // the Print Portal already reads from /print-operators. The Check Portal
-  // uses the SAME master data (there's no separate "checkers" table), so we
-  // hit /print-operators here too and filter client-side on divisionNo —
-  // exactly like the Print Portal does.
+  // Division-wise checkers — a DEDICATED "Checker Name Setup" master table
+  // (separate from Print's "Operator Name Setup" and Pick's "Picker Name
+  // Setup"), same as how the Pick Portal has its own /pickers endpoint
+  // instead of reusing Print's /print-operators. If /checkers 404s or
+  // returns nothing, add a "Checker Name Setup" screen + endpoint in
+  // Admin Master Setup (mirrors the Operator/Picker setup screens) —
+  // adjust the endpoint path below to match whatever your backend calls it.
   const fetchCheckersForDivision = useCallback(async (divisionNo) => {
     if (!divisionNo) {
       setPopupCheckers([]);
@@ -493,19 +515,19 @@ export default function IssueCheckFormat() {
 
     setPopupCheckersLoading(true);
     try {
-      const res = await fetch(`${SETUP_API}/print-operators`);
+      const res = await fetch(`${SETUP_API}/checkers`);
       if (res.ok) {
         const data = await res.json();
         setPopupCheckers(
           (data || [])
-            .filter(op => {
-              const opDivisionNo =
-                op.divisionNo ||
-                (op.division && op.division.divisionNo) ||
+            .filter(c => {
+              const cDivisionNo =
+                c.divisionNo ||
+                (c.division && c.division.divisionNo) ||
                 "";
-              return String(opDivisionNo) === String(divisionNo);
+              return String(cDivisionNo) === String(divisionNo);
             })
-            .map(op => op.operatorNicName || op.operatorName || op.name || op.fullName)
+            .map(c => c.checkerNicName || c.checkerName || c.name || c.fullName)
             .filter(Boolean)
         );
       } else {
@@ -605,7 +627,7 @@ export default function IssueCheckFormat() {
     } catch (err) { alert("Hold failed: " + err.message); }
   };
 
-  const handleReportIssueConfirm = async ({ sku, qty, checkedBy }) => {
+  const handleReportIssueConfirm = async ({ reason, sku, qty, checkedBy }) => {
     const id = activeId;
     closePopup();
     try {
@@ -614,9 +636,14 @@ export default function IssueCheckFormat() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           hasWrongMaterial: "YES",
-          wrongMaterialSku: sku,
+          // NOTE: the Issue entity has no dedicated reason column today, so
+          // the reason is prefixed onto wrongMaterialSku so it isn't lost.
+          // pickingErrorReason is also sent in case that column gets added
+          // on the backend later — harmless extra field otherwise.
+          wrongMaterialSku: `[${reason}] ${sku}`,
           wrongMaterialQty: qty,
           checkedBy,
+          pickingErrorReason: reason,
         }),
       });
       fetchDocuments(true);
