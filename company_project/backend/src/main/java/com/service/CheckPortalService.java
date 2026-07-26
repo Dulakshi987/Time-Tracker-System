@@ -122,8 +122,8 @@ public class CheckPortalService {
         return issueRepository.save(doc);
     }
  
-    public void delete(Long id) {
-        issueRepository.deleteById(id);
-    }
+    // public void delete(Long id) {
+    //     issueRepository.deleteById(id);
+    // }
 }
  

@@ -86,11 +86,11 @@ public class CheckPortalController {
         }
     }
 
-    @DeleteMapping("/{id}")
-    public ResponseEntity<Void> delete(@PathVariable Long id) {
-        checkPortalService.delete(id);
-        return ResponseEntity.noContent().build();
-    }
+    // @DeleteMapping("/{id}")
+    // public ResponseEntity<Void> delete(@PathVariable Long id) {
+    //     checkPortalService.delete(id);
+    //     return ResponseEntity.noContent().build();
+    // }
 
     @PutMapping("/{id}/edit")
     public Issue editCheck(@PathVariable Long id, @RequestBody Map<String, String> body) {
