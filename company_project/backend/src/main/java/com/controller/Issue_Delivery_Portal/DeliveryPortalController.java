@@ -77,6 +77,41 @@ public class DeliveryPortalController {
         }
     }
 
+    // body: { handoverBy }
+    // Only meaningful while the row is On Hold or Cancelled — the frontend
+    // enforces this by disabling the button otherwise.
+    @PutMapping("/{id}/handover")
+    public ResponseEntity<Issue> handover(@PathVariable Long id, @RequestBody Map<String, String> body) {
+        try {
+            return ResponseEntity.ok(deliveryPortalService.handoverDelivery(
+                    id, body.getOrDefault("handoverBy", "")));
+        } catch (RuntimeException e) {
+            return ResponseEntity.notFound().build();
+        }
+    }
+
+    // No body required — clears the handover stamp and resets deliveryStatus
+    // back to PENDING so Delivered / Hold / Cancel unlock again on the UI.
+    @PutMapping("/{id}/reactivate")
+    public ResponseEntity<Issue> reactivate(@PathVariable Long id) {
+        try {
+            return ResponseEntity.ok(deliveryPortalService.reactivateDelivery(id));
+        } catch (RuntimeException e) {
+            return ResponseEntity.notFound().build();
+        }
+    }
+
+    // body: { heldBy, cancelledBy, deliveredBy } — any of these may be omitted/null
+    @PutMapping("/{id}/edit")
+    public ResponseEntity<Issue> edit(@PathVariable Long id, @RequestBody Map<String, String> body) {
+        try {
+            return ResponseEntity.ok(deliveryPortalService.editDelivery(
+                    id, body.get("heldBy"), body.get("cancelledBy"), body.get("deliveredBy")));
+        } catch (RuntimeException e) {
+            return ResponseEntity.notFound().build();
+        }
+    }
+
     // body: { vehicleNo } — the *request* vehicle number
     @PutMapping("/{id}/vehicle")
     public ResponseEntity<Issue> updateVehicle(@PathVariable Long id, @RequestBody Map<String, String> body) {

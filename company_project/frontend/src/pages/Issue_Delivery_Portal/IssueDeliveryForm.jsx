@@ -1032,19 +1032,27 @@ export default function IssueDeliveryForm() {
   // Reactivate — reverses a Handover. Clears doc.handoverBy/handoverTime and
   // unlocks Delivered / Hold / Cancel / Delete for this row again.
   // NOTE: this calls PUT {API_BASE}/{id}/reactivate with no body.
-  // Add this endpoint on the backend (mirroring /handover): it should clear
-  // handoverBy + handoverTime so the row is no longer "handed over". If you
-  // also want Delivered/Hold/Cancel to be freely re-clickable even while the
-  // status is still On Hold / Cancelled, the backend should reset
-  // deliveryStatus back to a re-actionable state (e.g. "pending") too.
+  // BACKEND CONTRACT: this endpoint must clear handoverBy + handoverTime,
+  // AND reset deliveryStatus away from "On Hold"/"Cancelled" (e.g. back to
+  // "Pending") — otherwise the row will re-lock itself on the next refresh,
+  // since Hold/Cancelled status locks the row on its own.
+  // We also apply an OPTIMISTIC local update immediately on click so the
+  // buttons unlock instantly, without waiting for the next poll.
   const handleReactivateClick = async (id) => {
     if (!window.confirm("Reactivate this document? This will unlock Delivered / Hold / Cancel for this row again.")) return;
+
+    // Optimistic unlock — flip this row to Pending + clear handover locally.
+    setDocuments(prev => prev.map(d =>
+      d.id === id ? { ...d, deliveryStatus: "PENDING", handoverBy: null, handoverTime: null } : d
+    ));
+
     try {
       const res = await fetch(`${API_BASE}/${id}/reactivate`, { method: "PUT" });
       if (!res.ok) throw new Error(`Server error: ${res.status}`);
       fetchDocuments(true);
     } catch (err) {
       alert("Reactivate failed: " + err.message);
+      fetchDocuments(true); // roll back to server truth if the call failed
     }
   };
 

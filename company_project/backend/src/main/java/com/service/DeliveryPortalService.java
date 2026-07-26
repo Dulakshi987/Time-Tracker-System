@@ -100,6 +100,48 @@ public class DeliveryPortalService {
         return issueRepository.save(doc);
     }
 
+    // body: { handoverBy }
+    // Can only meaningfully be called from the frontend while the row is
+    // ON_HOLD or CANCELLED (enforced client-side); stamps who handed the
+    // document over and when. This is what causes the Delivery Portal row
+    // to lock (Delivered / Hold / Cancel / Delete) until it's reactivated.
+    public Issue handoverDelivery(Long id, String handoverBy) {
+        Issue doc = getById(id);
+
+        doc.setHandoverBy(handoverBy);
+        doc.setHandoverTime(LocalDateTime.now());
+
+        return issueRepository.save(doc);
+    }
+
+    // Reactivate — reverses a Handover. Clears the handover stamp AND resets
+    // deliveryStatus back to PENDING so the Delivery Portal row actually
+    // unlocks (ON_HOLD / CANCELLED status locks the row on its own, so
+    // clearing handoverBy alone would not be enough).
+    public Issue reactivateDelivery(Long id) {
+        Issue doc = getById(id);
+
+        doc.setHandoverBy(null);
+        doc.setHandoverTime(null);
+        doc.setDeliveryStatus("PENDING");
+
+        return issueRepository.save(doc);
+    }
+
+    // body: { heldBy, cancelledBy, deliveredBy }
+    // Lets an admin correct who was recorded against Hold / Cancel / Delivered
+    // after the fact, without re-running those actions. Any field left null
+    // in the request is left untouched.
+    public Issue editDelivery(Long id, String heldBy, String cancelledBy, String deliveredBy) {
+        Issue doc = getById(id);
+
+        if (heldBy != null)      doc.setDeliveryHeldBy(heldBy);
+        if (cancelledBy != null) doc.setDeliveryCancelledBy(cancelledBy);
+        if (deliveredBy != null) doc.setDeliveredBy(deliveredBy);
+
+        return issueRepository.save(doc);
+    }
+
     // Request-time vehicle number (doc.vehicleNo)
     public Issue updateVehicleNo(Long id, String vehicleNo) {
         Issue doc = getById(id);

@@ -226,6 +226,12 @@ public class Issue {
     @Column(name = "delivery_confirmed")
     private Boolean deliveryConfirmed;
 
+    @Column(name = "handover_by")
+    private String handoverBy;
+ 
+    @Column(name = "handover_time")
+    private LocalDateTime handoverTime;
+
     @Column(name = "delivery_confirmed_by")
     private String deliveryConfirmedBy;
 
