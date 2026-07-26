@@ -484,9 +484,8 @@ body {
 .ip-btn-handover:hover,
 .ip-btn-handover-action:hover { background: #9333ea !important; }
 
-/* View / outline button — same treatment in card and popup */
+/* Outline button — default treatment (Cancel in popups, Refresh in header) */
 .ip-btn-outline,
-.ip-card .ip-btn-outline,
 .ip-popup-foot .ip-btn-outline {
   background: transparent !important;
   color: var(--ip-muted) !important;
@@ -495,14 +494,27 @@ body {
 }
 
 .ip-btn-outline:hover:not(:disabled),
-.ip-card .ip-btn-outline:hover,
-.ip-card .ip-btn-outline:focus,
-.ip-card .ip-btn-outline:active {
+.ip-popup-foot .ip-btn-outline:hover {
   background: var(--ip-surface2) !important;
   color: var(--ip-text) !important;
 }
 
-.ip-card .ip-btn-outline * { color: inherit !important; }
+/* View button — always gray background, white text/icon */
+.ip-card-foot .ip-btn-outline,
+.ip-card-foot .ip-btn-outline:hover,
+.ip-card-foot .ip-btn-outline:focus,
+.ip-card-foot .ip-btn-outline:active {
+  background: #6b7280 !important;
+  color: #ffffff !important;
+  border: 1px solid #6b7280 !important;
+  font-weight: 700 !important;
+}
+
+.ip-card-foot .ip-btn-outline:hover:not(:disabled) {
+  background: #4b5563 !important;
+}
+
+.ip-card-foot .ip-btn-outline * { color: #ffffff !important; }
 
 /* ─── Badges ──────────────────────────────────────────────────────── */
 
@@ -555,7 +567,7 @@ body {
 }
 
 .ip-popup-head span {
-  color: #fff !important;
+  color: #000000 !important;
   font-weight: 700;
   font-size: 1rem;
 }
@@ -579,13 +591,13 @@ body {
 .ip-popup-close * { color: inherit !important; }
 
 .ip-popup-sub {
-  color: var(--ip-muted) !important;
+  color: #374151 !important;
   font-size: 0.8rem;
   margin: 0 0 18px;
 }
 
 .ip-popup-label {
-  color: var(--ip-muted) !important;
+  color: #111827 !important;
   font-size: 0.78rem;
   font-weight: 600;
   margin-bottom: 6px;
@@ -743,9 +755,9 @@ body {
 }
 
 .ip-error-chip {
-  background: rgba(235, 4, 4, 0.15);
+  background: rgba(239, 68, 68, 0.15);
   border: 1px solid rgba(239, 68, 68, 0.4);
-  color: #080808;
+  color: #fca5a5;
   border-radius: 8px;
   padding: 6px 12px;
   font-size: 0.78rem;
