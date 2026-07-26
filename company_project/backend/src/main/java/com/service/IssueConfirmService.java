@@ -6,6 +6,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 @Service
@@ -15,7 +16,6 @@ public class IssueConfirmService {
     private IssueRepository issueRepository;
 
     // Only delivered / cancelled documents belong on the Confirm Portal.
-    // (Hold documents are intentionally excluded — they don't belong here.)
     public List<Issue> getAllConfirmDocuments() {
         return issueRepository.findAll().stream()
                 .filter(issue -> isConfirmRelevant(issue.getDeliveryStatus()))
@@ -35,9 +35,7 @@ public class IssueConfirmService {
                 .orElseThrow(() -> new RuntimeException("Issue not found: " + id));
     }
 
-    // "Add to File" — stamps the Req ID (computed on the frontend the same way
-    // the Print Portal computes it) and saves the user-entered file number.
-    // Guarded so the same document can't be filed twice.
+    // "Add to File"
     public Issue addToFile(Long id, String reqId, String fileNumber) {
         Issue issue = issueRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("Issue not found: " + id));
@@ -51,7 +49,7 @@ public class IssueConfirmService {
         return issueRepository.save(issue);
     }
 
-    // ── NEW: Edit an existing file number ───────────────────────────────
+    // Edit an existing file number
     public Issue editFile(Long id, String newFileNumber) {
         Issue issue = issueRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("Issue not found: " + id));
@@ -64,7 +62,7 @@ public class IssueConfirmService {
         return issueRepository.save(issue);
     }
 
-    // ── NEW: Remove file number (revert document to "not filed") ───────
+    // Remove file number (revert document to "not filed")
     public Issue removeFile(Long id) {
         Issue issue = issueRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("Issue not found: " + id));
@@ -73,9 +71,35 @@ public class IssueConfirmService {
         return issueRepository.save(issue);
     }
 
+    // ── NEW: Edit Delivered/Cancelled detail fields ──────────────────────
+    // Only touches whichever of these keys are present in `fields`:
+    //   deliveredBy, deliveryCancelReason, deliveryCancelledBy
+    public Issue editStatusDetails(Long id, Map<String, String> fields) {
+        Issue issue = issueRepository.findById(id)
+                .orElseThrow(() -> new RuntimeException("Issue not found: " + id));
+
+        if (fields.containsKey("deliveredBy")) {
+            issue.setDeliveredBy(fields.get("deliveredBy"));
+        }
+        if (fields.containsKey("deliveryCancelReason")) {
+            issue.setDeliveryCancelReason(fields.get("deliveryCancelReason"));
+        }
+        if (fields.containsKey("deliveryCancelledBy")) {
+            issue.setDeliveryCancelledBy(fields.get("deliveryCancelledBy"));
+        }
+
+        return issueRepository.save(issue);
+    }
+
+    // ── NEW: Permanently delete a document ───────────────────────────────
+    public void deleteIssue(Long id) {
+        Issue issue = issueRepository.findById(id)
+                .orElseThrow(() -> new RuntimeException("Issue not found: " + id));
+        issueRepository.delete(issue);
+    }
+
     // ── Helpers ──────────────────────────────────────────────────────────
 
-    // Hold removed on purpose — only delivered/cancelled qualify now.
     private boolean isConfirmRelevant(String status) {
         if (status == null)
             return false;
@@ -83,7 +107,6 @@ public class IssueConfirmService {
         return v.contains("cancel") || v.contains("complete") || v.contains("done");
     }
 
-    // Maps raw deliveryStatus text down to one of: delivered | cancelled
     private String normalize(String status) {
         if (status == null)
             return "";

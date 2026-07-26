@@ -40,8 +40,6 @@ public class IssueConfirmController {
     }
 
     // ── PUT Add to File ─────────────────────────────────────────────────
-    // body: { reqId, fileNumber } — fileNumber is now entered by the user via
-    // the "Add to File" popup on the frontend, not auto-generated on the server.
     @PutMapping("/{id}/add-to-file")
     public ResponseEntity<?> addToFile(
             @PathVariable Long id,
@@ -64,8 +62,6 @@ public class IssueConfirmController {
     }
 
     // ── PUT Edit File Number ────────────────────────────────────────────
-    // body: { fileNumber } — only allowed once the document already has a
-    // file number (i.e. it was already added to file).
     @PutMapping("/{id}/edit-file")
     public ResponseEntity<?> editFile(
             @PathVariable Long id,
@@ -86,13 +82,39 @@ public class IssueConfirmController {
         }
     }
 
-    // ── DELETE File Number ──────────────────────────────────────────────
-    // Clears the file number/reqId, sending the document back to "not filed".
-    // Does NOT delete the underlying Issue/document itself.
+    // ── DELETE File Number (revert to "not filed", document stays) ──────
     @DeleteMapping("/{id}/file")
     public ResponseEntity<?> deleteFile(@PathVariable Long id) {
         try {
             return ResponseEntity.ok(issueConfirmService.removeFile(id));
+        } catch (RuntimeException e) {
+            return ResponseEntity.notFound().build();
+        }
+    }
+
+    // ── NEW: PUT Edit Status details ─────────────────────────────────────
+    // Used when the Delivered / Cancelled badge is clicked and edited.
+    // body may include any of: deliveredBy, deliveryCancelReason, deliveryCancelledBy
+    // Only the fields present in the body are updated.
+    @PutMapping("/{id}/edit-status")
+    public ResponseEntity<?> editStatus(
+            @PathVariable Long id,
+            @RequestBody Map<String, String> body) {
+        try {
+            return ResponseEntity.ok(issueConfirmService.editStatusDetails(id, body));
+        } catch (RuntimeException e) {
+            return ResponseEntity.notFound().build();
+        }
+    }
+
+    // ── NEW: DELETE the whole document ───────────────────────────────────
+    // Used by the Delivered / Cancelled badge's Delete option. Permanently
+    // removes the document from the system (not just the file number).
+    @DeleteMapping("/{id}")
+    public ResponseEntity<?> deleteDocument(@PathVariable Long id) {
+        try {
+            issueConfirmService.deleteIssue(id);
+            return ResponseEntity.ok().build();
         } catch (RuntimeException e) {
             return ResponseEntity.notFound().build();
         }

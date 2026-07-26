@@ -46,8 +46,8 @@ function jobTypeColor(jt) {
 }
 
 // NOTE: "hold" no longer surfaces in this portal (Confirm Portal only shows
-// delivered/cancelled), but the classifier is left intact for safety in
-// case a stray record with an unexpected status ever reaches the frontend.
+// delivered/cancelled), left intact for safety in case a stray record with
+// an unexpected status ever reaches the frontend.
 function statusClass(s) {
   const v = (s || "").toLowerCase();
   if (v.includes("cancel"))   return "cancelled";
@@ -179,10 +179,7 @@ function AddFilePopup({ doc, reqId, activeFileNo, loadingFileNo, fileNoError, on
   );
 }
 
-// ── NEW: Edit / Delete File popup ───────────────────────────────────────────
-// Opened by clicking a "Filed" badge or the file number itself. Lets the
-// user correct a wrong file number (Edit) or clear it entirely (Delete),
-// which sends the document back to "not filed".
+// ── Edit / Delete File popup (opened from the "Filed" badge / file no.) ────
 
 function FileEditPopup({ doc, editValue, onEditValueChange, saving, onSave, onDelete, onCancel }) {
   return (
@@ -210,7 +207,7 @@ function FileEditPopup({ doc, editValue, onEditValueChange, saving, onSave, onDe
         </div>
 
         <div className="icf-popup-foot">
-          <button className="icf-btn icf-btn-danger" disabled={saving} onClick={onDelete}>
+          <button className="icf-btn-danger" disabled={saving} onClick={onDelete}>
             🗑 Delete
           </button>
           <div style={{ flex: 1 }} />
@@ -230,7 +227,82 @@ function FileEditPopup({ doc, editValue, onEditValueChange, saving, onSave, onDe
   );
 }
 
-// ── View Drawer helpers (same pattern as Delivery Portal) ─────────────────
+// ── NEW: Edit / Delete Status popup (opened from Delivered / Cancelled) ────
+// Edit lets the user correct who delivered/cancelled it (and the cancel
+// reason). Delete permanently removes the whole document from the system.
+
+function StatusEditPopup({ doc, fields, onFieldChange, saving, onSave, onDelete, onCancel }) {
+  const sc = statusClass(doc.deliveryStatus);
+  const isDelivered = sc === "completed";
+
+  return (
+    <div className="icf-popup-overlay">
+      <div className="icf-popup">
+        <div className="icf-popup-head">
+          <span>{isDelivered ? "🚚 Edit Delivered Details" : "✕ Edit Cancelled Details"}</span>
+          <button className="icf-popup-close" onClick={onCancel}>✕</button>
+        </div>
+        <p className="icf-popup-sub">
+          {doc.printDocumentNo || `Doc #${doc.id}`}
+        </p>
+
+        {isDelivered ? (
+          <div className="icf-popup-field">
+            <span className="icf-popup-label">Delivered By</span>
+            <input
+              className="icf-popup-text-input"
+              type="text"
+              value={fields.deliveredBy}
+              onChange={e => onFieldChange("deliveredBy", e.target.value)}
+              placeholder="Enter name"
+              disabled={saving}
+            />
+          </div>
+        ) : (
+          <>
+            <div className="icf-popup-field">
+              <span className="icf-popup-label">Cancelled By</span>
+              <input
+                className="icf-popup-text-input"
+                type="text"
+                value={fields.deliveryCancelledBy}
+                onChange={e => onFieldChange("deliveryCancelledBy", e.target.value)}
+                placeholder="Enter name"
+                disabled={saving}
+              />
+            </div>
+            <div className="icf-popup-field">
+              <span className="icf-popup-label">Cancel Reason</span>
+              <input
+                className="icf-popup-text-input"
+                type="text"
+                value={fields.deliveryCancelReason}
+                onChange={e => onFieldChange("deliveryCancelReason", e.target.value)}
+                placeholder="Enter reason"
+                disabled={saving}
+              />
+            </div>
+          </>
+        )}
+
+        <div className="icf-popup-foot">
+          <button className="icf-btn-danger" disabled={saving} onClick={onDelete}>
+            🗑 Delete Document
+          </button>
+          <div style={{ flex: 1 }} />
+          <button className="icf-btn icf-btn-outline" disabled={saving} onClick={onCancel}>
+            Cancel
+          </button>
+          <button className="icf-btn-done" disabled={saving} onClick={onSave}>
+            {saving ? "Saving..." : "✓ Save"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── View Drawer helpers (light theme) ───────────────────────────────────────
 
 function DetailRow({ label, value }) {
   return (
@@ -250,7 +322,7 @@ function Section({ icon, title, children, accent }) {
   );
 }
 
-// ── Side Drawer: full document trail ───────────────────────────────────────
+// ── Side Drawer: full document trail (light theme, black text on white) ────
 
 function ViewDrawer({ doc, reqId, onClose }) {
   const ds = displayStatus(doc);
@@ -375,7 +447,7 @@ function ViewDrawer({ doc, reqId, onClose }) {
         </div>
 
         <div className="icf-popup-foot">
-          <button className="icf-btn icf-btn-outline" onClick={onClose}>Close</button>
+          <button className="icf-drawer-close-btn" onClick={onClose}>Close</button>
         </div>
       </div>
     </div>
@@ -400,11 +472,15 @@ export default function IssueConfirm() {
   const [loadingFileNo, setLoadingFileNo] = useState(false);
   const [fileNoError,   setFileNoError]   = useState(null);
 
-  // NEW: Edit/Delete file popup state — opened by clicking a "Filed" badge
-  // or the file number itself.
-  const [editDoc,        setEditDoc]        = useState(null);
-  const [editValue,      setEditValue]      = useState("");
+  // Edit/Delete FILE popup state — opened from "Filed" badge / file number
+  const [editFileDoc,      setEditFileDoc]      = useState(null);
+  const [editFileValue,    setEditFileValue]    = useState("");
   const [fileActionSaving, setFileActionSaving] = useState(false);
+
+  // NEW: Edit/Delete STATUS popup state — opened from Delivered / Cancelled badge
+  const [editStatusDoc,      setEditStatusDoc]      = useState(null);
+  const [statusFields,       setStatusFields]       = useState({ deliveredBy: "", deliveryCancelledBy: "", deliveryCancelReason: "" });
+  const [statusActionSaving, setStatusActionSaving] = useState(false);
 
   const fetchDocuments = useCallback(async (silent = false) => {
     if (!silent) setLoading(true); else setRefreshing(true);
@@ -495,26 +571,26 @@ export default function IssueConfirm() {
     }
   };
 
-  // ── NEW: Edit / Delete file number ──────────────────────────────────
+  // ── Edit / Delete FILE number (Filed badge) ─────────────────────────
 
   const openFileEdit = (doc) => {
-    setEditDoc(doc);
-    setEditValue(doc.fileNumber || "");
+    setEditFileDoc(doc);
+    setEditFileValue(doc.fileNumber || "");
   };
 
   const closeFileEdit = () => {
-    setEditDoc(null);
-    setEditValue("");
+    setEditFileDoc(null);
+    setEditFileValue("");
   };
 
-  const handleSaveEdit = async () => {
-    if (!editDoc || !editValue.trim()) return;
+  const handleSaveFileEdit = async () => {
+    if (!editFileDoc || !editFileValue.trim()) return;
     setFileActionSaving(true);
     try {
-      const res = await fetch(`${CONFIRM_API}/${editDoc.id}/edit-file`, {
+      const res = await fetch(`${CONFIRM_API}/${editFileDoc.id}/edit-file`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ fileNumber: editValue.trim() }),
+        body: JSON.stringify({ fileNumber: editFileValue.trim() }),
       });
       if (!res.ok) throw new Error(`Server error: ${res.status}`);
       const updated = await res.json();
@@ -527,12 +603,12 @@ export default function IssueConfirm() {
     }
   };
 
-  const handleDeleteFile = async () => {
-    if (!editDoc) return;
-    if (!window.confirm(`Remove file number ${editDoc.fileNumber}? This document will go back to "not filed".`)) return;
+  const handleDeleteFileNumber = async () => {
+    if (!editFileDoc) return;
+    if (!window.confirm(`Remove file number ${editFileDoc.fileNumber}? This document will go back to "not filed".`)) return;
     setFileActionSaving(true);
     try {
-      const res = await fetch(`${CONFIRM_API}/${editDoc.id}/file`, { method: "DELETE" });
+      const res = await fetch(`${CONFIRM_API}/${editFileDoc.id}/file`, { method: "DELETE" });
       if (!res.ok) throw new Error(`Server error: ${res.status}`);
       const updated = await res.json();
       setDocuments(prev => prev.map(d => d.id === updated.id ? updated : d));
@@ -541,6 +617,67 @@ export default function IssueConfirm() {
       alert("Delete failed: " + err.message);
     } finally {
       setFileActionSaving(false);
+    }
+  };
+
+  // ── NEW: Edit / Delete STATUS (Delivered / Cancelled badge) ─────────
+
+  const openStatusEdit = (doc) => {
+    setEditStatusDoc(doc);
+    setStatusFields({
+      deliveredBy: doc.deliveredBy || "",
+      deliveryCancelledBy: doc.deliveryCancelledBy || "",
+      deliveryCancelReason: doc.deliveryCancelReason || "",
+    });
+  };
+
+  const closeStatusEdit = () => {
+    setEditStatusDoc(null);
+    setStatusFields({ deliveredBy: "", deliveryCancelledBy: "", deliveryCancelReason: "" });
+  };
+
+  const handleStatusFieldChange = (key, value) => {
+    setStatusFields(prev => ({ ...prev, [key]: value }));
+  };
+
+  const handleSaveStatusEdit = async () => {
+    if (!editStatusDoc) return;
+    const sc = statusClass(editStatusDoc.deliveryStatus);
+    const body = sc === "completed"
+      ? { deliveredBy: statusFields.deliveredBy }
+      : { deliveryCancelledBy: statusFields.deliveryCancelledBy, deliveryCancelReason: statusFields.deliveryCancelReason };
+
+    setStatusActionSaving(true);
+    try {
+      const res = await fetch(`${CONFIRM_API}/${editStatusDoc.id}/edit-status`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) throw new Error(`Server error: ${res.status}`);
+      const updated = await res.json();
+      setDocuments(prev => prev.map(d => d.id === updated.id ? updated : d));
+      closeStatusEdit();
+    } catch (err) {
+      alert("Edit failed: " + err.message);
+    } finally {
+      setStatusActionSaving(false);
+    }
+  };
+
+  const handleDeleteDocument = async () => {
+    if (!editStatusDoc) return;
+    if (!window.confirm(`Permanently delete ${editStatusDoc.printDocumentNo || `Doc #${editStatusDoc.id}`}? This cannot be undone.`)) return;
+    setStatusActionSaving(true);
+    try {
+      const res = await fetch(`${CONFIRM_API}/${editStatusDoc.id}`, { method: "DELETE" });
+      if (!res.ok) throw new Error(`Server error: ${res.status}`);
+      setDocuments(prev => prev.filter(d => d.id !== editStatusDoc.id));
+      closeStatusEdit();
+    } catch (err) {
+      alert("Delete failed: " + err.message);
+    } finally {
+      setStatusActionSaving(false);
     }
   };
 
@@ -567,15 +704,27 @@ export default function IssueConfirm() {
         />
       )}
 
-      {editDoc && (
+      {editFileDoc && (
         <FileEditPopup
-          doc={editDoc}
-          editValue={editValue}
-          onEditValueChange={setEditValue}
+          doc={editFileDoc}
+          editValue={editFileValue}
+          onEditValueChange={setEditFileValue}
           saving={fileActionSaving}
-          onSave={handleSaveEdit}
-          onDelete={handleDeleteFile}
+          onSave={handleSaveFileEdit}
+          onDelete={handleDeleteFileNumber}
           onCancel={closeFileEdit}
+        />
+      )}
+
+      {editStatusDoc && (
+        <StatusEditPopup
+          doc={editStatusDoc}
+          fields={statusFields}
+          onFieldChange={handleStatusFieldChange}
+          saving={statusActionSaving}
+          onSave={handleSaveStatusEdit}
+          onDelete={handleDeleteDocument}
+          onCancel={closeStatusEdit}
         />
       )}
 
@@ -661,9 +810,9 @@ export default function IssueConfirm() {
                     <td>
                       <span
                         className={`icf-badge ${ds.cls}`}
-                        style={isFiled ? { cursor: "pointer" } : undefined}
-                        title={isFiled ? "Click to edit or delete this file entry" : undefined}
-                        onClick={isFiled ? () => openFileEdit(doc) : undefined}
+                        style={{ cursor: "pointer" }}
+                        title="Click to edit or delete"
+                        onClick={() => (isFiled ? openFileEdit(doc) : openStatusEdit(doc))}
                       >
                         {ds.label}
                       </span>
