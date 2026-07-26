@@ -105,9 +105,9 @@ public class CheckPortalService {
         return issueRepository.save(doc);
     }
 
-    public void delete(Long id) {
-        issueRepository.deleteById(id);
-    }
+    // public void delete(Long id) {
+    //     issueRepository.deleteById(id);
+    // }
      // fields change; status, timestamps, and durations are left untouched.
     public Issue editCheck(Long id, String heldBy, String checkedBy) {
         Issue doc = getById(id);
@@ -122,8 +122,8 @@ public class CheckPortalService {
         return issueRepository.save(doc);
     }
  
-    // public void delete(Long id) {
-    //     issueRepository.deleteById(id);
-    // }
+    public void delete(Long id) {
+        issueRepository.deleteById(id);
+    }
 }
  
