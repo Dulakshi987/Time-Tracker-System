@@ -193,7 +193,6 @@ public class Issue {
     @Column(name = "division_no")
     private String divisionNo;
 
-
     @Column(name = "delivery_held_by")
     private String deliveryHeldBy;
 

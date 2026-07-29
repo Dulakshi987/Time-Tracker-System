@@ -596,11 +596,86 @@ function StaffPanel() {
   );
 }
 
+// ── Reusable multi-select dropdown for divisions ─────────────────────────
+// Stores the selection as a single comma-separated string (e.g. "D1,D2")
+// so it drops straight into the existing `division_no` VARCHAR column —
+// no DB schema change needed. Click the box to open, tick as many
+// divisions as needed, click "Done" (or outside) to close.
+function MultiDivisionSelect({ divisions, value, onChange }) {
+  const [open, setOpen] = useState(false);
+  const selectedArr = (value || "").split(",").map(s => s.trim()).filter(Boolean);
+
+  const toggle = (divisionNo) => {
+    const next = selectedArr.includes(divisionNo)
+      ? selectedArr.filter(v => v !== divisionNo)
+      : [...selectedArr, divisionNo];
+    onChange(next.join(","));
+  };
+
+  const summary = selectedArr.length === 0 ? "Select division(s)…" : selectedArr.join(", ");
+
+  return (
+    <div style={{ position: "relative" }}>
+      <button
+        type="button"
+        className="adm-operator-select"
+        onClick={() => setOpen(o => !o)}
+        style={{ width: "100%", textAlign: "left", cursor: "pointer" }}
+      >
+        {summary}
+      </button>
+
+      {open && (
+        <>
+          {/* invisible backdrop so clicking outside closes the list */}
+          <div
+            onClick={() => setOpen(false)}
+            style={{ position: "fixed", inset: 0, zIndex: 9 }}
+          />
+          <div
+            style={{
+              position: "absolute", top: "100%", left: 0, marginTop: 4,
+              minWidth: "100%", background: "#0e1b2c", border: "1px solid #2a4062",
+              borderRadius: 8, padding: 8, zIndex: 10, maxHeight: 220, overflowY: "auto",
+              boxShadow: "0 8px 20px rgba(0,0,0,0.35)",
+            }}
+          >
+            {divisions.length === 0 ? (
+              <div style={{ color: "#7d93b2", fontSize: 13, padding: 4 }}>No divisions found</div>
+            ) : divisions.map(d => (
+              <label
+                key={d.id ?? d.divisionNo}
+                style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 4px", cursor: "pointer", color: "#dce8fa", fontSize: 13 }}
+              >
+                <input
+                  type="checkbox"
+                  checked={selectedArr.includes(d.divisionNo)}
+                  onChange={() => toggle(d.divisionNo)}
+                />
+                {d.divisionNo} — {d.divisionName}
+              </label>
+            ))}
+            <button
+              type="button"
+              className="adm-config-add-btn"
+              style={{ marginTop: 6, width: "100%" }}
+              onClick={() => setOpen(false)}
+            >
+              Done
+            </button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 // ── 2) User Accounts panel ──────────────────────────────────────────────
 function UserAccountsPanel() {
   const [staffOptions, setStaffOptions] = useState([]);
+  const [divisions, setDivisions] = useState([]);
   const [rows, setRows] = useState([]);
-  const [form, setForm] = useState({ staffName: "", fullName: "", nic: "", username: "", password: "", confirmPassword: "" });
+  const [form, setForm] = useState({ staffName: "", fullName: "", nic: "", username: "", password: "", confirmPassword: "", divisionNo: "" });
   const [editId, setEditId] = useState(null);
   const [err, setErr] = useState(null);
   const [showForgot, setShowForgot] = useState(false);
@@ -609,16 +684,31 @@ function UserAccountsPanel() {
 
   const load = useCallback(() => {
     apiGet("/staff").then(list => setStaffOptions(list.map(s => s.name)));
+    apiGet("/divisions").then(setDivisions).catch(() => {});
     apiGet("/users").then(setRows).catch(e => setErr(e.message));
   }, []);
   useEffect(() => { load(); const id = setInterval(load, AUTO_REFRESH); return () => clearInterval(id); }, [load]);
+
+  // divisionNo -> divisionName, so the table can show full labels for
+  // each comma-separated code stored against a user.
+  const divisionNameByNo = useMemo(() => {
+    const map = {};
+    divisions.forEach(d => { map[d.divisionNo] = d.divisionName; });
+    return map;
+  }, [divisions]);
+
+  const formatDivisionLabel = useCallback((divisionNo) => {
+    const codes = (divisionNo || "").split(",").map(s => s.trim()).filter(Boolean);
+    if (codes.length === 0) return "—";
+    return codes.map(c => `${c} — ${divisionNameByNo[c] || ""}`).join(", ");
+  }, [divisionNameByNo]);
 
   const submit = async () => {
     setErr(null);
     try {
       const body = { ...form, createdBy: "admin" };
       if (editId) await apiPut(`/users/${editId}`, body); else await apiPost("/users", body);
-      setForm({ staffName: "", fullName: "", nic: "", username: "", password: "", confirmPassword: "" });
+      setForm({ staffName: "", fullName: "", nic: "", username: "", password: "", confirmPassword: "", divisionNo: "" });
       setEditId(null); load();
     } catch (e) { setErr(e.message); }
   };
@@ -643,6 +733,13 @@ function UserAccountsPanel() {
           <option value="">Select staff / user character…</option>
           {staffOptions.map(n => <option key={n} value={n}>{n}</option>)}
         </select>
+
+        <MultiDivisionSelect
+          divisions={divisions}
+          value={form.divisionNo}
+          onChange={divisionNo => setForm({ ...form, divisionNo })}
+        />
+
         <input className="adm-config-input" placeholder="Full Name" value={form.fullName} onChange={e => setForm({ ...form, fullName: e.target.value })} />
         <input className="adm-config-input" placeholder="NIC" value={form.nic} onChange={e => setForm({ ...form, nic: e.target.value })} />
         <input className="adm-config-input" placeholder="Username" value={form.username} onChange={e => setForm({ ...form, username: e.target.value })} />
@@ -651,7 +748,7 @@ function UserAccountsPanel() {
       </div>
       <div className="adm-setup-form-row">
         <button className="adm-config-add-btn" onClick={submit}>{editId ? "Update Account" : "+ Create Account"}</button>
-        {editId && <button className="adm-xl-clear-btn" onClick={() => { setEditId(null); setForm({ staffName: "", fullName: "", nic: "", username: "", password: "", confirmPassword: "" }); }}>Cancel</button>}
+        {editId && <button className="adm-xl-clear-btn" onClick={() => { setEditId(null); setForm({ staffName: "", fullName: "", nic: "", username: "", password: "", confirmPassword: "", divisionNo: "" }); }}>Cancel</button>}
         <button className="adm-setup-forgot-btn" onClick={() => setShowForgot(s => !s)}>Forgot Password?</button>
       </div>
 
@@ -666,12 +763,13 @@ function UserAccountsPanel() {
       )}
 
       <SetupTable
-        rows={rows}
+        rows={rows.map(r => ({ ...r, divisionLabel: formatDivisionLabel(r.divisionNo) }))}
         cols={[
           { key: "id", label: "ID" }, { key: "staffName", label: "Staff Name" }, { key: "fullName", label: "Full Name" },
-          { key: "nic", label: "NIC" }, { key: "username", label: "Username" }, { key: "createdBy", label: "Created By" },
+          { key: "nic", label: "NIC" }, { key: "username", label: "Username" }, { key: "divisionLabel", label: "Division(s)" },
+          { key: "createdBy", label: "Created By" },
         ]}
-        onEdit={r => { setEditId(r.id); setForm({ staffName: r.staffName || "", fullName: r.fullName || "", nic: r.nic || "", username: r.username || "", password: "", confirmPassword: "" }); }}
+        onEdit={r => { setEditId(r.id); setForm({ staffName: r.staffName || "", fullName: r.fullName || "", nic: r.nic || "", username: r.username || "", password: "", confirmPassword: "", divisionNo: r.divisionNo || "" }); }}
         onDelete={id => apiDelete(`/users/${id}`).then(load)}
       />
     </div>
