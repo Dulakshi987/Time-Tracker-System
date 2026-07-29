@@ -27,8 +27,6 @@
   box-sizing: border-box;
 }
 
-/* ─── Header ────────────────────────────────────────────────────────── */
-
 .icf-header {
   display: flex;
   align-items: center;
@@ -58,8 +56,6 @@
   color: var(--icf-accent);
 }
 
-/* ─── Buttons (shared) ──────────────────────────────────────────────── */
-
 .icf-btn {
   padding: 8px 18px;
   border: none;
@@ -82,8 +78,6 @@
   background: var(--icf-surface2);
   color: var(--icf-text);
 }
-
-/* ─── Toolbar ───────────────────────────────────────────────────────── */
 
 .icf-toolbar {
   display: flex;
@@ -108,8 +102,6 @@
 }
 .icf-filter-select:focus { border-color: var(--icf-accent); }
 
-/* ─── Stats chips ───────────────────────────────────────────────────── */
-
 .icf-stats {
   display: flex;
   gap: 12px;
@@ -132,8 +124,6 @@
 .icf-stat-chip.onhold    strong { color: var(--icf-orange); }
 .icf-stat-chip.cancelled strong { color: var(--icf-red); }
 
-/* ─── Error banner ──────────────────────────────────────────────────── */
-
 .icf-error {
   background: rgba(239,68,68,0.12);
   border: 1px solid var(--icf-red);
@@ -152,8 +142,6 @@
   font-family: inherit;
   font-size: inherit;
 }
-
-/* ─── Table ─────────────────────────────────────────────────────────── */
 
 .icf-table-wrap {
   background: var(--icf-surface);
@@ -214,8 +202,6 @@
   font-size: 0.9rem;
 }
 
-/* ─── Status badges ─────────────────────────────────────────────────── */
-
 .icf-badge {
   font-size: 0.7rem;
   font-weight: 700;
@@ -245,8 +231,6 @@
   transform: translateY(-1px);
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
 }
-
-/* ─── View / Add-to-file buttons ────────────────────────────────────── */
 
 .icf-btn-view {
   background: #000000;
@@ -285,8 +269,6 @@
   color: var(--icf-purple);
   white-space: nowrap;
 }
-
-/* ─── Add to File / Edit File / Edit Status popup (dark, unchanged) ─── */
 
 .icf-popup-overlay {
   position: fixed;
@@ -387,7 +369,6 @@
 .icf-btn-done:hover:not(:disabled) { opacity: 0.88; }
 .icf-btn-done:disabled { opacity: 0.4; cursor: not-allowed; }
 
-/* Delete button inside the Edit/Delete popups */
 .icf-btn-danger {
   background: #fee2e2;
   color: #b91c1c;
@@ -402,10 +383,6 @@
 }
 .icf-btn-danger:hover:not(:disabled) { background: #fecaca; }
 .icf-btn-danger:disabled { opacity: 0.4; cursor: not-allowed; }
-
-/* ─── Side Drawer (full document trail) — LIGHT THEME ────────────────
-   White background, black text, per reference screenshot. Close button
-   stays gray with white text. */
 
 .icf-drawer-overlay {
   position: fixed;
@@ -452,7 +429,6 @@
   color: #111827;
 }
 
-/* Close (✕) icon button in the drawer head needs to read on white */
 .icf-drawer-head .icf-popup-close {
   color: #6b7280;
 }
@@ -467,7 +443,6 @@
   background: #ffffff;
 }
 
-/* ── Sections inside the drawer ── */
 .icf-view-section {
   background: #f8f9fb;
   border: 1px solid #e5e7eb;
@@ -522,14 +497,12 @@
   padding-top: 8px;
 }
 
-/* Drawer's footer bar sits on white — give it a matching background */
 .icf-drawer .icf-popup-foot {
   padding: 14px 20px;
   border-top: 1px solid #e2e5ea;
   margin-top: 0;
 }
 
-/* Close button — gray background, white text (kept as requested) */
 .icf-drawer-close-btn {
   width: 100%;
   background: #6b7280;
@@ -544,8 +517,6 @@
   font-family: inherit;
 }
 .icf-drawer-close-btn:hover { opacity: 0.85; }
-
-/* ─── Responsive ────────────────────────────────────────────────────── */
 
 @media (max-width: 640px) {
   .icf-page { padding: 16px 14px 32px; }

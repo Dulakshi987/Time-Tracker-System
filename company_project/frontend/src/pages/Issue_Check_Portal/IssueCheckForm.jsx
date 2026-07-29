@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { useNavigate } from "react-router-dom";
 // import DateRangeFilter from "./DateRangeFilter";
 import "./IssueCheck.css";
-import { getCurrentUser, canUseButton } from "../../config/permissions"; // adjust path to your project structure
+import { getCurrentUser, canUseButton, logoutUser } from "../../config/permissions"; // adjust path to your project structure
 
 // const API_BASE = "http://localhost:8080/api/check-portal";
 // const SETUP_API = "http://localhost:8080/api/admin-setup";
@@ -933,6 +934,8 @@ function SkeletonCard() {
 // ── Main Component ───────────────────────────────────────────────────────────
 
 export default function IssueCheckForm() {
+  const navigate = useNavigate();
+
   const [documents,    setDocuments]    = useState([]);
   const [loading,      setLoading]      = useState(true);
   const [error,        setError]        = useState(null);
@@ -954,6 +957,18 @@ export default function IssueCheckForm() {
     edit: canUseButton(currentUser, "edit"),
     delete: canUseButton(currentUser, "delete"),
   }), [currentUser]);
+
+  // Same rule as Confirm Portal: Admin / System Administrator already have
+  // a Logout control elsewhere (their own dashboard/navbar), so it's hidden
+  // here for them — every other role (Checker included) sees it.
+  const isAdminRole =
+    currentUser?.staffName === "Admin" ||
+    currentUser?.staffName === "System Administrator";
+
+  const handleLogout = () => {
+    logoutUser();
+    navigate("/login", { replace: true });
+  };
 
   // Divisions (Admin Master Data) — used to label each card and to scope
   // which check-operators show up in the popups, exactly like Pick Portal.
@@ -1327,13 +1342,24 @@ export default function IssueCheckForm() {
             )}
           </p>
         </div>
-        <button
-          className="ip-btn ip-btn-outline"
-          style={{ flex: "unset", padding: "8px 18px" }}
-          onClick={() => fetchDocuments(false)}
-        >
-          ↻ Refresh
-        </button>
+        <div style={{ display: "flex", gap: 10 }}>
+          <button
+            className="ip-btn ip-btn-outline"
+            style={{ flex: "unset", padding: "8px 18px" }}
+            onClick={() => fetchDocuments(false)}
+          >
+            ↻ Refresh
+          </button>
+          {!isAdminRole && (
+            <button
+              className="ip-btn ip-btn-outline"
+              style={{ flex: "unset", padding: "8px 18px", borderColor: "#ef4444", color: "#ef4444" }}
+              onClick={handleLogout}
+            >
+              ⎋ Logout
+            </button>
+          )}
+        </div>
       </div>
 
       {/* ── Active Picking Error Notification Bar ── */}

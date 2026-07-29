@@ -508,8 +508,6 @@ export default function IssueConfirm() {
   const navigate = useNavigate();
 
   // ── Auth / role guard ──
-  // Redirects to /login if there's no logged-in user, or the logged-in
-  // user's role isn't allowed on the /confirm route (see permissions.js).
   const currentUser = getCurrentUser();
 
   useEffect(() => {
@@ -518,8 +516,6 @@ export default function IssueConfirm() {
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Admin / System Administrator already have logout available elsewhere
-  // (their own dashboard/navbar) — hide the in-portal Logout button for them.
   const isAdminRole =
     currentUser?.staffName === "Admin" ||
     currentUser?.staffName === "System Administrator";
@@ -529,9 +525,6 @@ export default function IssueConfirm() {
     navigate("/login", { replace: true });
   };
 
-  // The Filed Adder role's ROLE_ACCESS entry only lists "add_to_file" —
-  // no "edit"/"delete" — so canUseButton correctly returns false for them.
-  // Admin/System Administrator have buttons: ["*"] and always pass.
   const canManageDocs = canUseButton(currentUser, "edit") || canUseButton(currentUser, "delete");
   const visibleColumnCount = canManageDocs ? 12 : 11;
 
@@ -542,6 +535,7 @@ export default function IssueConfirm() {
   const [refreshing,  setRefreshing]  = useState(false);
   const [filterStatus, setFilterStatus] = useState("ALL");
   const [search,      setSearch]      = useState("");
+  const [searchField, setSearchField] = useState("ALL");
   const [savingId,    setSavingId]    = useState(null);
   const [viewDoc,     setViewDoc]     = useState(null);
 
@@ -595,19 +589,34 @@ export default function IssueConfirm() {
 
     const q = search.toLowerCase().trim();
     const reqId = (doc.reqId || reqIdMap[doc.id] || "").toLowerCase();
-    const matchSearch = !q || [
-      reqId,
-      doc.printDocumentNo,
-      doc.jobwbs,
-      doc.customerName,
-      doc.requestedBy,
-      doc.deliveryVehicleNo,
-      doc.deliveredBy,
-      doc.deliveryCancelledBy,
-      doc.fileNumber,
-      String(doc.id),
-    ].some(v => (v || "").toLowerCase().includes(q));
 
+    // Field-specific search when a field is chosen; otherwise search everything.
+    const fieldMap = {
+      REQID: [reqId],
+      DOCNO: [doc.printDocumentNo],
+      RESERVATION: [doc.reservationNo],
+    };
+
+    const searchPool = searchField === "ALL"
+      ? [
+          reqId,
+          doc.printDocumentNo,
+          doc.reservationNo,
+          doc.jobwbs,
+          doc.customerName,
+          doc.requestedBy,
+          doc.deliveryVehicleNo,
+          doc.deliveredBy,
+          doc.deliveryCancelledBy,
+          doc.fileNumber,
+          String(doc.id),
+        ]
+      : (fieldMap[searchField] || []);
+
+    const matchSearch = !q || searchPool.some(v => (v || "").toLowerCase().includes(q));
+
+    // Status filter and search filter always combine — "All Status" simply
+    // means matchStatus is always true, so search alone still narrows results.
     return matchStatus && matchSearch;
   });
 
@@ -784,7 +793,6 @@ export default function IssueConfirm() {
     }
   };
 
-  // Don't flash the portal UI while the auth-guard redirect is in flight.
   if (!currentUser || !canAccessRoute(currentUser, "/confirm")) {
     return null;
   }
@@ -871,16 +879,28 @@ export default function IssueConfirm() {
 
       {/* Toolbar — Search + Filter */}
       <div className="icf-toolbar">
-        <div className="icf-search-wrap" style={{ flex: 1, maxWidth: 420 }}>
+        <div className="icf-search-wrap" style={{ flex: 1, maxWidth: 420, display: "flex", gap: 8 }}>
           <span className="icf-search-icon">🔍</span>
           <input
             className="icf-search"
             type="text"
-            placeholder="Search by Req ID, Doc No, WBS, Customer, Requested By, Vehicle, File No..."
+            placeholder="Search..."
             value={search}
             onChange={e => setSearch(e.target.value)}
           />
         </div>
+
+        <select
+          className="icf-filter-select"
+          value={searchField}
+          onChange={e => setSearchField(e.target.value)}
+          title="Choose which field the search box matches against"
+        >
+          <option value="ALL">Search: All Fields</option>
+          <option value="REQID">Search: Req ID</option>
+          <option value="DOCNO">Search: Doc No</option>
+          <option value="RESERVATION">Search: Reservation No</option>
+        </select>
 
         <select
           className="icf-filter-select"
@@ -939,7 +959,6 @@ export default function IssueConfirm() {
 
                 return (
                   <tr key={doc.id} className="icf-row">
-                    {/* Status badge (clickable) */}
                     <td>
                       <span
                         className={`icf-badge ${ds.cls}`}
@@ -951,42 +970,32 @@ export default function IssueConfirm() {
                       </span>
                     </td>
 
-                    {/* Req ID */}
                     <td className="icf-td-reqid">{reqId}</td>
 
-                    {/* Doc No */}
                     <td className="icf-td-docno">{doc.printDocumentNo || `Doc #${doc.id}`}</td>
 
-                    {/* Requested By */}
                     <td>{doc.requestedBy || "—"}</td>
 
-                    {/* Delivery Vehicle */}
                     <td>🚐 {doc.deliveryVehicleNo || "—"}</td>
 
-                    {/* Delivered By */}
                     <td>{sc === "completed" ? `👤 ${info.by || "—"}` : "—"}</td>
 
-                    {/* Cancelled By */}
                     <td>{sc === "cancelled" ? `👤 ${info.by || "—"}` : "—"}</td>
 
-                    {/* Date / Time */}
                     <td className="icf-td-datetime">{formatDateTime(info.dateTime)}</td>
 
-                    {/* Job Type */}
                     <td>
                       <span style={{ color: jobTypeColor(doc.jobType), fontWeight: 600 }}>
                         {doc.jobType || "—"}
                       </span>
                     </td>
 
-                    {/* View */}
                     <td>
                       <button className="icf-btn-view" onClick={() => setViewDoc(doc)}>
                         👁 View
                       </button>
                     </td>
 
-                    {/* Manage — Edit + Delete (Admin / System Administrator only) */}
                     {canManageDocs && (
                       <td>
                         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -1026,7 +1035,6 @@ export default function IssueConfirm() {
                       </td>
                     )}
 
-                    {/* File No */}
                     <td>
                       {doc.fileNumber ? (
                         <span

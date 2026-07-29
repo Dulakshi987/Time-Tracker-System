@@ -1302,24 +1302,17 @@ export default function IssueDeliveryForm() {
             value={search}
             onChange={e => setSearch(e.target.value)}
           />
-          {search && (
-            <button className="ip-search-clear" onClick={() => setSearch("")} title="Clear search">✕</button>
-          )}
         </div>
         <select className="ip-filter-select" value={filterType} onChange={e => setFilterType(e.target.value)}>
           {jobTypes.map(t => <option key={t} value={t}>{t === "ALL" ? "All Job Types" : t}</option>)}
+        </select>
+        <select className="ip-filter-select" value={filterStatus} onChange={e => setFilterStatus(e.target.value)}>
+          {statuses.map(s => <option key={s} value={s}>{s === "ALL" ? "All Status" : s}</option>)}
         </select>
       </div>
 
       {/* ── Stats ── */}
       <div className="ip-stats">
-        <select
-          className="ip-filter-select ip-status-select-inline"
-          value={filterStatus}
-          onChange={e => setFilterStatus(e.target.value)}
-        >
-          {statuses.map(s => <option key={s} value={s}>{s === "ALL" ? "All Status" : s}</option>)}
-        </select>
         <button
           className="ip-stat-chip blue"
           onClick={() => setStatFilter("ALL")}

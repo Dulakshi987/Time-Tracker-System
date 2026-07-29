@@ -368,6 +368,14 @@ export default function IssuPrinFormt() {
     delete: canUseButton(user, "delete"),
   }), [user]);
 
+  // Admin / System Administrator already have logout available elsewhere
+  // (their own dashboard/navbar) — hide the in-portal Logout button for
+  // them, same pattern as Pick / Delivery Portal. Everyone else (Printer,
+  // Print with Document Enter, etc.) sees it.
+  const isAdminRole =
+    user?.staffName === "Admin" ||
+    user?.staffName === "System Administrator";
+
   const handleLogout = () => {
     logoutUser();
     navigate("/", { replace: true });
@@ -656,13 +664,15 @@ export default function IssuPrinFormt() {
           >
             ↻ Refresh
           </button>
-          <button
-            className="ip-btn ip-btn-outline"
-            style={{ flex: "unset", padding: "8px 18px" }}
-            onClick={handleLogout}
-          >
-            ⎋ Logout
-          </button>
+          {!isAdminRole && (
+            <button
+              className="ip-btn ip-btn-outline"
+              style={{ flex: "unset", padding: "8px 18px", borderColor: "#ef4444", color: "#ef4444" }}
+              onClick={handleLogout}
+            >
+              ⎋ Logout
+            </button>
+          )}
         </div>
       </div>
       {/* Toolbar */}
