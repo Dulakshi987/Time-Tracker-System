@@ -260,6 +260,9 @@ function DocumentCard({ doc, requestId, divisionLabel, perms, onStart, onHold, o
   const canHold = isInProgress && perms.hold;
   const canEnd = (isInProgress || isOnHold) && perms.end;
 
+  const canEdit = isDone && perms.edit;
+  const canDelete = isDone && perms.delete;
+
   return (
     <div className={`ip-card status-${sc}`}>
       <div className="ip-card-head">
@@ -319,14 +322,20 @@ function DocumentCard({ doc, requestId, divisionLabel, perms, onStart, onHold, o
 
       <div className="ip-card-foot">
         {isDone ? (
-          <>
-            <button className="ip-btn ip-btn-edit" onClick={() => onEdit(doc)}>
-              ✎ Edit
-            </button>
-            <button className="ip-btn ip-btn-delete" onClick={() => onDelete(doc.id)}>
-              🗑 Delete
-            </button>
-          </>
+          (canEdit || canDelete) && (
+            <>
+              {canEdit && (
+                <button className="ip-btn ip-btn-edit" onClick={() => onEdit(doc)}>
+                  ✎ Edit
+                </button>
+              )}
+              {canDelete && (
+                <button className="ip-btn ip-btn-delete" onClick={() => onDelete(doc.id)}>
+                  🗑 Delete
+                </button>
+              )}
+            </>
+          )
         ) : (
           <>
             <button className="ip-btn ip-btn-start" disabled={!canStart} onClick={() => onStart(doc.id)}>
@@ -355,6 +364,8 @@ export default function IssuPrinFormt() {
     start: canUseButton(user, "start"),
     hold: canUseButton(user, "hold"),
     end: canUseButton(user, "end"),
+    edit: canUseButton(user, "edit"),
+    delete: canUseButton(user, "delete"),
   }), [user]);
 
   const handleLogout = () => {
@@ -506,6 +517,7 @@ export default function IssuPrinFormt() {
 
   // Edit — reopens the same popup pre-filled with the completed document's values
   const handleEditClick = async (doc) => {
+    if (!perms.edit) return;
     setActiveId(doc.id);
     setEditValues({
       documentNo: doc.printDocumentNo || "",
@@ -517,6 +529,7 @@ export default function IssuPrinFormt() {
 
   // Delete — removes the document entirely
   const handleDeleteClick = async (id) => {
+    if (!perms.delete) return;
     if (!window.confirm("Delete this document permanently? This cannot be undone.")) return;
     try {
       const res = await fetch(`${API_BASE}/${id}`, { method: "DELETE" });

@@ -22,6 +22,11 @@ export const ROLES = {
 
 // allowedRoutes: "*" = every route. buttons: "*" = every button.
 // allDivisions: true = ignore division filtering, see everything.
+// Button names used across portals: "start", "hold", "end", "edit",
+// "delete", "emergency_done", "deliver", "cancel", "add_to_file".
+// Only Admin / System Administrator (buttons: "*") can Edit or Delete a
+// completed print-portal card — Printer and Print with Document Enter
+// only get start/hold/end.
 export const ROLE_ACCESS = {
   [ROLES.ADMIN]: {
     defaultRoute: "/admin",
