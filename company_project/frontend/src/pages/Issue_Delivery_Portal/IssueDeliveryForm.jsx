@@ -717,7 +717,7 @@ function ViewDrawer({ doc, divisionLabel, onClose, onChangeVehicle }) {
 // purple). Clicking Reactivate clears the handover + unlocks the row again,
 // so Delivered / Hold / Cancel / Delete all become clickable once more.
 
-function DocumentRow({ doc, requestId, divisionLabel, canManage, onView, onDelivered, onHold, onCancelled, onHandover, onReactivate, onEdit, onDelete }) {
+function DocumentRow({ doc, requestId, divisionLabel, canManage, canHandover: canHandoverAccess, onView, onDelivered, onHold, onCancelled, onHandover, onReactivate, onEdit, onDelete }) {
   const sc = statusClass(doc.deliveryStatus);
   const isHandedOver = !!doc.handoverBy;
 
@@ -774,8 +774,8 @@ function DocumentRow({ doc, requestId, divisionLabel, canManage, onView, onDeliv
       <td>
         <button className="ip-btn-view" onClick={() => onView(doc)}>👁 View</button>
       </td>
-      <td>
-        {canManage ? (
+      {canManage && (
+        <td>
           <div className="ip-row-manage" style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <button
               className="ip-mini-manage ip-mini-edit"
@@ -807,10 +807,8 @@ function DocumentRow({ doc, requestId, divisionLabel, canManage, onView, onDeliv
               🗑
             </button>
           </div>
-        ) : (
-          <span style={{ color: "#5a6270" }}>—</span>
-        )}
-      </td>
+        </td>
+      )}
       <td>
         <div className="ip-row-actions">
           <button
@@ -842,32 +840,34 @@ function DocumentRow({ doc, requestId, divisionLabel, canManage, onView, onDeliv
           </button>
         </div>
       </td>
-      <td className="ip-td-handover">
-        {isHandedOver ? (
-          <button
-            className="ip-mini-btn ip-mini-handover ip-mini-btn-standalone active"
-            title={`Handed over by ${doc.handoverBy} — click to reactivate`}
-            onClick={() => onReactivate(doc.id)}
-            style={{ backgroundColor: ACTION_COLORS.reactivate.bg, color: ACTION_COLORS.reactivate.text, borderColor: ACTION_COLORS.reactivate.bg }}
-          >
-            <span className="ip-handover-icon">🔄</span>
-            <span className="ip-handover-label">Reactivate</span>
-          </button>
-        ) : (
-          <button
-            className="ip-mini-btn ip-mini-handover ip-mini-btn-standalone"
-            disabled={!canHandover}
-            title={canHandover ? "Handover" : "Handover available only after Hold or Cancel"}
-            onClick={() => onHandover(doc.id)}
-            style={canHandover
-              ? { borderColor: ACTION_COLORS.handover.bg, color: ACTION_COLORS.handover.bg }
-              : { opacity: 0.35, cursor: "not-allowed" }}
-          >
-            <span className="ip-handover-icon">🤝</span>
-            <span className="ip-handover-label">Handover</span>
-          </button>
-        )}
-      </td>
+      {canHandoverAccess && (
+        <td className="ip-td-handover">
+          {isHandedOver ? (
+            <button
+              className="ip-mini-btn ip-mini-handover ip-mini-btn-standalone active"
+              title={`Handed over by ${doc.handoverBy} — click to reactivate`}
+              onClick={() => onReactivate(doc.id)}
+              style={{ backgroundColor: ACTION_COLORS.reactivate.bg, color: ACTION_COLORS.reactivate.text, borderColor: ACTION_COLORS.reactivate.bg }}
+            >
+              <span className="ip-handover-icon">🔄</span>
+              <span className="ip-handover-label">Reactivate</span>
+            </button>
+          ) : (
+            <button
+              className="ip-mini-btn ip-mini-handover ip-mini-btn-standalone"
+              disabled={!canHandover}
+              title={canHandover ? "Handover" : "Handover available only after Hold or Cancel"}
+              onClick={() => onHandover(doc.id)}
+              style={canHandover
+                ? { borderColor: ACTION_COLORS.handover.bg, color: ACTION_COLORS.handover.bg }
+                : { opacity: 0.35, cursor: "not-allowed" }}
+            >
+              <span className="ip-handover-icon">🤝</span>
+              <span className="ip-handover-label">Handover</span>
+            </button>
+          )}
+        </td>
+      )}
     </tr>
   );
 }
@@ -876,10 +876,10 @@ function DocumentRow({ doc, requestId, divisionLabel, canManage, onView, onDeliv
 
 const COLUMN_COUNT = 14;
 
-function SkeletonRow() {
+function SkeletonRow({ columnCount }) {
   return (
     <tr className="ip-row">
-      {Array.from({ length: COLUMN_COUNT }).map((_, i) => (
+      {Array.from({ length: columnCount }).map((_, i) => (
         <td key={i}>
           <div className="ip-skeleton" style={{ width: "80%", height: 12 }} />
         </td>
@@ -920,6 +920,11 @@ export default function IssueDeliveryForm() {
   // false for them here. Admin/System Administrator have buttons: ["*"]
   // and always pass.
   const canManageDocs = canUseButton(currentUser, "edit") || canUseButton(currentUser, "delete");
+  // The Deliver role's ROLE_ACCESS entry doesn't list "handover" either
+  // (only "deliver", "hold", "cancel") — Handover is a Picker-only workflow
+  // button in this system, so canUseButton returns false for Deliver here.
+  const canHandoverAccess = canUseButton(currentUser, "handover");
+  const visibleColumnCount = COLUMN_COUNT - (canManageDocs ? 0 : 1) - (canHandoverAccess ? 0 : 1);
 
   const [documents,    setDocuments]    = useState([]);
   const [loading,      setLoading]      = useState(true);
@@ -1393,17 +1398,17 @@ export default function IssueDeliveryForm() {
               <th>Pending</th>
               <th>Status</th>
               <th>View</th>
-              <th>Manage</th>
+              {canManageDocs && <th>Manage</th>}
               <th>Actions</th>
-              <th className="ip-th-handover">Handover</th>
+              {canHandoverAccess && <th className="ip-th-handover">Handover</th>}
             </tr>
           </thead>
           <tbody>
             {loading ? (
-              Array.from({ length: 6 }).map((_, i) => <SkeletonRow key={i} />)
+              Array.from({ length: 6 }).map((_, i) => <SkeletonRow key={i} columnCount={visibleColumnCount} />)
             ) : visible.length === 0 ? (
               <tr>
-                <td colSpan={COLUMN_COUNT}>
+                <td colSpan={visibleColumnCount}>
                   <div className="ip-empty">
                     <div className="ip-empty-icon">📭</div>
                     <p>
@@ -1422,6 +1427,7 @@ export default function IssueDeliveryForm() {
                   requestId={requestIdMap[doc.id]}
                   divisionLabel={divisionLabelFor(doc)}
                   canManage={canManageDocs}
+                  canHandover={canHandoverAccess}
                   onView={setViewDoc}
                   onDelivered={handleDeliveredClick}
                   onHold={handleHoldClick}

@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import "./ConfirmPortal.css";
-import { getCurrentUser, canAccessRoute, logoutUser } from "../../config/permissions";
+import { getCurrentUser, canAccessRoute, canUseButton, logoutUser } from "../../config/permissions";
 // ⚠️ Adjust the path above ("../../config/permissions") to match where
 //    permissions.js actually sits relative to this file.
 
@@ -529,6 +529,12 @@ export default function IssueConfirm() {
     navigate("/login", { replace: true });
   };
 
+  // The Filed Adder role's ROLE_ACCESS entry only lists "add_to_file" —
+  // no "edit"/"delete" — so canUseButton correctly returns false for them.
+  // Admin/System Administrator have buttons: ["*"] and always pass.
+  const canManageDocs = canUseButton(currentUser, "edit") || canUseButton(currentUser, "delete");
+  const visibleColumnCount = canManageDocs ? 12 : 11;
+
   const [documents,   setDocuments]   = useState([]);
   const [loading,     setLoading]     = useState(true);
   const [error,       setError]       = useState(null);
@@ -914,15 +920,15 @@ export default function IssueConfirm() {
               <th>Date / Time</th>
               <th>Job Type</th>
               <th>View</th>
-              <th>Manage</th>
+              {canManageDocs && <th>Manage</th>}
               <th>File No.</th>
             </tr>
           </thead>
           <tbody>
             {loading ? (
-              <tr><td colSpan={12} className="icf-empty-cell">Loading...</td></tr>
+              <tr><td colSpan={visibleColumnCount} className="icf-empty-cell">Loading...</td></tr>
             ) : visible.length === 0 ? (
-              <tr><td colSpan={12} className="icf-empty-cell">No documents found.</td></tr>
+              <tr><td colSpan={visibleColumnCount} className="icf-empty-cell">No documents found.</td></tr>
             ) : (
               visible.map(doc => {
                 const sc = statusClass(doc.deliveryStatus);
@@ -980,43 +986,45 @@ export default function IssueConfirm() {
                       </button>
                     </td>
 
-                    {/* Manage — Edit + Delete */}
-                    <td>
-                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                        <button
-                          title="Edit"
-                          onClick={() => handleManageEdit(doc)}
-                          style={{
-                            backgroundColor: "#3b82f6",
-                            color: "#eaf2ff",
-                            border: "1px solid #3b82f6",
-                            minWidth: 34,
-                            minHeight: 34,
-                            fontSize: "1.05rem",
-                            borderRadius: 8,
-                            cursor: "pointer",
-                          }}
-                        >
-                          ✎
-                        </button>
-                        <button
-                          title="Delete"
-                          onClick={() => handleDeleteDocument(doc)}
-                          style={{
-                            backgroundColor: "#ef4444",
-                            color: "#2a0a0a",
-                            border: "1px solid #ef4444",
-                            minWidth: 34,
-                            minHeight: 34,
-                            fontSize: "1.05rem",
-                            borderRadius: 8,
-                            cursor: "pointer",
-                          }}
-                        >
-                          🗑
-                        </button>
-                      </div>
-                    </td>
+                    {/* Manage — Edit + Delete (Admin / System Administrator only) */}
+                    {canManageDocs && (
+                      <td>
+                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                          <button
+                            title="Edit"
+                            onClick={() => handleManageEdit(doc)}
+                            style={{
+                              backgroundColor: "#3b82f6",
+                              color: "#eaf2ff",
+                              border: "1px solid #3b82f6",
+                              minWidth: 34,
+                              minHeight: 34,
+                              fontSize: "1.05rem",
+                              borderRadius: 8,
+                              cursor: "pointer",
+                            }}
+                          >
+                            ✎
+                          </button>
+                          <button
+                            title="Delete"
+                            onClick={() => handleDeleteDocument(doc)}
+                            style={{
+                              backgroundColor: "#ef4444",
+                              color: "#2a0a0a",
+                              border: "1px solid #ef4444",
+                              minWidth: 34,
+                              minHeight: 34,
+                              fontSize: "1.05rem",
+                              borderRadius: 8,
+                              cursor: "pointer",
+                            }}
+                          >
+                            🗑
+                          </button>
+                        </div>
+                      </td>
+                    )}
 
                     {/* File No */}
                     <td>
