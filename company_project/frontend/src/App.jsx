@@ -16,14 +16,37 @@ import { getCurrentUser, canAccessRoute, getDefaultRoute } from "./config/permis
 //  2. their role is allowed on this specific path (permissions.js).
 // If they're logged in but their role doesn't cover this path, we send
 // them to their own portal instead of the login page.
+// function ProtectedRoute({ children, path }) {
+//   const user = getCurrentUser();
+
+//   if (!user) {
+//     return <Navigate to="/" replace />;
+//   }
+
+//   if (!canAccessRoute(user, path)) {
+//     return <Navigate to={getDefaultRoute(user)} replace />;
+//   }
+
+//   return children;
+// }
+
 function ProtectedRoute({ children, path }) {
   const user = getCurrentUser();
 
+  console.log("=== ProtectedRoute check ===", {
+    path,
+    user,
+    staffName: user?.staffName,
+    canAccess: user ? canAccessRoute(user, path) : "no user",
+  });
+
   if (!user) {
+    console.log("BOUNCE REASON: no user in sessionStorage");
     return <Navigate to="/" replace />;
   }
 
   if (!canAccessRoute(user, path)) {
+    console.log("BOUNCE REASON: canAccessRoute returned false, sending to", getDefaultRoute(user));
     return <Navigate to={getDefaultRoute(user)} replace />;
   }
 
