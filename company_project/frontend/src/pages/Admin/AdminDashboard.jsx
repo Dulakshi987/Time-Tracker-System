@@ -9,6 +9,7 @@ import IssueCheckForm    from "../Issue_Check_Portal/IssueCheckForm";
 import IssueDeliveryForm from "../Issue_Delivery_Portal/IssueDeliveryForm";
 import ConfirmPortal     from "../Confirm_Portal/ConfirmPortal";
 import DocumentForm      from "../Documents_Portal/DocumentForm";
+import { getCurrentUser, canSeeNavKey } from "../../config/permissions";
 // NOTE: AdminConfigCenter (old "usersetup" page) removed — replaced by
 // MasterSetupPanel below, which now lives inside this same file and saves
 // everything straight to the database through AdminSetupController.
@@ -377,13 +378,19 @@ function handleLogout() {
 }
 
 function Sidebar({ active, onSelect, open, onClose }) {
+  // Restrict which sidebar items render based on the logged-in user's
+  // role (see permissions.js -> ROLE_ACCESS[...].navKeys). Logout is
+  // rendered separately below and is always shown to everyone.
+  const user = getCurrentUser();
+  const visibleItems = NAV_ITEMS.filter(item => canSeeNavKey(user, item.key));
+
   return (
     <>
       {open && <div className="adm-sidebar-scrim" onClick={onClose} />}
       <div className={`adm-sidebar ${open ? "open" : ""}`} style={{ display: "flex", flexDirection: "column" }}>
         <div className="adm-sidebar-title">Fentons Admin</div>
         <div style={{ flex: 1 }}>
-          {NAV_ITEMS.map(item => (
+          {visibleItems.map(item => (
             <button
               key={item.key}
               onClick={() => { onSelect(item.key); onClose && onClose(); }}
