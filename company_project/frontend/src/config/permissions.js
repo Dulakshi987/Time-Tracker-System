@@ -6,6 +6,13 @@
 // e.g. "Admin", "Printer", "Picker" ...). If you rename any role in
 // Master Setup, update the matching key below too — they must match
 // EXACTLY (case-sensitive).
+//
+// FIX (this version): getRoleConfig() now matches staffName against the
+// ROLE_ACCESS keys ignoring case and leading/trailing whitespace. This
+// was causing "All" and "Print with Document Enter" accounts to fail to
+// resolve a role (falling back to "/" and being bounced back to the
+// login screen) whenever the staffName stored in Master Setup had a
+// slightly different casing or stray spaces from the exact key string.
 // ─────────────────────────────────────────────────────────────────────────
 
 export const ROLES = {
@@ -153,9 +160,21 @@ export function logoutUser() {
   sessionStorage.removeItem(STORAGE_KEY);
 }
 
+// FIXED: matches user.staffName against ROLE_ACCESS keys ignoring case
+// and leading/trailing whitespace, instead of requiring an exact
+// byte-for-byte match. This is what was breaking "All" and
+// "Print with Document Enter" logins whenever the staffName stored in
+// Master Setup had different casing/spacing than the literal key string.
 export function getRoleConfig(user) {
   if (!user || !user.staffName) return null;
-  return ROLE_ACCESS[user.staffName] || null;
+
+  const wanted = String(user.staffName).trim().toLowerCase();
+
+  const matchedKey = Object.keys(ROLE_ACCESS).find(
+    (key) => key.trim().toLowerCase() === wanted
+  );
+
+  return matchedKey ? ROLE_ACCESS[matchedKey] : null;
 }
 
 export function getDefaultRoute(user) {
@@ -203,7 +222,7 @@ export function isColumnHidden(user, portalKey, columnName) {
   const cfg = getRoleConfig(user);
   if (!cfg || !cfg.hiddenColumns || !cfg.hiddenColumns[portalKey]) return false;
   const needle = String(columnName || "").toLowerCase();
-  return cfg.hiddenColumns[portalKey].some(c => c.toLowerCase() === needle);
+  return cfg.hiddenColumns[portalKey].some((c) => c.toLowerCase() === needle);
 }
 
 export function hasAllDivisionAccess(user) {
