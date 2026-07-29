@@ -367,7 +367,19 @@ const NAV_ITEMS = [
   { key: "report",      label: "Report",          icon: Icon.report },
 ];
 
+// function handleLogout() {
+//   try {
+//     localStorage.removeItem("authToken");
+//     localStorage.removeItem("token");
+//     localStorage.removeItem("user");
+//     sessionStorage.clear();
+//   } catch (e) { /* ignore storage errors */ }
+//   window.location.href = "/login";
+// }
+
 function handleLogout() {
+  console.log("!!! handleLogout CALLED !!!");
+  console.trace(); // shows exactly what called this
   try {
     localStorage.removeItem("authToken");
     localStorage.removeItem("token");
