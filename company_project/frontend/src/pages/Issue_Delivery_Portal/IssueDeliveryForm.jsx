@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import "./IssueDelivery.css";
-import { getCurrentUser, canAccessRoute, logoutUser } from "../../config/permissions";
+import { getCurrentUser, canAccessRoute, canUseButton, logoutUser } from "../../config/permissions";
 // ⚠️ Adjust the path above ("../../config/permissions") to match where
 //    permissions.js actually sits relative to this file.
 
@@ -717,7 +717,7 @@ function ViewDrawer({ doc, divisionLabel, onClose, onChangeVehicle }) {
 // purple). Clicking Reactivate clears the handover + unlocks the row again,
 // so Delivered / Hold / Cancel / Delete all become clickable once more.
 
-function DocumentRow({ doc, requestId, divisionLabel, onView, onDelivered, onHold, onCancelled, onHandover, onReactivate, onEdit, onDelete }) {
+function DocumentRow({ doc, requestId, divisionLabel, canManage, onView, onDelivered, onHold, onCancelled, onHandover, onReactivate, onEdit, onDelete }) {
   const sc = statusClass(doc.deliveryStatus);
   const isHandedOver = !!doc.handoverBy;
 
@@ -775,39 +775,41 @@ function DocumentRow({ doc, requestId, divisionLabel, onView, onDelivered, onHol
         <button className="ip-btn-view" onClick={() => onView(doc)}>👁 View</button>
       </td>
       <td>
-        <div className="ip-row-manage" style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <button
-            className="ip-mini-manage ip-mini-edit"
-            title="Edit"
-            onClick={() => onEdit(doc)}
-            style={{
-              backgroundColor: "#3b82f6",
-              color: "#eaf2ff",
-              borderColor: "#3b82f6",
-              minWidth: 34,
-              minHeight: 34,
-              fontSize: "1.05rem",
-              borderRadius: 8,
-            }}
-          >
-            ✎
-          </button>
-          <button
-            className="ip-mini-manage ip-mini-delete"
-            title={isLocked ? lockedTitle : "Delete"}
-            disabled={isLocked}
-            onClick={() => onDelete(doc.id)}
-            style={
-              isLocked
-                ? { opacity: 0.35, cursor: "not-allowed", backgroundColor: "#3a1010", color: "#ef4444", borderColor: "#ef4444", minWidth: 34, minHeight: 34, fontSize: "1.05rem", borderRadius: 8 }
-                : { backgroundColor: "#ef4444", color: "#2a0a0a", borderColor: "#ef4444", minWidth: 34, minHeight: 34, fontSize: "1.05rem", borderRadius: 8 }
-            }
-          >
-            🗑
-          </button>
-        </div>
-
-
+        {canManage ? (
+          <div className="ip-row-manage" style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <button
+              className="ip-mini-manage ip-mini-edit"
+              title="Edit"
+              onClick={() => onEdit(doc)}
+              style={{
+                backgroundColor: "#3b82f6",
+                color: "#eaf2ff",
+                borderColor: "#3b82f6",
+                minWidth: 34,
+                minHeight: 34,
+                fontSize: "1.05rem",
+                borderRadius: 8,
+              }}
+            >
+              ✎
+            </button>
+            <button
+              className="ip-mini-manage ip-mini-delete"
+              title={isLocked ? lockedTitle : "Delete"}
+              disabled={isLocked}
+              onClick={() => onDelete(doc.id)}
+              style={
+                isLocked
+                  ? { opacity: 0.35, cursor: "not-allowed", backgroundColor: "#3a1010", color: "#ef4444", borderColor: "#ef4444", minWidth: 34, minHeight: 34, fontSize: "1.05rem", borderRadius: 8 }
+                  : { backgroundColor: "#ef4444", color: "#2a0a0a", borderColor: "#ef4444", minWidth: 34, minHeight: 34, fontSize: "1.05rem", borderRadius: 8 }
+              }
+            >
+              🗑
+            </button>
+          </div>
+        ) : (
+          <span style={{ color: "#5a6270" }}>—</span>
+        )}
       </td>
       <td>
         <div className="ip-row-actions">
@@ -912,6 +914,12 @@ export default function IssueDeliveryForm() {
     logoutUser();
     navigate("/login", { replace: true });
   };
+
+  // The Deliver role's ROLE_ACCESS entry only lists "deliver", "hold",
+  // "cancel" — no "edit"/"delete" — so canUseButton correctly returns
+  // false for them here. Admin/System Administrator have buttons: ["*"]
+  // and always pass.
+  const canManageDocs = canUseButton(currentUser, "edit") || canUseButton(currentUser, "delete");
 
   const [documents,    setDocuments]    = useState([]);
   const [loading,      setLoading]      = useState(true);
@@ -1413,6 +1421,7 @@ export default function IssueDeliveryForm() {
                   doc={doc}
                   requestId={requestIdMap[doc.id]}
                   divisionLabel={divisionLabelFor(doc)}
+                  canManage={canManageDocs}
                   onView={setViewDoc}
                   onDelivered={handleDeliveredClick}
                   onHold={handleHoldClick}
