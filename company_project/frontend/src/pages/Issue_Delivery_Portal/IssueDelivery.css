@@ -1061,3 +1061,47 @@
   opacity: 0.35;
   cursor: not-allowed;
 }
+
+/* ══════════════════════════════════════════════════════════════════
+   NEW: nicer search box + status dropdown moved next to stat chips
+   ══════════════════════════════════════════════════════════════════ */
+
+.ip-search {
+  border-radius: 22px;
+  padding: 10px 34px 10px 38px;
+  border: 1px solid var(--ip-border);
+  background: var(--ip-surface);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+.ip-search:focus {
+  border-color: var(--ip-accent);
+  box-shadow: 0 0 0 3px rgba(59,130,246,0.18);
+}
+.ip-search-icon {
+  opacity: 0.55;
+}
+.ip-search-clear {
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: rgba(0,0,0,0.06);
+  border: none;
+  color: var(--ip-muted);
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  font-size: 0.7rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.ip-search-clear:hover { background: rgba(239,68,68,0.15); color: var(--ip-red); }
+
+.ip-status-select-inline {
+  border-radius: 20px;
+  padding: 5px 14px;
+  font-size: 0.78rem;
+}
