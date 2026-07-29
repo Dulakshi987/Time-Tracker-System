@@ -1,13 +1,11 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import "./Login.css";
+import { getDefaultRoute } from "../../config/permissions";
 
 // ── Config ───────────────────────────────────────────────────────────────
 // const AUTH_API = "http://localhost:8080/api/auth";
 const AUTH_API = "https://time-tracker-system-production.up.railway.app/api/auth";
-
-// Change this to whatever route renders <AdminDashboard /> in your router.
-const ADMIN_DASHBOARD_ROUTE = "/admin";
 
 export default function Login() {
   const navigate = useNavigate();
@@ -42,10 +40,22 @@ export default function Login() {
 
       const user = await res.json();
 
-      // Keep the logged-in user around for the dashboard / route guard.
+      // Keep the logged-in user around for route guarding + division/button
+      // permissions. `user.staffName` is treated as the role
+      // (Admin / Printer / Picker / ...), `user.divisions` (if the backend
+      // sends it) scopes which division's data this user can see.
       sessionStorage.setItem("fentons_user", JSON.stringify(user));
 
-      navigate(ADMIN_DASHBOARD_ROUTE, { replace: true });
+      const target = getDefaultRoute(user);
+      if (target === "/") {
+        // Role not recognised in permissions.js — don't let them in blind.
+        setError("Your account role isn't set up for portal access yet. Contact an administrator.");
+        sessionStorage.removeItem("fentons_user");
+        setLoading(false);
+        return;
+      }
+
+      navigate(target, { replace: true });
     } catch (err) {
       setError(err.message || "Login failed. Please try again.");
     } finally {

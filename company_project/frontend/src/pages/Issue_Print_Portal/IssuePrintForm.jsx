@@ -1,5 +1,12 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
+import { useNavigate } from "react-router-dom";
 import "./IssuePrint.css";
+import {
+  getCurrentUser,
+  logoutUser,
+  canUseButton,
+  canSeeDivision,
+} from "../../config/permissions";
 
 // const API_BASE = "http://localhost:8080/api/print-portal";
 // const SETUP_API = "http://localhost:8080/api/admin-setup";
@@ -60,8 +67,8 @@ function computeRequestIds(documents) {
     const compactDate = key === "unknown" ? "00000000" : key.replace(/-/g, "");
     group
       .slice()
-      .sort((a, b) => (a.createdDatetime && b.createdDatetime 
-        ? new Date(a.createdDatetime) - new Date(b.createdDatetime) 
+      .sort((a, b) => (a.createdDatetime && b.createdDatetime
+        ? new Date(a.createdDatetime) - new Date(b.createdDatetime)
         : a.id - b.id))
       .forEach((doc, idx) => {
         idMap[doc.id] = `${compactDate}/${String(idx + 1).padStart(4, "0")}`;
@@ -240,7 +247,7 @@ function PrintDonePopup({ onConfirm, onCancel, printOperators, operatorsLoading,
 }
 
 // ── Document Card ──────────────────────────────────────────────────────────
-function DocumentCard({ doc, requestId, divisionLabel, onStart, onHold, onEnd, onEdit, onDelete }) {
+function DocumentCard({ doc, requestId, divisionLabel, perms, onStart, onHold, onEnd, onEdit, onDelete }) {
   const sc = statusClass(doc.printStatus);
   const jColor = jobTypeColor(doc.jobType);
   const isPending = sc === "pending";
@@ -248,9 +255,10 @@ function DocumentCard({ doc, requestId, divisionLabel, onStart, onHold, onEnd, o
   const isOnHold = sc === "onhold";
   const isDone = sc === "completed";
 
-  const canStart = isPending || isOnHold;
-  const canHold = isInProgress;
-  const canEnd = isInProgress || isOnHold;
+  // Role permission gates ANDed with the normal status-based gates.
+  const canStart = (isPending || isOnHold) && perms.start;
+  const canHold = isInProgress && perms.hold;
+  const canEnd = (isInProgress || isOnHold) && perms.end;
 
   return (
     <div className={`ip-card status-${sc}`}>
@@ -339,6 +347,21 @@ function DocumentCard({ doc, requestId, divisionLabel, onStart, onHold, onEnd, o
 
 // ── Main Component ─────────────────────────────────────────────────────────
 export default function IssuPrinFormt() {
+  const navigate = useNavigate();
+  const user = useMemo(() => getCurrentUser(), []);
+
+  // Button-level permissions for this role, computed once.
+  const perms = useMemo(() => ({
+    start: canUseButton(user, "start"),
+    hold: canUseButton(user, "hold"),
+    end: canUseButton(user, "end"),
+  }), [user]);
+
+  const handleLogout = () => {
+    logoutUser();
+    navigate("/", { replace: true });
+  };
+
   const [documents, setDocuments] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -398,12 +421,6 @@ export default function IssuPrinFormt() {
 
   // Division-wise operators — only the operators added under that
   // specific Division in Admin Master Data.
-  // NOTE: the backend's /print-operators endpoint returns ALL operators
-  // (there is no dedicated "by division" endpoint), so we fetch them all
-  // and filter client-side. Master Setup shows each operator's division
-  // as a "divisionNo — divisionName" code, so the stored field on each
-  // operator is the divisionNo code (e.g. "4017"), not the division name —
-  // match on that.
   const fetchOperatorsForDivision = useCallback(async (divisionNo) => {
     if (!divisionNo) {
       setPopupOperators([]);
@@ -463,6 +480,7 @@ export default function IssuPrinFormt() {
   };
 
   const handleStart = async (id) => {
+    if (!perms.start) return;
     try {
       await fetch(`${API_BASE}/${id}/start`, { method: "PUT" });
       fetchDocuments(true);
@@ -470,6 +488,7 @@ export default function IssuPrinFormt() {
   };
 
   const handleHoldClick = async (id) => {
+    if (!perms.hold) return;
     const doc = getDocById(id);
     setActiveId(id);
     setActivePopup("hold");
@@ -477,6 +496,7 @@ export default function IssuPrinFormt() {
   };
 
   const handleEndClick = async (id) => {
+    if (!perms.end) return;
     const doc = getDocById(id);
     setActiveId(id);
     setEditValues({ documentNo: "", printedBy: "" });
@@ -535,7 +555,15 @@ export default function IssuPrinFormt() {
 
   const requestIdMap = useMemo(() => computeRequestIds(documents), [documents]);
 
-  const jobTypes = ["ALL", ...new Set(documents.map(d => d.jobType).filter(Boolean))];
+  // ── Division-wise scoping ────────────────────────────────────────────
+  // Admin / System Administrator see every division. Everyone else only
+  // sees documents whose divisionNo is in their own `user.divisions` list.
+  const divisionScoped = useMemo(
+    () => documents.filter(doc => canSeeDivision(user, doc.divisionNo)),
+    [documents, user]
+  );
+
+  const jobTypes = ["ALL", ...new Set(divisionScoped.map(d => d.jobType).filter(Boolean))];
 
   const STATUS_FILTERS = [
     { value: "ALL", label: "All Status" },
@@ -545,7 +573,7 @@ export default function IssuPrinFormt() {
     { value: "completed", label: "Completed" },
   ];
 
-  const visible = documents.filter(doc => {
+  const visible = divisionScoped.filter(doc => {
     const q = search.toLowerCase();
     const matchSearch = !q || [
       String(doc.id), doc.jobwbs, doc.reservationNo,
@@ -558,11 +586,11 @@ export default function IssuPrinFormt() {
     return matchSearch && matchType && matchStatus;
   });
 
-  const total = documents.length;
-  const pending = documents.filter(d => statusClass(d.printStatus) === "pending").length;
-  const inProg = documents.filter(d => statusClass(d.printStatus) === "inprogress").length;
-  const onHold = documents.filter(d => statusClass(d.printStatus) === "onhold").length;
-  const completed = documents.filter(d => statusClass(d.printStatus) === "completed").length;
+  const total = divisionScoped.length;
+  const pending = divisionScoped.filter(d => statusClass(d.printStatus) === "pending").length;
+  const inProg = divisionScoped.filter(d => statusClass(d.printStatus) === "inprogress").length;
+  const onHold = divisionScoped.filter(d => statusClass(d.printStatus) === "onhold").length;
+  const completed = divisionScoped.filter(d => statusClass(d.printStatus) === "completed").length;
 
   // clicking a stat chip filters the grid by that status (Total clears the filter)
   const handleStatClick = (statusValue) => setFilterStatus(statusValue);
@@ -602,13 +630,27 @@ export default function IssuPrinFormt() {
             )}
           </p>
         </div>
-        <button
-          className="ip-btn ip-btn-outline"
-          style={{ flex: "unset", padding: "8px 18px" }}
-          onClick={() => fetchDocuments(false)}
-        >
-          ↻ Refresh
-        </button>
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          {user && (
+            <span style={{ fontSize: "0.8rem", color: "#6c8bb3" }}>
+              👤 {user.fullName || user.username} · {user.staffName}
+            </span>
+          )}
+          <button
+            className="ip-btn ip-btn-outline"
+            style={{ flex: "unset", padding: "8px 18px" }}
+            onClick={() => fetchDocuments(false)}
+          >
+            ↻ Refresh
+          </button>
+          <button
+            className="ip-btn ip-btn-outline"
+            style={{ flex: "unset", padding: "8px 18px" }}
+            onClick={handleLogout}
+          >
+            ⎋ Logout
+          </button>
+        </div>
       </div>
       {/* Toolbar */}
       <div className="ip-toolbar">
@@ -702,6 +744,7 @@ export default function IssuPrinFormt() {
                   ? `${doc.divisionNo} — ${divisionNoToName[doc.divisionNo] || ""}`
                   : null
               }
+              perms={perms}
               onStart={handleStart}
               onHold={handleHoldClick}
               onEnd={handleEndClick}
