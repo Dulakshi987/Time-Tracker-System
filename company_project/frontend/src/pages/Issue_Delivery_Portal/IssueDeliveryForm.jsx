@@ -1,5 +1,9 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
+import { useNavigate } from "react-router-dom";
 import "./IssueDelivery.css";
+import { getCurrentUser, canAccessRoute, logoutUser } from "../../config/permissions";
+// ⚠️ Adjust the path above ("../../config/permissions") to match where
+//    permissions.js actually sits relative to this file.
 
 // const API_BASE = "http://localhost:8080/api/delivery-portal";
 // const SETUP_API = "http://localhost:8080/api/admin-setup";
@@ -885,6 +889,30 @@ function SkeletonRow() {
 // ── Main Component ───────────────────────────────────────────────────────────
 
 export default function IssueDeliveryForm() {
+  const navigate = useNavigate();
+
+  // ── Auth / role guard ──
+  // Redirects to /login if there's no logged-in user, or the logged-in
+  // user's role isn't allowed on the /delivery route (see permissions.js).
+  const currentUser = getCurrentUser();
+
+  useEffect(() => {
+    if (!currentUser || !canAccessRoute(currentUser, "/delivery")) {
+      navigate("/login", { replace: true });
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Admin / System Administrator already have logout available elsewhere
+  // (their own dashboard/navbar) — hide the in-portal Logout button for them.
+  const isAdminRole =
+    currentUser?.staffName === "Admin" ||
+    currentUser?.staffName === "System Administrator";
+
+  const handleLogout = () => {
+    logoutUser();
+    navigate("/login", { replace: true });
+  };
+
   const [documents,    setDocuments]    = useState([]);
   const [loading,      setLoading]      = useState(true);
   const [error,        setError]        = useState(null);
@@ -1165,6 +1193,11 @@ export default function IssueDeliveryForm() {
     [activeDoc, getOperatorNamesForDivision]
   );
 
+  // Don't flash the portal UI while the auth-guard redirect is in flight.
+  if (!currentUser || !canAccessRoute(currentUser, "/delivery")) {
+    return null;
+  }
+
   return (
     <div className="ip-page">
 
@@ -1209,13 +1242,24 @@ export default function IssueDeliveryForm() {
             )}
           </p>
         </div>
-        <button
-          className="ip-btn ip-btn-outline"
-          style={{ flex: "unset", padding: "8px 18px" }}
-          onClick={() => fetchDocuments(false)}
-        >
-          ↻ Refresh
-        </button>
+        <div style={{ display: "flex", gap: 10 }}>
+          <button
+            className="ip-btn ip-btn-outline"
+            style={{ flex: "unset", padding: "8px 18px" }}
+            onClick={() => fetchDocuments(false)}
+          >
+            ↻ Refresh
+          </button>
+          {!isAdminRole && (
+            <button
+              className="ip-btn ip-btn-outline"
+              style={{ flex: "unset", padding: "8px 18px", borderColor: "#ef4444", color: "#ef4444" }}
+              onClick={handleLogout}
+            >
+              ⎋ Logout
+            </button>
+          )}
+        </div>
       </div>
 
       {/* ── Overdue notification ── */}

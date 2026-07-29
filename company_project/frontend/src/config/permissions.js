@@ -22,11 +22,11 @@ export const ROLES = {
 
 // allowedRoutes: "*" = every route. buttons: "*" = every button.
 // allDivisions: true = ignore division filtering, see everything.
-// Button names used across portals: "start", "hold", "end", "edit",
-// "delete", "emergency_done", "deliver", "cancel", "add_to_file".
+// Button names used across portals: "handover", "start", "hold", "end",
+// "edit", "delete", "emergency_done", "deliver", "cancel", "add_to_file".
 // Only Admin / System Administrator (buttons: "*") can Edit or Delete a
-// completed print-portal card — Printer and Print with Document Enter
-// only get start/hold/end.
+// completed card — Picker, Printer, and Print with Document Enter only get
+// the workflow-action buttons, never Edit/Delete.
 export const ROLE_ACCESS = {
   [ROLES.ADMIN]: {
     defaultRoute: "/admin",
@@ -58,7 +58,8 @@ export const ROLE_ACCESS = {
   [ROLES.PICKER]: {
     defaultRoute: "/pick",
     allowedRoutes: ["/pick"],
-    buttons: ["start", "hold", "end", "emergency_done"],
+    // Pickers get the full pick-workflow action set, but never edit/delete.
+    buttons: ["handover", "start", "hold", "end", "emergency_done"],
   },
   [ROLES.CHECKER]: {
     defaultRoute: "/check",

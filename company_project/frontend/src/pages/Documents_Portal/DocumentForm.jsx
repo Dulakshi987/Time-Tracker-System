@@ -9,6 +9,7 @@ import {
   fetchPrintOperatorsByDivision,
   fetchDivisions,
 } from "../../services/Documents_Portal/api";
+import { getCurrentUser, canUseButton } from "../../config/permissions";
 import "./DocumentsForm.css";
 
 const getCurrentDate = () => new Date().toISOString().split("T")[0];
@@ -47,6 +48,17 @@ const emptyTableFilters = () => ({
 const DocumentForm = ({ selectedType }) => {
   const safeSelectedType = selectedType || "Summary";
   const isSummary = safeSelectedType === "Summary" || safeSelectedType === "All";
+
+  // ── Role permissions ────────────────────────────────────────────────
+  // "Document Enter" only gets the normal entry form + a read-only table
+  // view. Edit/Delete on existing rows is reserved for Admin / System
+  // Administrator (permissions.js: buttons "*"). "Print with Document
+  // Enter" behaves the same as plain Document Enter here unless you
+  // explicitly add "edit"/"delete" to its buttons list in permissions.js.
+  const user = useMemo(() => getCurrentUser(), []);
+  const canEdit = canUseButton(user, "edit");
+  const canDelete = canUseButton(user, "delete");
+  const showActionsColumn = canEdit || canDelete;
 
   const [formData, setFormData] = useState(emptyForm(isSummary ? "" : safeSelectedType));
   const [editingId, setEditingId] = useState(null);
@@ -181,6 +193,12 @@ const DocumentForm = ({ selectedType }) => {
   const handleSubmit = async (e) => {
     e.preventDefault();
 
+    // Editing an existing row (not a fresh save) requires edit permission.
+    if (editingId && !canEdit) {
+      setSaveMsg({ type: "error", text: "You don't have permission to edit documents." });
+      return;
+    }
+
     if (!formData.divisionNo) {
       setSaveMsg({ type: "error", text: "Please select a Division before saving." });
       return;
@@ -231,6 +249,7 @@ const DocumentForm = ({ selectedType }) => {
   };
 
   const startEdit = (row) => {
+    if (!canEdit) return;
     setEditingId(row.id);
     setFieldErrors({});
     setFormData({
@@ -257,6 +276,7 @@ const DocumentForm = ({ selectedType }) => {
   };
 
   const removeRow = async (id) => {
+    if (!canDelete) return;
     if (!window.confirm("Delete this document? This cannot be undone.")) return;
     try {
       await deleteDocument(id);
@@ -326,6 +346,8 @@ const DocumentForm = ({ selectedType }) => {
     tableFilters.jobType !== "ALL" ||
     tableFilters.divisionNo !== "ALL" ||
     tableFilters.status !== "ALL";
+
+  const tableColumnCount = showActionsColumn ? 14 : 13;
 
   return (
     <div className="docf-page">
@@ -555,12 +577,12 @@ const DocumentForm = ({ selectedType }) => {
                   <th>Request Date</th>
                   <th>Request Time</th>
                   <th>Status</th>
-                  <th>Actions</th>
+                  {showActionsColumn && <th>Actions</th>}
                 </tr>
               </thead>
               <tbody>
                 {filteredRows.length === 0 ? (
-                  <tr><td colSpan={14} className="docf-empty-row">No documents match this filter</td></tr>
+                  <tr><td colSpan={tableColumnCount} className="docf-empty-row">No documents match this filter</td></tr>
                 ) : filteredRows.map(row => (
                   <tr key={row.id}>
                     <td>{row.id}</td>
@@ -576,10 +598,16 @@ const DocumentForm = ({ selectedType }) => {
                     <td>{row.requestDate || "—"}</td>
                     <td>{row.requestTime || "—"}</td>
                     <td><span className="docf-badge">{row.status || "Draft"}</span></td>
-                    <td className="docf-actions-cell">
-                      <button className="docf-edit-btn" onClick={() => startEdit(row)}>Edit</button>
-                      <button className="docf-del-btn" onClick={() => removeRow(row.id)}>Delete</button>
-                    </td>
+                    {showActionsColumn && (
+                      <td className="docf-actions-cell">
+                        {canEdit && (
+                          <button className="docf-edit-btn" onClick={() => startEdit(row)}>Edit</button>
+                        )}
+                        {canDelete && (
+                          <button className="docf-del-btn" onClick={() => removeRow(row.id)}>Delete</button>
+                        )}
+                      </td>
+                    )}
                   </tr>
                 ))}
               </tbody>

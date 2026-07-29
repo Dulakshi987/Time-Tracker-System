@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 // import DateRangeFilter from "./DateRangeFilter";
 import "./IssueCheck.css";
+import { getCurrentUser, canUseButton } from "../../config/permissions"; // adjust path to your project structure
 
 // const API_BASE = "http://localhost:8080/api/check-portal";
 // const SETUP_API = "http://localhost:8080/api/admin-setup";
@@ -631,6 +632,9 @@ function DocumentCard({
   doc, requestId, divisionLabel,
   onStart, onHold, onEnd, onView, onEdit, onDelete,
   cardRef, jumpHighlighted,
+  // Role-based permission flags (from permissions.js → canUseButton).
+  // Computed once in the parent and passed down.
+  canStartBtn, canHoldBtn, canEndBtn, canEditBtn, canDeleteBtn,
 }) {
   const sc        = statusClass(doc.checkStatus);
   const jColor    = jobTypeColor(doc.jobType);
@@ -642,6 +646,12 @@ function DocumentCard({
   const isFlagged = (doc.hasWrongMaterial || "").toUpperCase() === "YES";
   const hasUnresolvedError = isFlagged && !doc.emergencyPickResolved && !isDone;
   const hasResolvedError = isFlagged && doc.emergencyPickResolved && !isDone;
+
+  // Button availability = correct workflow state AND the logged-in role is
+  // permitted to use that button (permissions.js).
+  const canStart = (isPending || isOnHold) && canStartBtn;
+  const canHold = isStarted && canHoldBtn;
+  const canEnd = (isStarted || isOnHold) && canEndBtn;
 
   const cardClassName =
     `ip-card status-${sc}` +
@@ -842,12 +852,20 @@ function DocumentCard({
       <div className="ip-card-foot">
         {isDone ? (
           <>
-            <button className="ip-btn ip-btn-edit" onClick={() => onEdit(doc)}>
-              ✎ Edit
-            </button>
-            <button className="ip-btn ip-btn-delete" onClick={() => onDelete(doc.id)}>
-              🗑 Delete
-            </button>
+            {/* Edit/Delete are hidden entirely (not just disabled) unless
+                the logged-in role has "edit"/"delete" in permissions.js.
+                Checker's button list does not include them, so a Checker
+                never sees these two on a completed card. */}
+            {canEditBtn && (
+              <button className="ip-btn ip-btn-edit" onClick={() => onEdit(doc)}>
+                ✎ Edit
+              </button>
+            )}
+            {canDeleteBtn && (
+              <button className="ip-btn ip-btn-delete" onClick={() => onDelete(doc.id)}>
+                🗑 Delete
+              </button>
+            )}
             <button className="ip-btn ip-btn-outline" onClick={() => onView(doc.id)}>
               👁 View
             </button>
@@ -856,21 +874,21 @@ function DocumentCard({
           <>
             <button
               className="ip-btn ip-btn-start"
-              disabled={!(isPending || isOnHold)}
+              disabled={!canStart}
               onClick={() => onStart(doc.id)}
             >
               {isOnHold ? "▶ Resume" : "▶ Start"}
             </button>
             <button
               className="ip-btn ip-btn-hold"
-              disabled={!isStarted}
+              disabled={!canHold}
               onClick={() => onHold(doc.id)}
             >
               ⏸ Hold
             </button>
             <button
               className="ip-btn ip-btn-end"
-              disabled={!(isStarted || isOnHold)}
+              disabled={!canEnd}
               onClick={() => onEnd(doc.id)}
             >
               ■ End
@@ -925,6 +943,17 @@ export default function IssueCheckForm() {
   const [toDate,       setToDate]       = useState("");
   const [lastUpdated,  setLastUpdated]  = useState(null);
   const [refreshing,   setRefreshing]   = useState(false);
+
+  // Logged-in user (from sessionStorage via permissions.js) — read once on
+  // mount. Used to compute which buttons this role is allowed to see/use.
+  const currentUser = useMemo(() => getCurrentUser(), []);
+  const buttonPerms = useMemo(() => ({
+    start: canUseButton(currentUser, "start"),
+    hold: canUseButton(currentUser, "hold"),
+    end: canUseButton(currentUser, "end"),
+    edit: canUseButton(currentUser, "edit"),
+    delete: canUseButton(currentUser, "delete"),
+  }), [currentUser]);
 
   // Divisions (Admin Master Data) — used to label each card and to scope
   // which check-operators show up in the popups, exactly like Pick Portal.
@@ -1043,6 +1072,7 @@ export default function IssueCheckForm() {
 
   // ── Start / Resume ──
   const handleStart = async (id) => {
+    if (!buttonPerms.start) return;
     try {
       await fetch(`${API_BASE}/${id}/start`, { method: "PUT" });
       fetchDocuments(true);
@@ -1052,6 +1082,7 @@ export default function IssueCheckForm() {
   };
 
   const handleHoldClick = async (id) => {
+    if (!buttonPerms.hold) return;
     const doc = getDocById(id);
     setActiveId(id);
     setActivePopup("hold");
@@ -1059,6 +1090,7 @@ export default function IssueCheckForm() {
   };
 
   const handleEndClick = async (id) => {
+    if (!buttonPerms.end) return;
     const doc = getDocById(id);
     setActiveId(id);
     setActivePopup("end");
@@ -1067,8 +1099,10 @@ export default function IssueCheckForm() {
 
   const handleViewClick = (id) => { setActiveId(id); setActivePopup("view"); };
 
-  // Edit — reopens pre-filled with the completed document's Held By / Checked By.
+  // Edit — reopens pre-filled with the completed document's Held By / Checked
+  // By. Blocked for any role without the "edit" permission (e.g. Checker).
   const handleEditClick = async (doc) => {
+    if (!buttonPerms.edit) return;
     setActiveId(doc.id);
     setActivePopup("edit");
     await fetchOperatorsForDivision(doc?.divisionNo);
@@ -1136,6 +1170,7 @@ export default function IssueCheckForm() {
   };
 
   const handleDelete = async (id) => {
+    if (!buttonPerms.delete) return;
     if (!window.confirm("Delete this document from the Check Portal? This cannot be undone.")) return;
     try {
       const res = await fetch(`${API_BASE}/${id}`, { method: "DELETE" });
@@ -1492,6 +1527,11 @@ export default function IssueCheckForm() {
               onDelete={handleDelete}
               cardRef={el => { cardRefs.current[doc.id] = el; }}
               jumpHighlighted={jumpHighlightId === doc.id}
+              canStartBtn={buttonPerms.start}
+              canHoldBtn={buttonPerms.hold}
+              canEndBtn={buttonPerms.end}
+              canEditBtn={buttonPerms.edit}
+              canDeleteBtn={buttonPerms.delete}
             />
           ))
         )}

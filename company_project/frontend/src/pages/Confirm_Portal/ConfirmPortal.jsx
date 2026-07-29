@@ -1,5 +1,9 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
+import { useNavigate } from "react-router-dom";
 import "./ConfirmPortal.css";
+import { getCurrentUser, canAccessRoute, logoutUser } from "../../config/permissions";
+// ⚠️ Adjust the path above ("../../config/permissions") to match where
+//    permissions.js actually sits relative to this file.
 
 // const DELIVERY_API = "http://localhost:8080/api/delivery-portal";
 // const CONFIRM_API = "http://localhost:8080/api/issue-confirm";
@@ -501,6 +505,30 @@ function ViewDrawer({ doc, reqId, onClose }) {
 // ── Main Component ──────────────────────────────────────────────────────────
 
 export default function IssueConfirm() {
+  const navigate = useNavigate();
+
+  // ── Auth / role guard ──
+  // Redirects to /login if there's no logged-in user, or the logged-in
+  // user's role isn't allowed on the /confirm route (see permissions.js).
+  const currentUser = getCurrentUser();
+
+  useEffect(() => {
+    if (!currentUser || !canAccessRoute(currentUser, "/confirm")) {
+      navigate("/login", { replace: true });
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Admin / System Administrator already have logout available elsewhere
+  // (their own dashboard/navbar) — hide the in-portal Logout button for them.
+  const isAdminRole =
+    currentUser?.staffName === "Admin" ||
+    currentUser?.staffName === "System Administrator";
+
+  const handleLogout = () => {
+    logoutUser();
+    navigate("/login", { replace: true });
+  };
+
   const [documents,   setDocuments]   = useState([]);
   const [loading,     setLoading]     = useState(true);
   const [error,       setError]       = useState(null);
@@ -750,6 +778,11 @@ export default function IssueConfirm() {
     }
   };
 
+  // Don't flash the portal UI while the auth-guard redirect is in flight.
+  if (!currentUser || !canAccessRoute(currentUser, "/confirm")) {
+    return null;
+  }
+
   return (
     <div className="icf-page">
 
@@ -810,13 +843,24 @@ export default function IssueConfirm() {
             )}
           </p>
         </div>
-        <button
-          className="ip-btn ip-btn-outline"
-          style={{ flex: "unset", padding: "8px 18px" }}
-          onClick={() => fetchDocuments(false)}
-        >
-          ↻ Refresh
-        </button>
+        <div style={{ display: "flex", gap: 10 }}>
+          <button
+            className="ip-btn ip-btn-outline"
+            style={{ flex: "unset", padding: "8px 18px" }}
+            onClick={() => fetchDocuments(false)}
+          >
+            ↻ Refresh
+          </button>
+          {!isAdminRole && (
+            <button
+              className="ip-btn ip-btn-outline"
+              style={{ flex: "unset", padding: "8px 18px", borderColor: "#ef4444", color: "#ef4444" }}
+              onClick={handleLogout}
+            >
+              ⎋ Logout
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Toolbar — Search + Filter */}

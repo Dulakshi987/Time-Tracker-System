@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import "./IssuePick.css";
+import { getCurrentUser, canUseButton } from "../../config/permissions"; // adjust path to your project structure
 
 // const API_BASE = "http://localhost:8080/api/pick-portal";
 // const SETUP_API = "http://localhost:8080/api/admin-setup";
@@ -563,6 +564,11 @@ function DocumentCard({
   onHandover, onStart, onHold, onEnd, onView, onEmergencyDone,
   onEdit, onDelete,
   cardRef, jumpHighlighted,
+  // Role-based permission flags (from permissions.js → canUseButton).
+  // These are computed once in the parent and passed down so this
+  // component never has to know about the current user directly.
+  canHandoverBtn, canStartBtn, canHoldBtn, canEndBtn, canEmergencyBtn,
+  canEditBtn, canDeleteBtn,
 }) {
   const sc = statusClass(doc.status);
   const jColor = jobTypeColor(doc.jobType);
@@ -572,10 +578,12 @@ function DocumentCard({
   const isOnHold = sc === "onhold";
   const isDone = sc === "completed";
 
-  const canHandover = isPending;
-  const canStart = isHandedOver || isOnHold;
-  const canHold = isStarted;
-  const canEnd = isStarted || isOnHold;
+  // Button availability = correct workflow state AND the logged-in role is
+  // permitted to use that button (permissions.js).
+  const canHandover = isPending && canHandoverBtn;
+  const canStart = (isHandedOver || isOnHold) && canStartBtn;
+  const canHold = isStarted && canHoldBtn;
+  const canEnd = (isStarted || isOnHold) && canEndBtn;
 
   const hasCheckError =
     (doc.hasWrongMaterial || "").toUpperCase() === "YES" && !doc.emergencyPickResolved;
@@ -710,12 +718,20 @@ function DocumentCard({
       <div className="ip-card-foot">
         {isDone ? (
           <>
-            <button className="ip-btn ip-btn-edit" onClick={() => onEdit(doc)}>
-              ✎ Edit
-            </button>
-            <button className="ip-btn ip-btn-delete" onClick={() => onDelete(doc.id)}>
-              🗑 Delete
-            </button>
+            {/* Edit/Delete are hidden entirely (not just disabled) unless
+                the logged-in role has "edit"/"delete" in permissions.js.
+                Picker's button list does not include them, so a Picker
+                never sees these two on a completed card. */}
+            {canEditBtn && (
+              <button className="ip-btn ip-btn-edit" onClick={() => onEdit(doc)}>
+                ✎ Edit
+              </button>
+            )}
+            {canDeleteBtn && (
+              <button className="ip-btn ip-btn-delete" onClick={() => onDelete(doc.id)}>
+                🗑 Delete
+              </button>
+            )}
             <button className="ip-btn ip-btn-outline" onClick={() => onView(doc.id)}>
               👁 View
             </button>
@@ -740,11 +756,12 @@ function DocumentCard({
           </>
         )}
         {/* Emergency Pick Done button — always shown below the normal
-            action row when there's an unresolved picking error, hard red
-            background + darker red border so it's unmistakable. Clicking it
-            opens EmergencyPickDonePopup where the reasons/materials are
-            shown again before picking who re-picked. */}
-        {hasCheckError && (
+            action row when there's an unresolved picking error AND the
+            logged-in role is allowed to use it, hard red background +
+            darker red border so it's unmistakable. Clicking it opens
+            EmergencyPickDonePopup where the reasons/materials are shown
+            again before picking who re-picked. */}
+        {hasCheckError && canEmergencyBtn && (
           <button
             className="ip-btn ip-btn-emergency"
             style={{
@@ -786,6 +803,19 @@ export default function IssuPikFormt() {
   const [filterStatus, setFilterStatus] = useState("ALL");
   const [lastUpdated, setLastUpdated] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
+
+  // Logged-in user (from sessionStorage via permissions.js) — read once on
+  // mount. Used to compute which buttons this role is allowed to see/use.
+  const currentUser = useMemo(() => getCurrentUser(), []);
+  const buttonPerms = useMemo(() => ({
+    handover: canUseButton(currentUser, "handover"),
+    start: canUseButton(currentUser, "start"),
+    hold: canUseButton(currentUser, "hold"),
+    end: canUseButton(currentUser, "end"),
+    emergency_done: canUseButton(currentUser, "emergency_done"),
+    edit: canUseButton(currentUser, "edit"),
+    delete: canUseButton(currentUser, "delete"),
+  }), [currentUser]);
 
   // Divisions (Admin Master Data) — used only to label each card, exactly
   // like the Print Portal does with divisionNoToName.
@@ -916,7 +946,11 @@ export default function IssuPikFormt() {
   };
 
   // ── Open popups — each pulls the division-scoped picker list first ──
+  // Every entry point below also re-checks the role permission before doing
+  // any work, so even a manually-triggered call (e.g. from devtools) can't
+  // open a popup the current user isn't allowed to use.
   const handleHandoverClick = async (id) => {
+    if (!buttonPerms.handover) return;
     const doc = getDocById(id);
     setActiveId(id);
     setActivePopup("handover");
@@ -924,6 +958,7 @@ export default function IssuPikFormt() {
   };
 
   const handleHoldClick = async (id) => {
+    if (!buttonPerms.hold) return;
     const doc = getDocById(id);
     setActiveId(id);
     setActivePopup("hold");
@@ -931,6 +966,7 @@ export default function IssuPikFormt() {
   };
 
   const handleEndClick = async (id) => {
+    if (!buttonPerms.end) return;
     const doc = getDocById(id);
     setActiveId(id);
     setActivePopup("end");
@@ -940,6 +976,7 @@ export default function IssuPikFormt() {
   const handleViewClick = (id) => { setActiveId(id); setActivePopup("view"); };
 
   const handleEmergencyClick = async (id) => {
+    if (!buttonPerms.emergency_done) return;
     const doc = getDocById(id);
     setActiveId(id);
     setActivePopup("emergency");
@@ -947,8 +984,10 @@ export default function IssuPikFormt() {
   };
 
   // Edit — reopens pre-filled with the completed document's values, exactly
-  // like the Print Portal's Edit action.
+  // like the Print Portal's Edit action. Blocked for any role without the
+  // "edit" permission (e.g. Picker).
   const handleEditClick = async (doc) => {
+    if (!buttonPerms.edit) return;
     setActiveId(doc.id);
     setActivePopup("edit");
     await fetchPickersForDivision(doc?.divisionNo);
@@ -969,6 +1008,7 @@ export default function IssuPikFormt() {
   };
 
   const handleStart = async (id) => {
+    if (!buttonPerms.start) return;
     try {
       const res = await fetch(`${API_BASE}/${id}/start`, { method: "PUT" });
       await assertOk(res, "Start");
@@ -1029,6 +1069,7 @@ export default function IssuPikFormt() {
   };
 
   const handleDelete = async (id) => {
+    if (!buttonPerms.delete) return;
     if (!window.confirm("Delete this document from the Pick Portal? This cannot be undone.")) return;
     try {
       const res = await fetch(`${API_BASE}/${id}`, { method: "DELETE" });
@@ -1250,6 +1291,13 @@ export default function IssuPikFormt() {
               onDelete={handleDelete}
               cardRef={el => { cardRefs.current[doc.id] = el; }}
               jumpHighlighted={jumpHighlightId === doc.id}
+              canHandoverBtn={buttonPerms.handover}
+              canStartBtn={buttonPerms.start}
+              canHoldBtn={buttonPerms.hold}
+              canEndBtn={buttonPerms.end}
+              canEmergencyBtn={buttonPerms.emergency_done}
+              canEditBtn={buttonPerms.edit}
+              canDeleteBtn={buttonPerms.delete}
             />
           ))
         )}
