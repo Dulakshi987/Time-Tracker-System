@@ -65,6 +65,7 @@ public class AdminSetupService {
         existing.setFullName(u.getFullName());
         existing.setNic(u.getNic());
         existing.setUsername(u.getUsername());
+        existing.setDivisionNo(u.getDivisionNo()); // ← was missing, so edits never persisted the division(s)
         if (password != null && !password.isBlank()) {
             if (!password.equals(confirmPassword)) {
                 throw new IllegalArgumentException("Password and Confirm Password do not match");

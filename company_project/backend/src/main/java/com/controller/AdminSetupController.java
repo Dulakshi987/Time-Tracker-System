@@ -31,6 +31,7 @@ public class AdminSetupController {
         u.setFullName(body.get("fullName"));
         u.setNic(body.get("nic"));
         u.setUsername(body.get("username"));
+        u.setDivisionNo(body.get("divisionNo")); // ← comma-separated division codes, e.g. "D1,D2"
         u.setCreatedBy(body.get("createdBy"));
         return service.createUser(u, body.get("password"), body.get("confirmPassword"));
     }
@@ -42,6 +43,7 @@ public class AdminSetupController {
         u.setFullName(body.get("fullName"));
         u.setNic(body.get("nic"));
         u.setUsername(body.get("username"));
+        u.setDivisionNo(body.get("divisionNo")); // ← was missing, so edits never persisted the division(s)
         return service.updateUser(id, u, body.get("password"), body.get("confirmPassword"));
     }
 
