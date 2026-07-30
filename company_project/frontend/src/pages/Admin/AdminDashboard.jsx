@@ -1289,6 +1289,16 @@ function DashboardPanel({ documents, jobTypes, divisions, operatorDivisionMap, d
 
 // ── Main ───────────────────────────────────────────────────────────────────
 
+// export default function AdminDashboard() {
+//   const ACTIVE_VIEW_KEY = "adm_active_view";
+//   const [activeView, setActiveViewState] = useState(() => {
+//     try {
+//       const saved = localStorage.getItem(ACTIVE_VIEW_KEY);
+//       if (saved && NAV_ITEMS.some(n => n.key === saved)) return saved;
+//     } catch (e) { /* localStorage unavailable — fall back to default */ }
+//     return "dashboard";
+//   });
+
 export default function AdminDashboard() {
   const ACTIVE_VIEW_KEY = "adm_active_view";
   const [activeView, setActiveViewState] = useState(() => {
@@ -1298,6 +1308,7 @@ export default function AdminDashboard() {
     } catch (e) { /* localStorage unavailable — fall back to default */ }
     return "dashboard";
   });
+  // ...
   // Wraps setActiveView so every sidebar selection is also remembered —
   // a page refresh (or reopening the tab) lands back on the same page
   // instead of always redirecting to the Dashboard.
