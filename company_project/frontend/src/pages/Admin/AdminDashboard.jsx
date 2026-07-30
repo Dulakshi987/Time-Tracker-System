@@ -75,32 +75,28 @@ function deliveryStatusClass(s) {
 }
 
 // ── Date range filter ─────────────────────────────────────────────────────
-// dateField lets each portal check its OWN date (printStartTime, startTime,
-// checkStartTime, deliveryStartTime) instead of always using requestDate —
-// so "Today" on the Print Portal means "printed today", not "requested
-// today", and the same idea applies to Pick / Check / Delivery. Document
-// Form / Confirm Portal keep using requestDate (that's their own date).
-function inRange(doc, range, fromDate, toDate, dateField = "requestDate") {
-  const key = toDateKey(doc[dateField]);
+
+function inRange(doc, range, fromDate, toDate) {
+  const key = docDateKey(doc);
   if (range === "ALL") return true;
   if (!key) return false;
 
-  const nowD = new Date();
-  const todayKey = toDateKey(nowD);
+  const now = new Date();
+  const todayKey = toDateKey(now);
 
   switch (range) {
     case "TODAY":
       return key === todayKey;
     case "7D": {
-      const from = new Date(nowD.getFullYear(), nowD.getMonth(), nowD.getDate() - 6);
+      const from = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 6);
       return key >= toDateKey(from) && key <= todayKey;
     }
     case "30D": {
-      const from = new Date(nowD.getFullYear(), nowD.getMonth(), nowD.getDate() - 29);
+      const from = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 29);
       return key >= toDateKey(from) && key <= todayKey;
     }
     case "YEAR":
-      return key.slice(0, 4) === String(nowD.getFullYear());
+      return key.slice(0, 4) === String(now.getFullYear());
     case "CUSTOM":
       if (!fromDate && !toDate) return true;
       if (fromDate && key < fromDate) return false;
@@ -161,35 +157,6 @@ function operatorEfficiency(docs, byField, durationField, doneFn) {
     .sort((a, b) => b.jobs - a.jobs);
 }
 
-// ── Today's live time stats per portal — uses each portal's own date
-// field (via STAGE_CONFIG's startField) so "today" means "activity in
-// THIS portal happened today", not "document was requested today".
-// Counts elapsed time live for jobs still in progress/on hold (using
-// `nowMs`, which ticks every second), and the final stored duration once
-// a job is completed. Skips cancelled jobs and jobs that haven't started.
-function portalDayTimeStats(docs, stage, nowMs) {
-  const cfg = STAGE_CONFIG[stage];
-  const todayKey = toDateKey(new Date());
-  let totalSeconds = 0;
-  let count = 0;
-
-  docs.forEach(d => {
-    if (!d[cfg.startField]) return;
-    if (toDateKey(d[cfg.startField]) !== todayKey) return;
-    const status = (d[cfg.statusField] || "").toLowerCase();
-    if (status.includes("cancel")) return;
-
-    totalSeconds += liveDurationSeconds(d, stage, nowMs);
-    count += 1;
-  });
-
-  return {
-    totalSeconds,
-    avgSeconds: count ? Math.round(totalSeconds / count) : 0,
-    count,
-  };
-}
-
 // ── Small UI atoms ─────────────────────────────────────────────────────────
 
 function KpiCard({ label, value, colorClass }) {
@@ -247,21 +214,6 @@ function EfficiencyTable({ title, rows }) {
           ))}
         </tbody>
       </table>
-    </div>
-  );
-}
-
-// Live "Today" time-accuracy card — total & average time for a portal,
-// scoped to that portal's own date field, ticking in real time.
-function TimeStatCard({ title, stats }) {
-  return (
-    <div className="adm-eff-card">
-      <div className="adm-eff-title">{title}</div>
-      <div className="adm-triple-stats">
-        <div><div className="adm-stat-label">Jobs Today</div><div className="adm-stat-value">{stats.count}</div></div>
-        <div><div className="adm-stat-label">Total Time</div><div className="adm-stat-value">{secondsToHMS(stats.totalSeconds)}</div></div>
-        <div><div className="adm-stat-label">Avg Time</div><div className="adm-stat-value">{secondsToHMS(stats.avgSeconds)}</div></div>
-      </div>
     </div>
   );
 }
@@ -1263,72 +1215,36 @@ function buildJobTypeCards(jobTypes, documents, divisions, operatorDivisionMap) 
   return cards;
 }
 
-// `documents` here is division-filtered ONLY (no date filter applied yet) —
-// each portal below filters itself against its OWN date field (print date,
-// pick date, check date, delivery date, request date) using `range` /
-// `fromDate` / `toDate` from the filter bar. This is what makes "Today"
-// mean "today's activity in that portal", not "requested today".
-function DashboardPanel({ documents, jobTypes, divisions, operatorDivisionMap, division, range, fromDate, toDate, now }) {
+function DashboardPanel({ documents, jobTypes, divisions, operatorDivisionMap, division }) {
   // When a specific division is selected in the filter bar, the job-type
   // cards row should only show cards for that division — not every
   // division's cards. "ALL" shows every division's cards as before.
   const divisionsForCards = division && division !== "ALL"
     ? divisions.filter(d => d.divisionNo === division)
     : divisions;
-
-  const documentDocs = useMemo(
-    () => documents.filter(d => inRange(d, range, fromDate, toDate, "requestDate")),
-    [documents, range, fromDate, toDate]
-  );
-  const printDocs = useMemo(
-    () => documents.filter(d => inRange(d, range, fromDate, toDate, "printStartTime")),
-    [documents, range, fromDate, toDate]
-  );
-  const pickDocs = useMemo(
-    () => documents.filter(d => inRange(d, range, fromDate, toDate, "startTime")),
-    [documents, range, fromDate, toDate]
-  );
-  const checkDocs = useMemo(
-    () => documents.filter(d => inRange(d, range, fromDate, toDate, "checkStartTime")),
-    [documents, range, fromDate, toDate]
-  );
-  const deliveryDocs = useMemo(
-    () => documents.filter(d => inRange(d, range, fromDate, toDate, "deliveryStartTime")),
-    [documents, range, fromDate, toDate]
-  );
-
-  const print = portalCounts(printDocs, () => true, d => printStatusClass(d.printStatus));
-  const pick = portalCounts(pickDocs, d => !!d.printDocumentNo, d => pickStatusClass(d.status));
+  const print = portalCounts(documents, () => true, d => printStatusClass(d.printStatus));
+  const pick = portalCounts(documents, d => !!d.printDocumentNo, d => pickStatusClass(d.status));
   const check = portalCounts(
-    checkDocs,
+    documents,
     d => pickStatusClass(d.status) === "completed" && !!d.printDocumentNo,
     d => checkStatusClass(d.checkStatus),
   );
   const delivery = portalCounts(
-    deliveryDocs,
+    documents,
     d => checkStatusClass(d.checkStatus) === "completed",
     d => deliveryStatusClass(d.deliveryStatus),
   );
 
-  const deliveredDocs = deliveryDocs.filter(d => deliveryStatusClass(d.deliveryStatus) === "completed");
+  const deliveredDocs = documents.filter(d => deliveryStatusClass(d.deliveryStatus) === "completed");
   const filedCount    = deliveredDocs.filter(d => d.fileNumber).length;
-  const holdCount     = deliveryDocs.filter(d => deliveryStatusClass(d.deliveryStatus) === "onhold").length;
-  const cancelledCount = deliveryDocs.filter(d => deliveryStatusClass(d.deliveryStatus) === "cancelled").length;
+  const holdCount     = documents.filter(d => deliveryStatusClass(d.deliveryStatus) === "onhold").length;
+  const cancelledCount = documents.filter(d => deliveryStatusClass(d.deliveryStatus) === "cancelled").length;
   const pendingFileCount = deliveredDocs.length - filedCount;
 
-  const printEff    = operatorEfficiency(printDocs, "printedBy", "printDurationSeconds", d => printStatusClass(d.printStatus) === "completed");
-  const pickEff     = operatorEfficiency(pickDocs, "pickedBy", "durationSeconds", d => pickStatusClass(d.status) === "completed");
-  const checkEff    = operatorEfficiency(checkDocs, "checkedBy", "checkDurationSeconds", d => checkStatusClass(d.checkStatus) === "completed");
-  const deliveryEff = operatorEfficiency(deliveryDocs, "deliveredBy", "deliveryDurationSeconds", d => deliveryStatusClass(d.deliveryStatus) === "completed");
-
-  // Live "Today" time accuracy — always TODAY specifically, per portal's
-  // own date field, ticking every second via `now` so ongoing/on-hold
-  // jobs' elapsed time keeps counting up in real time regardless of
-  // whichever range (Today/7D/30D/Year/Custom) is selected above.
-  const printToday    = portalDayTimeStats(documents, "print", now);
-  const pickToday      = portalDayTimeStats(documents, "pick", now);
-  const checkToday     = portalDayTimeStats(documents, "check", now);
-  const deliveryToday  = portalDayTimeStats(documents, "delivery", now);
+  const printEff    = operatorEfficiency(documents, "printedBy", "printDurationSeconds", d => printStatusClass(d.printStatus) === "completed");
+  const pickEff     = operatorEfficiency(documents, "pickedBy", "durationSeconds", d => pickStatusClass(d.status) === "completed");
+  const checkEff    = operatorEfficiency(documents, "checkedBy", "checkDurationSeconds", d => checkStatusClass(d.checkStatus) === "completed");
+  const deliveryEff = operatorEfficiency(documents, "deliveredBy", "deliveryDurationSeconds", d => deliveryStatusClass(d.deliveryStatus) === "completed");
 
   return (
     <div>
@@ -1337,8 +1253,8 @@ function DashboardPanel({ documents, jobTypes, divisions, operatorDivisionMap, d
 
       <SectionTitle>Total Jobs by Job Type</SectionTitle>
       <div className="adm-kpi-row adm-jobtype-grid">
-        <KpiCard label="Total Jobs" value={documentDocs.length} colorClass="accent" />
-        {buildJobTypeCards(jobTypes, documentDocs, divisionsForCards, operatorDivisionMap).map(c => (
+        <KpiCard label="Total Jobs" value={documents.length} colorClass="accent" />
+        {buildJobTypeCards(jobTypes, documents, divisionsForCards, operatorDivisionMap).map(c => (
           <KpiCard key={c.key} label={c.label} value={c.value} />
         ))}
       </div>
@@ -1349,14 +1265,6 @@ function DashboardPanel({ documents, jobTypes, divisions, operatorDivisionMap, d
         <TripleStat title="Pick Portal"     {...pick} />
         <TripleStat title="Check Portal"    {...check} />
         <TripleStat title="Delivery Portal" {...delivery} />
-      </div>
-
-      <SectionTitle>Today's Time Accuracy — Live (each portal's own date)</SectionTitle>
-      <div className="adm-eff-row">
-        <TimeStatCard title="Print Portal"    stats={printToday} />
-        <TimeStatCard title="Pick Portal"     stats={pickToday} />
-        <TimeStatCard title="Check Portal"    stats={checkToday} />
-        <TimeStatCard title="Delivery Portal" stats={deliveryToday} />
       </div>
 
       <SectionTitle>Document Filing Status</SectionTitle>
@@ -1381,6 +1289,16 @@ function DashboardPanel({ documents, jobTypes, divisions, operatorDivisionMap, d
 
 // ── Main ───────────────────────────────────────────────────────────────────
 
+// export default function AdminDashboard() {
+//   const ACTIVE_VIEW_KEY = "adm_active_view";
+//   const [activeView, setActiveViewState] = useState(() => {
+//     try {
+//       const saved = localStorage.getItem(ACTIVE_VIEW_KEY);
+//       if (saved && NAV_ITEMS.some(n => n.key === saved)) return saved;
+//     } catch (e) { /* localStorage unavailable — fall back to default */ }
+//     return "dashboard";
+//   });
+
 export default function AdminDashboard() {
   const ACTIVE_VIEW_KEY = "adm_active_view";
   const [activeView, setActiveViewState] = useState(() => {
@@ -1393,6 +1311,8 @@ export default function AdminDashboard() {
     } catch (e) { /* localStorage unavailable — fall back to default */ }
     return "dashboard";
   });
+  // ... rest stays exactly the same
+  // ...
   // Wraps setActiveView so every sidebar selection is also remembered —
   // a page refresh (or reopening the tab) lands back on the same page
   // instead of always redirecting to the Dashboard.
@@ -1401,10 +1321,6 @@ export default function AdminDashboard() {
     try { localStorage.setItem(ACTIVE_VIEW_KEY, key); } catch (e) { /* ignore */ }
   }, []);
   const [sidebarOpen, setSidebarOpen] = useState(false);
-
-  // Drives real-time ticking for the live "Today's Time Accuracy" section
-  // (and anything else that needs to recompute elapsed time every second).
-  const now = useTick(1000);
 
   const [documents, setDocuments]   = useState([]);
   const [loading, setLoading]       = useState(true);
@@ -1500,17 +1416,14 @@ export default function AdminDashboard() {
     return Array.from(set).sort();
   }, [documents]);
 
-  // Division (+ operator) filter ONLY — date filtering now happens PER
-  // PORTAL inside DashboardPanel, using each portal's own date field
-  // (print date, pick date, check date, delivery date, request date)
-  // instead of one shared requestDate-based filter for everything.
-  const divisionFiltered = useMemo(() => {
+  const filtered = useMemo(() => {
     return documents.filter(d => {
+      if (!inRange(d, range, fromDate, toDate)) return false;
       if (operator !== "ALL" && !docOperators(d).includes(operator)) return false;
       if (!docMatchesDivision(d, division, operatorDivisionMap)) return false;
       return true;
     });
-  }, [documents, operator, division, operatorDivisionMap]);
+  }, [documents, range, fromDate, toDate, operator, division, operatorDivisionMap]);
 
   const activeLabel = NAV_ITEMS.find(n => n.key === activeView)?.label || "Dashboard";
 
@@ -1555,15 +1468,11 @@ export default function AdminDashboard() {
             )}
             {!loading && !error && (
               <DashboardPanel
-                documents={divisionFiltered}
+                documents={filtered}
                 jobTypes={jobTypes}
                 divisions={divisionsList}
                 operatorDivisionMap={operatorDivisionMap}
                 division={division}
-                range={range}
-                fromDate={fromDate}
-                toDate={toDate}
-                now={now}
               />
             )}
           </>
