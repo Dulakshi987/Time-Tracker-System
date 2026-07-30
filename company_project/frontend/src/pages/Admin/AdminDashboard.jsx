@@ -1304,10 +1304,14 @@ export default function AdminDashboard() {
   const [activeView, setActiveViewState] = useState(() => {
     try {
       const saved = localStorage.getItem(ACTIVE_VIEW_KEY);
-      if (saved && NAV_ITEMS.some(n => n.key === saved)) return saved;
+      const user = getCurrentUser();
+      if (saved && NAV_ITEMS.some(n => n.key === saved) && canSeeNavKey(user, saved)) {
+        return saved;
+      }
     } catch (e) { /* localStorage unavailable — fall back to default */ }
     return "dashboard";
   });
+  // ... rest stays exactly the same
   // ...
   // Wraps setActiveView so every sidebar selection is also remembered —
   // a page refresh (or reopening the tab) lands back on the same page
