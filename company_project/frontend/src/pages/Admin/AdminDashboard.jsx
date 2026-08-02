@@ -137,7 +137,99 @@ function portalCounts(docs, eligibleFn, statusFn) {
   return { total, ongoing, completed, cancelled };
 }
 
-function operatorEfficiency(docs, byField, durationField, doneFn) {
+// ═══════════════════════════════════════════════════════════════════════
+// ── HOLD-AWARE DURATION ENGINE ──────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════
+// This is the single source of truth for "how long did this job actually
+// take", for every portal (Print / Pick / Check / Delivery).
+//
+// The rule (same for every portal, and for however many hold/resume
+// cycles happen in between):
+//
+//   total working time = (End Time − Start Time) − (sum of every
+//                          hold→resume gap that happened in between)
+//
+// Example: start → work 10m → hold → (paused, doesn't count) → resume
+//          → work 5m more → end  =>  total working time = 15m, not 15m
+//          + however long the hold lasted.
+//
+// STAGE_CONFIG maps each portal to its own set of column names so one
+// function can drive all four. We compute this straight from the raw
+// timestamps + totalHoldSeconds columns rather than trusting only the
+// stored `durationSeconds`-style column — so even if a backend endpoint
+// forgets to (re)calculate it correctly, the dashboard still shows the
+// right number. If the stored duration is the only thing available
+// (e.g. timestamps were cleared), it falls back to that.
+// ═══════════════════════════════════════════════════════════════════════
+
+const STAGE_CONFIG = {
+  print: {
+    statusField: "printStatus", startField: "printStartTime", endField: "printEndTime",
+    holdField: "printHoldTime", totalHoldField: "printTotalHoldSeconds",
+    durationField: "printDurationSeconds",
+  },
+  pick: {
+    statusField: "status", startField: "startTime", endField: "endTime",
+    holdField: "holdTime", totalHoldField: "totalHoldSeconds",
+    durationField: "durationSeconds",
+  },
+  check: {
+    statusField: "checkStatus", startField: "checkStartTime", endField: "checkEndTime",
+    holdField: "checkHoldTime", totalHoldField: "checkTotalHoldSeconds",
+    durationField: "checkDurationSeconds",
+  },
+  delivery: {
+    statusField: "deliveryStatus", startField: "deliveryStartTime", endField: "deliveryEndTime",
+    holdField: "deliveryHoldTime", totalHoldField: "deliveryTotalHoldSeconds",
+    durationField: "deliveryDurationSeconds",
+  },
+};
+
+// Live ticking duration for a job that is CURRENTLY in progress or on
+// hold (used for real-time badges/counters while the job is still open).
+function liveDurationSeconds(doc, stage, nowMs) {
+  const cfg = STAGE_CONFIG[stage];
+  const status = (doc[cfg.statusField] || "").toLowerCase();
+  const totalHold = Number(doc[cfg.totalHoldField]) || 0;
+
+  if (status.includes("complete") || status.includes("done")) {
+    return computeFinalDuration(doc, stage);
+  }
+  if (!doc[cfg.startField]) return 0;
+
+  const start = new Date(doc[cfg.startField]).getTime();
+
+  if (status.includes("hold")) {
+    const holdStart = doc[cfg.holdField] ? new Date(doc[cfg.holdField]).getTime() : nowMs;
+    return Math.max((holdStart - start) / 1000 - totalHold, 0);
+  }
+  return Math.max((nowMs - start) / 1000 - totalHold, 0);
+}
+
+// Final (completed-job) duration — this is what feeds the efficiency
+// tables. Prefers a direct start→end calculation minus every hold gap
+// that was accumulated in totalHoldSeconds; falls back to the stored
+// duration column only if the raw timestamps aren't available.
+function computeFinalDuration(doc, stage) {
+  const cfg = STAGE_CONFIG[stage];
+  const totalHold = Number(doc[cfg.totalHoldField]) || 0;
+  const startRaw = doc[cfg.startField];
+  const endRaw = doc[cfg.endField];
+
+  if (startRaw && endRaw) {
+    const start = new Date(startRaw).getTime();
+    const end = new Date(endRaw).getTime();
+    if (!isNaN(start) && !isNaN(end) && end >= start) {
+      return Math.max((end - start) / 1000 - totalHold, 0);
+    }
+  }
+  // Fallback — trust whatever the backend already stored.
+  return Number(doc[cfg.durationField]) || 0;
+}
+
+// Per-operator Total / Average time, using computeFinalDuration so hold
+// cycles (however many there were) are always subtracted correctly.
+function operatorEfficiency(docs, byField, stage, doneFn) {
   const groups = {};
   docs.forEach(d => {
     if (!doneFn(d)) return;
@@ -145,7 +237,7 @@ function operatorEfficiency(docs, byField, durationField, doneFn) {
     if (!name) return;
     if (!groups[name]) groups[name] = { jobs: 0, totalSeconds: 0 };
     groups[name].jobs += 1;
-    groups[name].totalSeconds += Number(d[durationField]) || 0;
+    groups[name].totalSeconds += computeFinalDuration(d, stage);
   });
   return Object.entries(groups)
     .map(([name, v]) => ({
@@ -216,50 +308,6 @@ function EfficiencyTable({ title, rows }) {
       </table>
     </div>
   );
-}
-
-// ── Live duration engine ──────────────────────────────────────────────────
-
-const STAGE_CONFIG = {
-  print: {
-    statusField: "printStatus", startField: "printStartTime",
-    holdField: "printHoldTime", totalHoldField: "printTotalHoldSeconds",
-    durationField: "printDurationSeconds",
-  },
-  pick: {
-    statusField: "status", startField: "startTime",
-    holdField: "holdTime", totalHoldField: "totalHoldSeconds",
-    durationField: "durationSeconds",
-  },
-  check: {
-    statusField: "checkStatus", startField: "checkStartTime",
-    holdField: "checkHoldTime", totalHoldField: "checkTotalHoldSeconds",
-    durationField: "checkDurationSeconds",
-  },
-  delivery: {
-    statusField: "deliveryStatus", startField: "deliveryStartTime",
-    holdField: "deliveryHoldTime", totalHoldField: "deliveryTotalHoldSeconds",
-    durationField: "deliveryDurationSeconds",
-  },
-};
-
-function liveDurationSeconds(doc, stage, nowMs) {
-  const cfg = STAGE_CONFIG[stage];
-  const status = (doc[cfg.statusField] || "").toLowerCase();
-  const totalHold = doc[cfg.totalHoldField] || 0;
-
-  if (status.includes("complete") || status.includes("done")) {
-    return doc[cfg.durationField] || 0;
-  }
-  if (!doc[cfg.startField]) return 0;
-
-  const start = new Date(doc[cfg.startField]).getTime();
-
-  if (status.includes("hold")) {
-    const holdStart = doc[cfg.holdField] ? new Date(doc[cfg.holdField]).getTime() : nowMs;
-    return Math.max((holdStart - start) / 1000 - totalHold, 0);
-  }
-  return Math.max((nowMs - start) / 1000 - totalHold, 0);
 }
 
 function StatusBadge({ status }) {
@@ -1241,10 +1289,12 @@ function DashboardPanel({ documents, jobTypes, divisions, operatorDivisionMap, d
   const cancelledCount = documents.filter(d => deliveryStatusClass(d.deliveryStatus) === "cancelled").length;
   const pendingFileCount = deliveredDocs.length - filedCount;
 
-  const printEff    = operatorEfficiency(documents, "printedBy", "printDurationSeconds", d => printStatusClass(d.printStatus) === "completed");
-  const pickEff     = operatorEfficiency(documents, "pickedBy", "durationSeconds", d => pickStatusClass(d.status) === "completed");
-  const checkEff    = operatorEfficiency(documents, "checkedBy", "checkDurationSeconds", d => checkStatusClass(d.checkStatus) === "completed");
-  const deliveryEff = operatorEfficiency(documents, "deliveredBy", "deliveryDurationSeconds", d => deliveryStatusClass(d.deliveryStatus) === "completed");
+  // ── Efficiency tables — now driven by computeFinalDuration (hold-aware,
+  // supports any number of hold/resume cycles per job) via operatorEfficiency. ──
+  const printEff    = operatorEfficiency(documents, "printedBy", "print", d => printStatusClass(d.printStatus) === "completed");
+  const pickEff     = operatorEfficiency(documents, "pickedBy", "pick", d => pickStatusClass(d.status) === "completed");
+  const checkEff    = operatorEfficiency(documents, "checkedBy", "check", d => checkStatusClass(d.checkStatus) === "completed");
+  const deliveryEff = operatorEfficiency(documents, "deliveredBy", "delivery", d => deliveryStatusClass(d.deliveryStatus) === "completed");
 
   return (
     <div>
@@ -1289,16 +1339,6 @@ function DashboardPanel({ documents, jobTypes, divisions, operatorDivisionMap, d
 
 // ── Main ───────────────────────────────────────────────────────────────────
 
-// export default function AdminDashboard() {
-//   const ACTIVE_VIEW_KEY = "adm_active_view";
-//   const [activeView, setActiveViewState] = useState(() => {
-//     try {
-//       const saved = localStorage.getItem(ACTIVE_VIEW_KEY);
-//       if (saved && NAV_ITEMS.some(n => n.key === saved)) return saved;
-//     } catch (e) { /* localStorage unavailable — fall back to default */ }
-//     return "dashboard";
-//   });
-
 export default function AdminDashboard() {
   const ACTIVE_VIEW_KEY = "adm_active_view";
   const [activeView, setActiveViewState] = useState(() => {
@@ -1311,8 +1351,6 @@ export default function AdminDashboard() {
     } catch (e) { /* localStorage unavailable — fall back to default */ }
     return "dashboard";
   });
-  // ... rest stays exactly the same
-  // ...
   // Wraps setActiveView so every sidebar selection is also remembered —
   // a page refresh (or reopening the tab) lands back on the same page
   // instead of always redirecting to the Dashboard.
