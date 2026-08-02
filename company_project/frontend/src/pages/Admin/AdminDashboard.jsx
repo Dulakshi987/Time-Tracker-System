@@ -76,8 +76,12 @@ function deliveryStatusClass(s) {
 
 // ── Date range filter ─────────────────────────────────────────────────────
 
-function inRange(doc, range, fromDate, toDate) {
-  const key = docDateKey(doc);
+// Generic range check against ANY date value — the range/CUSTOM logic is
+// identical no matter which date field is being checked, so this is the
+// single source of truth; inRange() and inRangeForStage() below both just
+// pick which date value to feed in.
+function inRangeGeneric(dateVal, range, fromDate, toDate) {
+  const key = toDateKey(dateVal);
   if (range === "ALL") return true;
   if (!key) return false;
 
@@ -105,6 +109,23 @@ function inRange(doc, range, fromDate, toDate) {
     default:
       return true;
   }
+}
+
+// Request-date range check — used for "Total Jobs" / "Total Jobs by Job
+// Type" (how many requests came in during the selected range).
+function inRange(doc, range, fromDate, toDate) {
+  return inRangeGeneric(doc.requestDate, range, fromDate, toDate);
+}
+
+// Portal-specific range check — Today/7D/30D/Year/Custom now means "this
+// portal's own start date falls in range", e.g. Today on the Pick Portal
+// card means picked today, not requested today. Falls back to requestDate
+// only if that portal was never started (keeps un-started docs out of a
+// "Today" filter unless they were also requested today).
+function inRangeForStage(doc, stage, range, fromDate, toDate) {
+  const cfg = STAGE_CONFIG[stage];
+  const dateVal = doc[cfg.startField] || doc.requestDate;
+  return inRangeGeneric(dateVal, range, fromDate, toDate);
 }
 
 // ── Operator filter ───────────────────────────────────────────────────────
@@ -1236,65 +1257,70 @@ function ReportPanel({ documents, jobTypes }) {
 
 // ── Dashboard panel ───────────────────────────────────────────────────────
 
-// Builds one flat KPI card PER job-type/division combination that actually
-// has jobs — e.g. "Balance — Division A" and "Balance — Division B" show
-// as two separate cards rather than one job-type card listing divisions
-// inside it. If a job type has no division data to split by, it falls
-// back to a single plain card for that job type.
-function buildJobTypeCards(jobTypes, documents, divisions, operatorDivisionMap) {
-  const cards = [];
-  jobTypes.forEach(jt => {
-    const matching = documents.filter(d => (d.jobType || "").toLowerCase() === jt.toLowerCase());
-
-    const byDivision = divisions
-      .map(div => ({
-        key: `${jt}__${div.divisionNo}`,
-        label: `${jt} — ${div.divisionName}`,
-        value: matching.filter(d => docMatchesDivision(d, div.divisionNo, operatorDivisionMap)).length,
-      }))
-      .filter(row => row.value > 0);
-
-    if (byDivision.length === 0) {
-      cards.push({ key: jt, label: jt, value: matching.length });
-    } else {
-      cards.push(...byDivision);
-    }
-  });
-  return cards;
+// One flat KPI card per Job Category — label is just the category name
+// (no division name/number attached). `documents` passed in is already
+// scoped to the selected Division (and date range) by the caller, so
+// picking a division in the filter bar automatically narrows these counts
+// correctly without any per-division splitting here.
+function buildJobTypeCards(jobTypes, documents) {
+  return jobTypes.map(jt => ({
+    key: jt,
+    label: jt,
+    value: documents.filter(d => (d.jobType || "").toLowerCase() === jt.toLowerCase()).length,
+  }));
 }
 
-function DashboardPanel({ documents, jobTypes, divisions, operatorDivisionMap, division }) {
-  // When a specific division is selected in the filter bar, the job-type
-  // cards row should only show cards for that division — not every
-  // division's cards. "ALL" shows every division's cards as before.
-  const divisionsForCards = division && division !== "ALL"
-    ? divisions.filter(d => d.divisionNo === division)
-    : divisions;
-  const print = portalCounts(documents, () => true, d => printStatusClass(d.printStatus));
-  const pick = portalCounts(documents, d => !!d.printDocumentNo, d => pickStatusClass(d.status));
+function DashboardPanel({ documents, jobTypes, division, range, fromDate, toDate }) {
+  // `documents` coming in is already scoped to the selected Division (and
+  // operator, if used) — NOT yet date-filtered. Two different date fields
+  // matter for two different things on this page:
+  //
+  //   1. "Total Jobs" / "Total Jobs by Job Type" — how many requests came
+  //      in during the selected range → filtered by REQUEST date.
+  //   2. Each portal's own Total/Ongoing/Completed cards + its Efficiency
+  //      table, and Document Filing Status — filtered by THAT portal's own
+  //      start date (Today on Pick Portal = picked today, not requested
+  //      today; Delivered/Filed/On Hold/Cancelled = delivered today).
+  const requestDateFiltered = useMemo(
+    () => documents.filter(d => inRangeGeneric(d.requestDate, range, fromDate, toDate)),
+    [documents, range, fromDate, toDate]
+  );
+
+  const stageFiltered = useCallback(
+    (stage) => documents.filter(d => inRangeForStage(d, stage, range, fromDate, toDate)),
+    [documents, range, fromDate, toDate]
+  );
+
+  const printDocs    = useMemo(() => stageFiltered("print"), [stageFiltered]);
+  const pickDocs      = useMemo(() => stageFiltered("pick"), [stageFiltered]);
+  const checkDocs     = useMemo(() => stageFiltered("check"), [stageFiltered]);
+  const deliveryDocs  = useMemo(() => stageFiltered("delivery"), [stageFiltered]);
+
+  const print = portalCounts(printDocs, () => true, d => printStatusClass(d.printStatus));
+  const pick = portalCounts(pickDocs, d => !!d.printDocumentNo, d => pickStatusClass(d.status));
   const check = portalCounts(
-    documents,
+    checkDocs,
     d => pickStatusClass(d.status) === "completed" && !!d.printDocumentNo,
     d => checkStatusClass(d.checkStatus),
   );
   const delivery = portalCounts(
-    documents,
+    deliveryDocs,
     d => checkStatusClass(d.checkStatus) === "completed",
     d => deliveryStatusClass(d.deliveryStatus),
   );
 
-  const deliveredDocs = documents.filter(d => deliveryStatusClass(d.deliveryStatus) === "completed");
+  const deliveredDocs = deliveryDocs.filter(d => deliveryStatusClass(d.deliveryStatus) === "completed");
   const filedCount    = deliveredDocs.filter(d => d.fileNumber).length;
-  const holdCount     = documents.filter(d => deliveryStatusClass(d.deliveryStatus) === "onhold").length;
-  const cancelledCount = documents.filter(d => deliveryStatusClass(d.deliveryStatus) === "cancelled").length;
+  const holdCount     = deliveryDocs.filter(d => deliveryStatusClass(d.deliveryStatus) === "onhold").length;
+  const cancelledCount = deliveryDocs.filter(d => deliveryStatusClass(d.deliveryStatus) === "cancelled").length;
   const pendingFileCount = deliveredDocs.length - filedCount;
 
-  // ── Efficiency tables — now driven by computeFinalDuration (hold-aware,
-  // supports any number of hold/resume cycles per job) via operatorEfficiency. ──
-  const printEff    = operatorEfficiency(documents, "printedBy", "print", d => printStatusClass(d.printStatus) === "completed");
-  const pickEff     = operatorEfficiency(documents, "pickedBy", "pick", d => pickStatusClass(d.status) === "completed");
-  const checkEff    = operatorEfficiency(documents, "checkedBy", "check", d => checkStatusClass(d.checkStatus) === "completed");
-  const deliveryEff = operatorEfficiency(documents, "deliveredBy", "delivery", d => deliveryStatusClass(d.deliveryStatus) === "completed");
+  // ── Efficiency tables — hold-aware (computeFinalDuration) AND now scoped
+  // to each portal's own date range via stageFiltered() above. ──
+  const printEff    = operatorEfficiency(printDocs, "printedBy", "print", d => printStatusClass(d.printStatus) === "completed");
+  const pickEff     = operatorEfficiency(pickDocs, "pickedBy", "pick", d => pickStatusClass(d.status) === "completed");
+  const checkEff    = operatorEfficiency(checkDocs, "checkedBy", "check", d => checkStatusClass(d.checkStatus) === "completed");
+  const deliveryEff = operatorEfficiency(deliveryDocs, "deliveredBy", "delivery", d => deliveryStatusClass(d.deliveryStatus) === "completed");
 
   return (
     <div>
@@ -1303,8 +1329,8 @@ function DashboardPanel({ documents, jobTypes, divisions, operatorDivisionMap, d
 
       <SectionTitle>Total Jobs by Job Type</SectionTitle>
       <div className="adm-kpi-row adm-jobtype-grid">
-        <KpiCard label="Total Jobs" value={documents.length} colorClass="accent" />
-        {buildJobTypeCards(jobTypes, documents, divisionsForCards, operatorDivisionMap).map(c => (
+        <KpiCard label="Total Jobs" value={requestDateFiltered.length} colorClass="accent" />
+        {buildJobTypeCards(jobTypes, requestDateFiltered).map(c => (
           <KpiCard key={c.key} label={c.label} value={c.value} />
         ))}
       </div>
@@ -1454,14 +1480,17 @@ export default function AdminDashboard() {
     return Array.from(set).sort();
   }, [documents]);
 
+  // Division + operator scoping only — NOT date-filtered here. Date range
+  // (Today/7D/30D/Year/Custom) is now applied inside DashboardPanel on a
+  // per-portal basis (each portal's own start date), so it's passed down
+  // as range/fromDate/toDate instead of being baked into this list.
   const filtered = useMemo(() => {
     return documents.filter(d => {
-      if (!inRange(d, range, fromDate, toDate)) return false;
       if (operator !== "ALL" && !docOperators(d).includes(operator)) return false;
       if (!docMatchesDivision(d, division, operatorDivisionMap)) return false;
       return true;
     });
-  }, [documents, range, fromDate, toDate, operator, division, operatorDivisionMap]);
+  }, [documents, operator, division, operatorDivisionMap]);
 
   const activeLabel = NAV_ITEMS.find(n => n.key === activeView)?.label || "Dashboard";
 
@@ -1508,9 +1537,10 @@ export default function AdminDashboard() {
               <DashboardPanel
                 documents={filtered}
                 jobTypes={jobTypes}
-                divisions={divisionsList}
-                operatorDivisionMap={operatorDivisionMap}
                 division={division}
+                range={range}
+                fromDate={fromDate}
+                toDate={toDate}
               />
             )}
           </>
