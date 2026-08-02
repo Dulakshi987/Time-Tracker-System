@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import "./IssueDelivery.css";
+import { formatSriLankaTime } from "../../utils/dateUtils";
 import { getCurrentUser, canAccessRoute, canUseButton, logoutUser } from "../../config/permissions";
 // ⚠️ Adjust the path above ("../../config/permissions") to match where
 //    permissions.js actually sits relative to this file.
@@ -36,11 +37,10 @@ function formatTime(t) { return t ? String(t).substring(0, 5) : "—"; }
 
 function formatDateTime(dt) {
   if (!dt) return "—";
-  const d = new Date(dt);
-  if (isNaN(d.getTime())) return "—";
-  return d.toLocaleString("en-GB", {
-    day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit",
-  });
+  // now delegates to the shared Sri-Lanka-aware formatter — every call
+  // site below (Print/Pick/Check/Delivery/Handover/Hold/Cancel sections
+  // in ViewDrawer) picks up the fix automatically, no other lines change.
+  return formatSriLankaTime(dt);
 }
 
 // Days are now always measured against the *request* date/time — this is

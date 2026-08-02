@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import "./IssuePick.css";
+import { formatSriLankaTime } from "../../utils/dateUtils";
 import { getCurrentUser, canUseButton, logoutUser } from "../../config/permissions"; // adjust path to your project structure
 
 // const API_BASE = "http://localhost:8080/api/pick-portal";
@@ -659,28 +660,49 @@ function DocumentCard({
           </div>
         )}
 
-        {(isOnHold || doc.holdReason) && (
-          <div className="ip-hold-box">
-            <div className="ip-hold-row"><span>⏸ Hold Reason</span><span>{doc.holdReason || "—"}</span></div>
-            <div className="ip-hold-row"><span>Held By</span><span>👤 {doc.heldBy || "—"}</span></div>
-            <div className="ip-hold-row"><span>Held At</span><span>{formatDateTime(doc.holdTime)}</span></div>
-          </div>
+        {(isOnHold || doc.printHoldReason) && (
+                <div className="ip-hold-box">
+                  <div className="ip-hold-row"><span>Hold Reason</span><span>{doc.printHoldReason || "—"}</span></div>
+                  <div className="ip-hold-row"><span>Held By</span><span>👤 {doc.printHeldBy || "—"}</span></div>
+                  <div className="ip-hold-row"><span>Held At</span><span>{formatSriLankaTime(doc.printHoldTime)}</span></div>
+                  {doc.printResumeTime && (
+                    <div className="ip-hold-row"><span>Resumed At</span><span>{formatSriLankaTime(doc.printResumeTime)}</span></div>
+                  )}
+                </div>
         )}
 
+
         {isDone && (
-          <div className="ip-duration-box">
-            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-              <span className="ip-duration-label">Picked By</span>
-              <span style={{ fontSize: "0.85rem", fontWeight: 600, color: "#e2e8f0" }}>
-                👤 {doc.pickedBy || "—"}
-              </span>
-            </div>
-            <div style={{ textAlign: "right" }}>
-              <span className="ip-duration-label">Total Duration</span>
-              <div className="ip-duration-value">⏱ {formatDuration(doc.durationSeconds)}</div>
-            </div>
-          </div>
-        )}
+  <div className="ip-duration-box">
+    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+      <span className="ip-duration-label">Picked By</span>
+      <span style={{ fontSize: "0.85rem", fontWeight: 600, color: "#e2e8f0" }}>
+        👤 {doc.pickedBy || "—"}
+      </span>
+    </div>
+    <div style={{ textAlign: "right" }}>
+      <span className="ip-duration-label">Total Duration</span>
+      <div className="ip-duration-value">⏱ {formatDuration(doc.durationSeconds)}</div>
+    </div>
+  </div>
+)}
+
+{isDone && (
+  <div className="ip-duration-box">
+    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+      <span className="ip-duration-label">Started At</span>
+      <span style={{ fontSize: "0.85rem", fontWeight: 600, color: "#e2e8f0" }}>
+        {formatSriLankaTime(doc.startTime)}
+      </span>
+    </div>
+    <div style={{ textAlign: "right" }}>
+      <span className="ip-duration-label">Ended At</span>
+      <div style={{ fontSize: "0.85rem", fontWeight: 600, color: "#e2e8f0" }}>
+        {formatSriLankaTime(doc.endTime)}
+      </div>
+    </div>
+  </div>
+)}
 
         {/* Picking error details — every reason logged by Check Portal shown
             as its own small group (Reason + SKU + Qty), right above the

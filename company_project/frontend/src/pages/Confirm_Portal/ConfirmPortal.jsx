@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import "./ConfirmPortal.css";
+import { formatSriLankaTime } from "../../utils/dateUtils"; 
 import { getCurrentUser, canAccessRoute, canUseButton, logoutUser } from "../../config/permissions";
 // ⚠️ Adjust the path above ("../../config/permissions") to match where
 //    permissions.js actually sits relative to this file.
@@ -21,11 +22,10 @@ function formatTime(t) { return t ? String(t).substring(0, 5) : "—"; }
 
 function formatDateTime(dt) {
   if (!dt) return "—";
-  const d = new Date(dt);
-  if (isNaN(d.getTime())) return "—";
-  return d.toLocaleString("en-GB", {
-    day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit",
-  });
+  // delegates to the shared Sri-Lanka-aware formatter — every call site in
+  // this file (ViewDrawer's Print/Pick/Check/Delivery/Cancel sections, plus
+  // the table's "Date / Time" column via eventInfo()) is fixed automatically.
+  return formatSriLankaTime(dt);
 }
 
 function yn(v) {

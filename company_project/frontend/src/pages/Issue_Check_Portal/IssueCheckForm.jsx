@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 // import DateRangeFilter from "./DateRangeFilter";
 import "./IssueCheck.css";
+import { formatSriLankaTime } from "../../utils/dateUtils";
 import { getCurrentUser, canUseButton, logoutUser } from "../../config/permissions"; // adjust path to your project structure
 
 // const API_BASE = "http://localhost:8080/api/check-portal";
@@ -504,7 +505,7 @@ function ViewDetailsPopup({ doc, requestId, divisionLabel, onClose }) {
           {row("Vehicle Number", doc.vehicleNo)}
           {row("Print Hold Reason", doc.printHoldReason)}
           {row("Print Held By", doc.printHeldBy && `👤 ${doc.printHeldBy}`)}
-          {row("Print Held At", formatDateTime(doc.printHoldTime))}
+          {row("Print Held At", formatSriLankaTime(doc.printHoldTime))}
           {row("Printed By", doc.printedBy && `👤 ${doc.printedBy}`)}
           {row("Print Duration", `⏱ ${formatDuration(doc.printDurationSeconds)}`)}
         </div>
@@ -515,7 +516,7 @@ function ViewDetailsPopup({ doc, requestId, divisionLabel, onClose }) {
         <div className="ip-hold-box" style={{ marginBottom: 14 }}>
           {row("Pick Hold Reason", doc.pickHoldReason)}
           {row("Pick Held By", doc.pickHeldBy && `👤 ${doc.pickHeldBy}`)}
-          {row("Pick Held At", formatDateTime(doc.pickHoldTime))}
+          {row("Pick Held At", formatSriLankaTime(doc.pickHoldTime))}
           {row("Picked By", doc.pickedBy && `👤 ${doc.pickedBy}`)}
           {row("Pick Duration", `⏱ ${formatDuration(doc.pickDurationSeconds ?? doc.durationSeconds)}`)}
         </div>
@@ -778,18 +779,24 @@ function DocumentCard({
           </div>
         </div>
 
-        {(isOnHold || doc.checkHeldBy) && (
-          <div className="ip-hold-box">
-            <div className="ip-hold-row">
-              <span>Held By</span>
-              <span>👤 {doc.checkHeldBy || "—"}</span>
-            </div>
-            <div className="ip-hold-row">
-              <span>Held At</span>
-              <span>{formatDateTime(doc.checkHoldTime)}</span>
-            </div>
-          </div>
-        )}
+       {(isOnHold || doc.checkHeldBy) && (
+  <div className="ip-hold-box">
+    <div className="ip-hold-row">
+      <span>Held By</span>
+      <span>👤 {doc.checkHeldBy || "—"}</span>
+    </div>
+    <div className="ip-hold-row">
+      <span>Held At</span>
+      <span>{formatSriLankaTime(doc.checkHoldTime)}</span>
+    </div>
+    {doc.checkResumeTime && (
+      <div className="ip-hold-row">
+        <span>Resumed At</span>
+        <span>{formatSriLankaTime(doc.checkResumeTime)}</span>
+      </div>
+    )}
+  </div>
+)}
 
         {/* Wrong-material box — each reason (Shortage / Collected Different
             Material) shown as its own group, with its own SKU + Qty, font
@@ -835,16 +842,24 @@ function DocumentCard({
               <div className="ip-no-issue-box">✅ No material issues</div>
             )}
 
-            <div className="ip-print-done-box">
-              <div className="ip-print-done-row">
-                <span>Checked By</span>
-                <span>👤 {doc.checkedBy || "—"}</span>
-              </div>
-              <div className="ip-print-done-row">
-                <span>Duration</span>
-                <span>⏱ {formatDuration(doc.checkDurationSeconds)}</span>
-              </div>
-            </div>
+     <div className="ip-print-done-box">
+  <div className="ip-print-done-row">
+    <span>Started At</span>
+    <span>{formatSriLankaTime(doc.checkStartTime)}</span>
+  </div>
+  <div className="ip-print-done-row">
+    <span>Ended At</span>
+    <span>{formatSriLankaTime(doc.checkEndTime)}</span>
+  </div>
+  <div className="ip-print-done-row">
+    <span>Checked By</span>
+    <span>👤 {doc.checkedBy || "—"}</span>
+  </div>
+  <div className="ip-print-done-row">
+    <span>Duration</span>
+    <span>⏱ {formatDuration(doc.checkDurationSeconds)}</span>
+  </div>
+</div>
           </>
         )}
       </div>
