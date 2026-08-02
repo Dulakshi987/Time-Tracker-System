@@ -10,6 +10,7 @@ import IssueDeliveryForm from "../Issue_Delivery_Portal/IssueDeliveryForm";
 import ConfirmPortal     from "../Confirm_Portal/ConfirmPortal";
 import DocumentForm      from "../Documents_Portal/DocumentForm";
 import { getCurrentUser, canSeeNavKey } from "../../config/permissions";
+import { formatSriLankaTime } from "../../utils/dateUtils";
 // NOTE: AdminConfigCenter (old "usersetup" page) removed — replaced by
 // MasterSetupPanel below, which now lives inside this same file and saves
 // everything straight to the database through AdminSetupController.
@@ -44,6 +45,34 @@ function toDateKey(d) {
 
 function docDateKey(doc) {
   return toDateKey(doc.requestDate);
+}
+
+// ── Timestamp display helper ────────────────────────────────────────────
+// Full LocalDateTime columns need UTC → Asia/Colombo conversion before
+// display, exactly like every portal card already does via
+// formatSriLankaTime() (see IssueCheckForm.jsx, Pick/Print/Delivery
+// portals). Plain date/time-only columns (requestDate, requestTime,
+// fromDate, toDate) are NOT in this set — those aren't stored with a
+// timezone component, so they render as-is. Previously the Report / Full
+// Report tables (and their Excel exports) rendered every column as a raw
+// String(value), which skipped this conversion — that's why times looked
+// right on the portal cards but wrong in Report / Full Report.
+const TIMESTAMP_COLUMNS = new Set([
+  "printStartTime", "printHoldTime", "printResumeTime", "printEndTime", "printHandoverTime",
+  "startTime", "holdTime", "resumeTime", "endTime",
+  "checkStartTime", "checkHoldTime", "checkResumeTime", "checkEndTime",
+  "deliveryStartTime", "deliveryHoldTime", "deliveryResumeTime", "deliveryEndTime",
+  "deliveryCancelTime", "deliveryConfirmTime", "cancelConfirmTime",
+  "emergencyResolvedTime", "createdDatetime",
+]);
+
+// Single source of truth for how any table cell (Report / Full Report)
+// should be rendered — status columns get the badge, timestamp columns get
+// Sri-Lanka-converted formatting, everything else renders as-is.
+function renderCellValue(doc, col) {
+  if (col.toLowerCase().includes("status")) return <StatusBadge status={doc[col]} />;
+  if (TIMESTAMP_COLUMNS.has(col)) return formatSriLankaTime(doc[col]);
+  return String(doc[col] ?? "");
 }
 
 // ── Status classifiers (mirror each portal's own logic) ─────────────────
@@ -1248,10 +1277,9 @@ function ReportPanel({ documents, jobTypes }) {
               <tr><td colSpan={cols.length} className="adm-eff-empty">No data for this filter</td></tr>
             ) : rows.map(d => (
               <tr key={d.id}>
-                {cols.map(c => {
-                  const isStatus = c.toLowerCase().includes("status");
-                  return <td key={c}>{isStatus ? <StatusBadge status={d[c]} /> : String(d[c] ?? "")}</td>;
-                })}
+                {cols.map(c => (
+                  <td key={c}>{renderCellValue(d, c)}</td>
+                ))}
               </tr>
             ))}
           </tbody>
@@ -1625,12 +1653,20 @@ function dateFieldInRange(doc, field, fromDate, toDate) {
   return true;
 }
 
-function exportToExcel(docs, columns, filename, sheetName) {
-  const rows = docs.map(d => {
-    const row = {};
-    columns.forEach(c => { row[c] = d[c] ?? ""; });
-    return row;
+// Builds Excel-export rows for a set of columns — timestamp columns are
+// converted through formatSriLankaTime() first, exactly like the on-screen
+// table, so the downloaded .xlsx matches what's shown in Report / Full
+// Report instead of the raw (UTC) DB value.
+function buildExportRow(doc, columns) {
+  const row = {};
+  columns.forEach(c => {
+    row[c] = TIMESTAMP_COLUMNS.has(c) ? formatSriLankaTime(doc[c]) : (doc[c] ?? "");
   });
+  return row;
+}
+
+function exportToExcel(docs, columns, filename, sheetName) {
+  const rows = docs.map(d => buildExportRow(d, columns));
   const ws = XLSX.utils.json_to_sheet(rows);
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, sheetName);
@@ -1709,11 +1745,7 @@ function DocumentsExcelPanel({ documents, jobTypes }) {
           onClick={() => {
             const wb = XLSX.utils.book_new();
             Object.entries(PORTAL_COLUMNS).forEach(([key, columns]) => {
-              const sheetRows = rows.map(d => {
-                const row = {};
-                columns.forEach(c => { row[c] = d[c] ?? ""; });
-                return row;
-              });
+              const sheetRows = rows.map(d => buildExportRow(d, columns));
               XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(sheetRows), key);
             });
             XLSX.writeFile(wb, `full_report_${toDateKey(new Date())}.xlsx`);
@@ -1729,11 +1761,7 @@ function DocumentsExcelPanel({ documents, jobTypes }) {
             jobTypes.forEach(t => {
               const typeRows = documents
                 .filter(d => (d.jobType || "").toLowerCase() === t.toLowerCase())
-                .map(d => {
-                  const row = {};
-                  cols.forEach(c => { row[c] = d[c] ?? ""; });
-                  return row;
-                });
+                .map(d => buildExportRow(d, cols));
               const safeName = t.replace(/[\\/?*[\]:]/g, "-").substring(0, 31) || "Sheet";
               XLSX.utils.book_append_sheet(
                 wb,
@@ -1782,10 +1810,9 @@ function DocumentsExcelPanel({ documents, jobTypes }) {
           <tbody>
             {rows.map(d => (
               <tr key={d.id}>
-                {cols.map(c => {
-                  const isStatus = c.toLowerCase().includes("status");
-                  return <td key={c}>{isStatus ? <StatusBadge status={d[c]} /> : String(d[c] ?? "")}</td>;
-                })}
+                {cols.map(c => (
+                  <td key={c}>{renderCellValue(d, c)}</td>
+                ))}
               </tr>
             ))}
           </tbody>
