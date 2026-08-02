@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import "./IssuePrint.css";
+import { formatSriLankaTime } from "../../utils/dateUtils";
 import {
   getCurrentUser,
   logoutUser,
@@ -304,20 +305,25 @@ function DocumentCard({ doc, requestId, divisionLabel, perms, onStart, onHold, o
         </div>
 
         {(isOnHold || doc.printHoldReason) && (
-          <div className="ip-hold-box">
-            <div className="ip-hold-row"><span>Hold Reason</span><span>{doc.printHoldReason || "—"}</span></div>
-            <div className="ip-hold-row"><span>Held By</span><span>👤 {doc.printHeldBy || "—"}</span></div>
-            <div className="ip-hold-row"><span>Held At</span><span>{formatDateTime(doc.printHoldTime)}</span></div>
-          </div>
+        <div className="ip-hold-box">
+          <div className="ip-hold-row"><span>Hold Reason</span><span>{doc.printHoldReason || "—"}</span></div>
+          <div className="ip-hold-row"><span>Held By</span><span>👤 {doc.printHeldBy || "—"}</span></div>
+          <div className="ip-hold-row"><span>Held At</span><span>{formatSriLankaTime(doc.printHoldTime)}</span></div>
+          {doc.printResumeTime && (
+            <div className="ip-hold-row"><span>Resumed At</span><span>{formatSriLankaTime(doc.printResumeTime)}</span></div>
+          )}
+        </div>
         )}
 
         {isDone && (
-          <div className="ip-print-done-box">
-            <div className="ip-print-done-row"><span>Document No</span><span>{doc.printDocumentNo || "—"}</span></div>
-            <div className="ip-print-done-row"><span>Printed By</span><span>👤 {doc.printedBy || "—"}</span></div>
-            <div className="ip-print-done-row"><span>Duration</span><span>⏱ {formatDuration(doc.printDurationSeconds)}</span></div>
-          </div>
-        )}
+        <div className="ip-print-done-box">
+          <div className="ip-print-done-row"><span>Started At</span><span>{formatSriLankaTime(doc.printStartTime)}</span></div>
+          <div className="ip-print-done-row"><span>Ended At</span><span>{formatSriLankaTime(doc.printEndTime)}</span></div>
+          <div className="ip-print-done-row"><span>Document No</span><span>{doc.printDocumentNo || "—"}</span></div>
+          <div className="ip-print-done-row"><span>Printed By</span><span>👤 {doc.printedBy || "—"}</span></div>
+          <div className="ip-print-done-row"><span>Duration</span><span>⏱ {formatDuration(doc.printDurationSeconds)}</span></div>
+        </div>
+      )}
       </div>
 
       <div className="ip-card-foot">
