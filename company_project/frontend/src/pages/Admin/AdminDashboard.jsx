@@ -137,14 +137,20 @@ function docOperators(doc) {
   ].filter(Boolean);
 }
 
-// Division filter — a document "belongs" to a division if ANY operator
-// who touched it (printer, picker, checker, deliverer) is registered under
-// that division in Master Setup. operatorDivisionMap is name -> divisionNo,
-// built once by merging the 4 operator master tables.
-function docMatchesDivision(doc, divisionNo, operatorDivisionMap) {
+// Division filter — every document already carries its own `divisionNo`
+// (set when the document was entered, in Document Portal / DocumentForm —
+// it's a real column on the Issue entity). That is the single source of
+// truth for which division a document belongs to. The previous version of
+// this function tried to re-derive division membership by matching
+// printedBy/pickedBy/checkedBy/deliveredBy names against the operator
+// master tables — that was unreliable (name mismatches, shared operator
+// names across divisions, and pending/un-touched documents never matched
+// anything), which is why selecting a division could still show every
+// document's totals. Matching on doc.divisionNo directly is both simpler
+// and correct.
+function docMatchesDivision(doc, divisionNo) {
   if (!divisionNo || divisionNo === "ALL") return true;
-  const names = [doc.printedBy, doc.pickedBy, doc.checkedBy, doc.deliveredBy].filter(Boolean);
-  return names.some(n => operatorDivisionMap[n] === divisionNo);
+  return String(doc.divisionNo || "") === String(divisionNo);
 }
 
 // ── Aggregation ────────────────────────────────────────────────────────────
@@ -1270,7 +1276,26 @@ function buildJobTypeCards(jobTypes, documents) {
   }));
 }
 
-function DashboardPanel({ documents, jobTypes, division, range, fromDate, toDate }) {
+function DashboardPanel({ documents, jobCategories, divisionsList, division, range, fromDate, toDate }) {
+  // Master Setup → Job Category stores each category against a Division
+  // (by divisionName). To scope the "Total Jobs by Job Type" cards to the
+  // Division selected in the filter bar, look up that division's name and
+  // keep only the categories linked to it. "All Divisions" shows every
+  // category, same as before.
+  const selectedDivisionName = useMemo(() => {
+    if (!division || division === "ALL") return null;
+    const d = divisionsList.find(dv => dv.divisionNo === division);
+    return d ? d.divisionName : null;
+  }, [division, divisionsList]);
+
+  const scopedJobTypes = useMemo(() => {
+    const relevant = selectedDivisionName
+      ? jobCategories.filter(c => c.divisionName === selectedDivisionName)
+      : jobCategories;
+    const names = relevant.map(c => c.categoryName).filter(Boolean);
+    return Array.from(new Set(names)).sort((a, b) => a.localeCompare(b));
+  }, [jobCategories, selectedDivisionName]);
+
   // `documents` coming in is already scoped to the selected Division (and
   // operator, if used) — NOT yet date-filtered. Two different date fields
   // matter for two different things on this page:
@@ -1330,7 +1355,7 @@ function DashboardPanel({ documents, jobTypes, division, range, fromDate, toDate
       <SectionTitle>Total Jobs by Job Type</SectionTitle>
       <div className="adm-kpi-row adm-jobtype-grid">
         <KpiCard label="Total Jobs" value={requestDateFiltered.length} colorClass="accent" />
-        {buildJobTypeCards(jobTypes, requestDateFiltered).map(c => (
+        {buildJobTypeCards(scopedJobTypes, requestDateFiltered).map(c => (
           <KpiCard key={c.key} label={c.label} value={c.value} />
         ))}
       </div>
@@ -1398,11 +1423,14 @@ export default function AdminDashboard() {
   // ── Division filter state ────────────────────────────────────────────
   const [division, setDivision] = useState("ALL");
   const [divisionsList, setDivisionsList] = useState([]);
-  // name -> divisionNo, merged from the 4 operator master tables
-  const [operatorDivisionMap, setOperatorDivisionMap] = useState({});
 
   // ── Job types now come straight from the Job Category master data —
-  // add a category in Master Setup and it appears here automatically. ───
+  // add a category in Master Setup and it appears here automatically.
+  // Each category also carries a divisionName (see Master Setup → Job
+  // Category), so DashboardPanel can further scope the cards to whichever
+  // division is selected in the filter bar. This top-level `jobTypes` list
+  // (all categories, every division) still drives the Report / Full
+  // Report tabs' job-type dropdowns exactly as before. ───
   const [jobCategories, setJobCategories] = useState([]);
   const jobTypes = useMemo(() => {
     const names = jobCategories.map(c => c.categoryName).filter(Boolean);
@@ -1440,26 +1468,6 @@ export default function AdminDashboard() {
     } catch (e) { /* non-fatal */ }
   }, []);
 
-  // Build the name -> divisionNo lookup by merging Picker, Print, Check,
-  // and Delivery operator master tables (same name across roles keeps
-  // whichever division was fetched last — flag to us if that ever matters).
-  const fetchOperatorDivisions = useCallback(async () => {
-    try {
-      const [pickers, printOps, checkOps, deliveryOps] = await Promise.all([
-        apiGet("/pickers").catch(() => []),
-        apiGet("/print-operators").catch(() => []),
-        apiGet("/check-operators").catch(() => []),
-        apiGet("/delivery-operators").catch(() => []),
-      ]);
-      const map = {};
-      pickers.forEach(p => { if (p.pickerName && p.divisionNo) map[p.pickerName] = p.divisionNo; });
-      printOps.forEach(p => { if (p.operatorName && p.divisionNo) map[p.operatorName] = p.divisionNo; });
-      checkOps.forEach(p => { if (p.operatorName && p.divisionNo) map[p.operatorName] = p.divisionNo; });
-      deliveryOps.forEach(p => { if (p.operatorName && p.divisionNo) map[p.operatorName] = p.divisionNo; });
-      setOperatorDivisionMap(map);
-    } catch (e) { /* non-fatal */ }
-  }, []);
-
   useEffect(() => { fetchDocuments(false); }, [fetchDocuments]);
   useEffect(() => {
     const id = setInterval(() => fetchDocuments(true), AUTO_REFRESH);
@@ -1468,11 +1476,10 @@ export default function AdminDashboard() {
 
   useEffect(() => {
     fetchDivisions();
-    fetchOperatorDivisions();
     fetchJobCategories();
-    const id = setInterval(() => { fetchDivisions(); fetchOperatorDivisions(); fetchJobCategories(); }, AUTO_REFRESH * 5);
+    const id = setInterval(() => { fetchDivisions(); fetchJobCategories(); }, AUTO_REFRESH * 5);
     return () => clearInterval(id);
-  }, [fetchDivisions, fetchOperatorDivisions, fetchJobCategories]);
+  }, [fetchDivisions, fetchJobCategories]);
 
   const operators = useMemo(() => {
     const set = new Set();
@@ -1484,13 +1491,16 @@ export default function AdminDashboard() {
   // (Today/7D/30D/Year/Custom) is now applied inside DashboardPanel on a
   // per-portal basis (each portal's own start date), so it's passed down
   // as range/fromDate/toDate instead of being baked into this list.
+  // Division matching now uses each document's own divisionNo column
+  // directly (see docMatchesDivision above) — reliable regardless of
+  // whether the document has been printed/picked/checked/delivered yet.
   const filtered = useMemo(() => {
     return documents.filter(d => {
       if (operator !== "ALL" && !docOperators(d).includes(operator)) return false;
-      if (!docMatchesDivision(d, division, operatorDivisionMap)) return false;
+      if (!docMatchesDivision(d, division)) return false;
       return true;
     });
-  }, [documents, operator, division, operatorDivisionMap]);
+  }, [documents, operator, division]);
 
   const activeLabel = NAV_ITEMS.find(n => n.key === activeView)?.label || "Dashboard";
 
@@ -1536,7 +1546,8 @@ export default function AdminDashboard() {
             {!loading && !error && (
               <DashboardPanel
                 documents={filtered}
-                jobTypes={jobTypes}
+                jobCategories={jobCategories}
+                divisionsList={divisionsList}
                 division={division}
                 range={range}
                 fromDate={fromDate}
