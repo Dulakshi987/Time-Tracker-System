@@ -30,6 +30,14 @@ const CANCEL_REASONS = [
   "Other",
 ];
 
+// ── Date filter options — Today (Sri Lanka time, default) / All / Custom
+// range. Same pattern as Print Portal / Pick Portal / Check Portal.
+const DATE_FILTER_OPTIONS = [
+  { value: "TODAY", label: "Today" },
+  { value: "ALL", label: "All" },
+  { value: "CUSTOM", label: "Custom" },
+];
+
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
 function formatDate(d) { return d || "—"; }
@@ -71,6 +79,47 @@ function daysPending(doc) {
   const now = new Date();
   const diffMs = now.getTime() - requested.getTime();
   return Math.max(0, Math.floor(diffMs / (1000 * 60 * 60 * 24)));
+}
+
+// ── Date filter helpers ──────────────────────────────────────────────────
+// Returns today's date key (YYYY-MM-DD) in Sri Lanka time (UTC+5:30, no
+// DST), regardless of what timezone the browser/server/device is actually
+// running in. This is what "Today" always compares against, so the filter
+// is correct no matter where the page is opened from. Mirrors the Print
+// Portal / Pick Portal / Check Portal implementation exactly.
+function getSriLankaTodayKey() {
+  const now = new Date();
+  const utcMs = now.getTime() + now.getTimezoneOffset() * 60000;
+  const colomboMs = utcMs + 5.5 * 60 * 60000;
+  const colombo = new Date(colomboMs);
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${colombo.getFullYear()}-${pad(colombo.getMonth() + 1)}-${pad(colombo.getDate())}`;
+}
+
+// requestDate is stored as a plain date (no time/timezone component), so a
+// straight string comparison against YYYY-MM-DD keys is correct as-is.
+function docDateKey(doc) {
+  return doc.requestDate ? String(doc.requestDate).substring(0, 10) : null;
+}
+
+function matchesDateFilter(doc, mode, fromDate, toDate) {
+  if (mode === "ALL") return true;
+
+  const key = docDateKey(doc);
+
+  if (mode === "TODAY") {
+    return key === getSriLankaTodayKey();
+  }
+
+  if (mode === "CUSTOM") {
+    if (!fromDate && !toDate) return true;
+    if (!key) return false;
+    if (fromDate && key < fromDate) return false;
+    if (toDate && key > toDate) return false;
+    return true;
+  }
+
+  return true;
 }
 
 function jobTypeColor(jt) {
@@ -936,6 +985,16 @@ export default function IssueDeliveryForm() {
   const [lastUpdated,  setLastUpdated]  = useState(null);
   const [refreshing,   setRefreshing]   = useState(false);
 
+  // ── Date filter — defaults to "Today" (Sri Lanka time). "All" clears
+  // it, "Custom" opens a From/To range. Recomputes on every render (and
+  // the auto-refresh timer keeps this component re-rendering), so at
+  // midnight Colombo time "Today" automatically rolls over to the new
+  // day without needing a page reload. Mirrors Print Portal / Pick Portal
+  // / Check Portal.
+  const [dateFilterMode, setDateFilterMode] = useState("TODAY"); // "TODAY" | "ALL" | "CUSTOM"
+  const [fromDate,     setFromDate]     = useState("");
+  const [toDate,       setToDate]       = useState("");
+
   // Divisions (Admin Master Data) — used to label each row/card and to
   // scope which delivery operators show up in the popups below.
   const [divisions, setDivisions] = useState([]);
@@ -1181,18 +1240,27 @@ export default function IssueDeliveryForm() {
     const matchType   = filterType   === "ALL" || doc.jobType === filterType;
     const matchStatus = filterStatus === "ALL" || doc.deliveryStatus === filterStatus;
     const matchStat   = statFilter   === "ALL" || statusClass(doc.deliveryStatus) === statFilter;
+    const matchDate   = matchesDateFilter(doc, dateFilterMode, fromDate, toDate);
 
-    return matchSearch && matchType && matchStatus && matchStat;
+    return matchSearch && matchType && matchStatus && matchStat && matchDate;
   });
 
-  // Stats
-  const total     = documents.length;
-  const pending   = documents.filter(d => statusClass(d.deliveryStatus) === "pending").length;
-  const onHold    = documents.filter(d => statusClass(d.deliveryStatus) === "onhold").length;
-  const completed = documents.filter(d => statusClass(d.deliveryStatus) === "completed").length;
-  const cancelled = documents.filter(d => statusClass(d.deliveryStatus) === "cancelled").length;
+  // Stats — scoped by the date filter too, so counts on screen always match
+  // what's actually shown in the table below (e.g. "Today" only counts
+  // today's documents, not every document ever entered). Mirrors Print
+  // Portal / Pick Portal / Check Portal.
+  const dateScoped = useMemo(
+    () => documents.filter(doc => matchesDateFilter(doc, dateFilterMode, fromDate, toDate)),
+    [documents, dateFilterMode, fromDate, toDate]
+  );
 
-  const overdueDocs  = documents.filter(d => {
+  const total     = dateScoped.length;
+  const pending   = dateScoped.filter(d => statusClass(d.deliveryStatus) === "pending").length;
+  const onHold    = dateScoped.filter(d => statusClass(d.deliveryStatus) === "onhold").length;
+  const completed = dateScoped.filter(d => statusClass(d.deliveryStatus) === "completed").length;
+  const cancelled = dateScoped.filter(d => statusClass(d.deliveryStatus) === "cancelled").length;
+
+  const overdueDocs  = dateScoped.filter(d => {
     const p = daysPending(d);
     return p !== null && p > OVERDUE_DAYS && statusClass(d.deliveryStatus) !== "completed";
   });
@@ -1309,6 +1377,51 @@ export default function IssueDeliveryForm() {
         <select className="ip-filter-select" value={filterStatus} onChange={e => setFilterStatus(e.target.value)}>
           {statuses.map(s => <option key={s} value={s}>{s === "ALL" ? "All Status" : s}</option>)}
         </select>
+      </div>
+
+      {/* ── Date filter — Today (Sri Lanka time, default) / All / Custom
+          range. Same toolbar pattern as Print Portal / Pick Portal / Check
+          Portal. ── */}
+      <div className="ip-toolbar" style={{ marginTop: -6 }}>
+        {DATE_FILTER_OPTIONS.map(opt => (
+          <button
+            key={opt.value}
+            type="button"
+            className={`ip-filter-select ip-stat-chip-clickable ${dateFilterMode === opt.value ? "active" : ""}`}
+            style={{ cursor: "pointer", fontWeight: dateFilterMode === opt.value ? 700 : 500 }}
+            onClick={() => setDateFilterMode(opt.value)}
+          >
+            {opt.label}
+          </button>
+        ))}
+
+        {dateFilterMode === "CUSTOM" && (
+          <>
+            <input
+              type="date"
+              className="ip-filter-select"
+              value={fromDate}
+              onChange={e => setFromDate(e.target.value)}
+            />
+            <span style={{ color: "#6c8bb3" }}>—</span>
+            <input
+              type="date"
+              className="ip-filter-select"
+              value={toDate}
+              onChange={e => setToDate(e.target.value)}
+            />
+            {(fromDate || toDate) && (
+              <button
+                type="button"
+                className="ip-btn ip-btn-outline"
+                style={{ flex: "unset", padding: "6px 14px" }}
+                onClick={() => { setFromDate(""); setToDate(""); }}
+              >
+                ✕ Clear
+              </button>
+            )}
+          </>
+        )}
       </div>
 
       {/* ── Stats ── */}

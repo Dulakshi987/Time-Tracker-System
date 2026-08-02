@@ -140,6 +140,47 @@ function parsePickingErrorGroups(doc) {
   }));
 }
 
+// ── Date filter helpers ──────────────────────────────────────────────────
+// Returns today's date key (YYYY-MM-DD) in Sri Lanka time (UTC+5:30, no
+// DST), regardless of what timezone the browser/server/device is actually
+// running in. This is what "Today" always compares against, so the filter
+// is correct no matter where the page is opened from. Mirrors the Print
+// Portal's implementation exactly.
+function getSriLankaTodayKey() {
+  const now = new Date();
+  const utcMs = now.getTime() + now.getTimezoneOffset() * 60000;
+  const colomboMs = utcMs + 5.5 * 60 * 60000;
+  const colombo = new Date(colomboMs);
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${colombo.getFullYear()}-${pad(colombo.getMonth() + 1)}-${pad(colombo.getDate())}`;
+}
+
+// requestDate is stored as a plain date (no time/timezone component), so a
+// straight string comparison against YYYY-MM-DD keys is correct as-is.
+function docDateKey(doc) {
+  return doc.requestDate ? String(doc.requestDate).substring(0, 10) : null;
+}
+
+function matchesDateFilter(doc, mode, fromDate, toDate) {
+  if (mode === "ALL") return true;
+
+  const key = docDateKey(doc);
+
+  if (mode === "TODAY") {
+    return key === getSriLankaTodayKey();
+  }
+
+  if (mode === "CUSTOM") {
+    if (!fromDate && !toDate) return true;
+    if (!key) return false;
+    if (fromDate && key < fromDate) return false;
+    if (toDate && key > toDate) return false;
+    return true;
+  }
+
+  return true;
+}
+
 // ── Person Picker (division-scoped — Only Master Data, no "Other") ─────────
 // Mirrors the Print Portal's PersonPicker exactly: the `people` list handed
 // in is already filtered down to whichever Division the current document
@@ -846,6 +887,15 @@ export default function IssuPikFormt() {
   const [lastUpdated, setLastUpdated] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
 
+  // ── Date filter — defaults to "Today" (Sri Lanka time). "All" clears
+  // it, "Custom" opens a From/To range. Recomputes on every render (and
+  // the auto-refresh timer keeps this component re-rendering), so at
+  // midnight Colombo time "Today" automatically rolls over to the new
+  // day without needing a page reload. Mirrors the Print Portal exactly.
+  const [dateFilterMode, setDateFilterMode] = useState("TODAY"); // "TODAY" | "ALL" | "CUSTOM"
+  const [fromDate, setFromDate] = useState("");
+  const [toDate, setToDate] = useState("");
+
   const buttonPerms = useMemo(() => ({
     handover: canUseButton(currentUser, "handover"),
     start: canUseButton(currentUser, "start"),
@@ -1150,6 +1200,12 @@ export default function IssuPikFormt() {
     { value: "completed", label: "Pick Done" },
   ];
 
+  const DATE_FILTER_OPTIONS = [
+    { value: "TODAY", label: "Today" },
+    { value: "ALL", label: "All" },
+    { value: "CUSTOM", label: "Custom" },
+  ];
+
   const visible = documents.filter(doc => {
     const q = search.toLowerCase();
     const matchSearch = !q || [
@@ -1158,16 +1214,25 @@ export default function IssuPikFormt() {
 
     const matchType = filterType === "ALL" || doc.jobType === filterType;
     const matchStatus = filterStatus === "ALL" || statusClass(doc.status) === filterStatus;
+    const matchDate = matchesDateFilter(doc, dateFilterMode, fromDate, toDate);
 
-    return matchSearch && matchType && matchStatus;
+    return matchSearch && matchType && matchStatus && matchDate;
   });
 
-  const total = documents.length;
-  const pending = documents.filter(d => statusClass(d.status) === "pending").length;
-  const handedOver = documents.filter(d => statusClass(d.status) === "handedover").length;
-  const inProg = documents.filter(d => statusClass(d.status) === "inprogress").length;
-  const onHold = documents.filter(d => statusClass(d.status) === "onhold").length;
-  const completed = documents.filter(d => statusClass(d.status) === "completed").length;
+  // Stat chips reflect the date filter too, so the counts on screen always
+  // match what's actually shown in the grid below (e.g. "Today" only
+  // counts today's documents, not every document ever entered).
+  const dateScoped = useMemo(
+    () => documents.filter(doc => matchesDateFilter(doc, dateFilterMode, fromDate, toDate)),
+    [documents, dateFilterMode, fromDate, toDate]
+  );
+
+  const total = dateScoped.length;
+  const pending = dateScoped.filter(d => statusClass(d.status) === "pending").length;
+  const handedOver = dateScoped.filter(d => statusClass(d.status) === "handedover").length;
+  const inProg = dateScoped.filter(d => statusClass(d.status) === "inprogress").length;
+  const onHold = dateScoped.filter(d => statusClass(d.status) === "onhold").length;
+  const completed = dateScoped.filter(d => statusClass(d.status) === "completed").length;
 
   // clicking a stat chip filters the grid by that status (Total clears it)
   const handleStatClick = (statusValue) => setFilterStatus(statusValue);
@@ -1289,6 +1354,50 @@ export default function IssuPikFormt() {
         <select className="ip-filter-select" value={filterStatus} onChange={e => setFilterStatus(e.target.value)}>
           {STATUS_FILTERS.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
         </select>
+      </div>
+
+      {/* Date filter — Today (Sri Lanka time, default) / All / Custom range.
+          Same toolbar pattern as the Print Portal. */}
+      <div className="ip-toolbar" style={{ marginTop: -6 }}>
+        {DATE_FILTER_OPTIONS.map(opt => (
+          <button
+            key={opt.value}
+            type="button"
+            className={`ip-filter-select ip-stat-chip-clickable ${dateFilterMode === opt.value ? "active" : ""}`}
+            style={{ cursor: "pointer", fontWeight: dateFilterMode === opt.value ? 700 : 500 }}
+            onClick={() => setDateFilterMode(opt.value)}
+          >
+            {opt.label}
+          </button>
+        ))}
+
+        {dateFilterMode === "CUSTOM" && (
+          <>
+            <input
+              type="date"
+              className="ip-filter-select"
+              value={fromDate}
+              onChange={e => setFromDate(e.target.value)}
+            />
+            <span style={{ color: "#6c8bb3" }}>—</span>
+            <input
+              type="date"
+              className="ip-filter-select"
+              value={toDate}
+              onChange={e => setToDate(e.target.value)}
+            />
+            {(fromDate || toDate) && (
+              <button
+                type="button"
+                className="ip-btn ip-btn-outline"
+                style={{ flex: "unset", padding: "6px 14px" }}
+                onClick={() => { setFromDate(""); setToDate(""); }}
+              >
+                ✕ Clear
+              </button>
+            )}
+          </>
+        )}
       </div>
 
       <div className="ip-stats">

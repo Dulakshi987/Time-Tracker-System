@@ -15,6 +15,15 @@ const CONFIRM_API = "https://time-tracker-system-production.up.railway.app/api/i
 const SETUP_API = "https://time-tracker-system-production.up.railway.app/api/admin-setup";
 const AUTO_REFRESH = 10000;
 
+// ── Date filter options — Today (Sri Lanka time, default) / All / Custom
+// range. Same pattern as Print Portal / Pick Portal / Check Portal /
+// Delivery Portal.
+const DATE_FILTER_OPTIONS = [
+  { value: "TODAY", label: "Today" },
+  { value: "ALL", label: "All" },
+  { value: "CUSTOM", label: "Custom" },
+];
+
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
 function formatDate(d) { return d || "—"; }
@@ -109,6 +118,48 @@ function eventInfo(doc) {
     return { dateTime: doc.deliveryCancelTime, by: doc.deliveryCancelledBy, reason: doc.deliveryCancelReason };
   }
   return { dateTime: null, by: null, reason: null };
+}
+
+// ── Date filter helpers ──────────────────────────────────────────────────
+// Returns today's date key (YYYY-MM-DD) in Sri Lanka time (UTC+5:30, no
+// DST), regardless of what timezone the browser/server/device is actually
+// running in. This is what "Today" always compares against, so the filter
+// is correct no matter where the page is opened from. Mirrors the Print
+// Portal / Pick Portal / Check Portal / Delivery Portal implementation
+// exactly.
+function getSriLankaTodayKey() {
+  const now = new Date();
+  const utcMs = now.getTime() + now.getTimezoneOffset() * 60000;
+  const colomboMs = utcMs + 5.5 * 60 * 60000;
+  const colombo = new Date(colomboMs);
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${colombo.getFullYear()}-${pad(colombo.getMonth() + 1)}-${pad(colombo.getDate())}`;
+}
+
+// requestDate is stored as a plain date (no time/timezone component), so a
+// straight string comparison against YYYY-MM-DD keys is correct as-is.
+function docDateKey(doc) {
+  return doc.requestDate ? String(doc.requestDate).substring(0, 10) : null;
+}
+
+function matchesDateFilter(doc, mode, fromDate, toDate) {
+  if (mode === "ALL") return true;
+
+  const key = docDateKey(doc);
+
+  if (mode === "TODAY") {
+    return key === getSriLankaTodayKey();
+  }
+
+  if (mode === "CUSTOM") {
+    if (!fromDate && !toDate) return true;
+    if (!key) return false;
+    if (fromDate && key < fromDate) return false;
+    if (toDate && key > toDate) return false;
+    return true;
+  }
+
+  return true;
 }
 
 async function fetchActiveFileNumber() {
@@ -539,6 +590,16 @@ export default function IssueConfirm() {
   const [savingId,    setSavingId]    = useState(null);
   const [viewDoc,     setViewDoc]     = useState(null);
 
+  // ── Date filter — defaults to "Today" (Sri Lanka time). "All" clears
+  // it, "Custom" opens a From/To range. Recomputes on every render (and
+  // the auto-refresh timer keeps this component re-rendering), so at
+  // midnight Colombo time "Today" automatically rolls over to the new
+  // day without needing a page reload. Mirrors Print Portal / Pick Portal
+  // / Check Portal / Delivery Portal.
+  const [dateFilterMode, setDateFilterMode] = useState("TODAY"); // "TODAY" | "ALL" | "CUSTOM"
+  const [fromDate,     setFromDate]     = useState("");
+  const [toDate,       setToDate]       = useState("");
+
   // Add-to-File popup
   const [fileDoc,       setFileDoc]       = useState(null);
   const [activeFileNo,  setActiveFileNo]  = useState(null);
@@ -615,14 +676,24 @@ export default function IssueConfirm() {
 
     const matchSearch = !q || searchPool.some(v => (v || "").toLowerCase().includes(q));
 
+    const matchDate = matchesDateFilter(doc, dateFilterMode, fromDate, toDate);
+
     // Status filter and search filter always combine — "All Status" simply
     // means matchStatus is always true, so search alone still narrows results.
-    return matchStatus && matchSearch;
+    return matchStatus && matchSearch && matchDate;
   });
 
+  // Counts — scoped by the date filter too, so the chip numbers on screen
+  // always match what's actually shown in the table below. Mirrors Print
+  // Portal / Pick Portal / Check Portal / Delivery Portal.
+  const dateScopedRelevant = useMemo(
+    () => relevant.filter(doc => matchesDateFilter(doc, dateFilterMode, fromDate, toDate)),
+    [relevant, dateFilterMode, fromDate, toDate]
+  );
+
   const counts = {
-    completed: relevant.filter(d => statusClass(d.deliveryStatus) === "completed").length,
-    cancelled: relevant.filter(d => statusClass(d.deliveryStatus) === "cancelled").length,
+    completed: dateScopedRelevant.filter(d => statusClass(d.deliveryStatus) === "completed").length,
+    cancelled: dateScopedRelevant.filter(d => statusClass(d.deliveryStatus) === "cancelled").length,
   };
 
   useEffect(() => {
@@ -917,6 +988,51 @@ export default function IssueConfirm() {
           <div className="icf-stat-chip cancelled">Cancelled <strong>{counts.cancelled}</strong></div>
           <div className="icf-stat-chip">Showing <strong style={{ color: "#a78bfa" }}>{visible.length}</strong></div>
         </div>
+      </div>
+
+      {/* ── Date filter — Today (Sri Lanka time, default) / All / Custom
+          range. Same toolbar pattern as Print Portal / Pick Portal / Check
+          Portal / Delivery Portal. ── */}
+      <div className="icf-toolbar" style={{ marginTop: -6 }}>
+        {DATE_FILTER_OPTIONS.map(opt => (
+          <button
+            key={opt.value}
+            type="button"
+            className={`icf-filter-select icf-stat-chip-clickable ${dateFilterMode === opt.value ? "active" : ""}`}
+            style={{ cursor: "pointer", fontWeight: dateFilterMode === opt.value ? 700 : 500 }}
+            onClick={() => setDateFilterMode(opt.value)}
+          >
+            {opt.label}
+          </button>
+        ))}
+
+        {dateFilterMode === "CUSTOM" && (
+          <>
+            <input
+              type="date"
+              className="icf-filter-select"
+              value={fromDate}
+              onChange={e => setFromDate(e.target.value)}
+            />
+            <span style={{ color: "#6c8bb3" }}>—</span>
+            <input
+              type="date"
+              className="icf-filter-select"
+              value={toDate}
+              onChange={e => setToDate(e.target.value)}
+            />
+            {(fromDate || toDate) && (
+              <button
+                type="button"
+                className="icf-btn icf-btn-outline"
+                style={{ flex: "unset", padding: "6px 14px" }}
+                onClick={() => { setFromDate(""); setToDate(""); }}
+              >
+                ✕ Clear
+              </button>
+            )}
+          </>
+        )}
       </div>
 
       {error && (
