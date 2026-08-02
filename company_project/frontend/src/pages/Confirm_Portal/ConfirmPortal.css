@@ -124,6 +124,48 @@
 .icf-stat-chip.onhold    strong { color: var(--icf-orange); }
 .icf-stat-chip.cancelled strong { color: var(--icf-red); }
 
+/* ─── Date filter row (Today / All / Custom) ──────────────────────────
+   Separate from .icf-toolbar on purpose — .icf-toolbar uses
+   justify-content: space-between which is fine when it holds unrelated
+   groups (search, selects, stats) that should sit at opposite ends, but
+   it spreads a 3-button row across the whole width. This row instead
+   packs the buttons together on the left, with the date inputs (Custom
+   mode) flowing right after them. */
+.icf-date-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 22px;
+  flex-wrap: wrap;
+}
+
+.icf-date-toolbar .icf-filter-select {
+  padding: 8px 18px;
+}
+
+/* Clickable pill buttons — used for Today/All/Custom, and reusable
+   anywhere else a filter needs to look like an active/inactive toggle. */
+.icf-stat-chip-clickable {
+  transition: background 0.15s, border-color 0.15s, color 0.15s, transform 0.12s;
+}
+.icf-stat-chip-clickable:active { transform: scale(0.97); }
+.icf-stat-chip-clickable:hover {
+  background: var(--icf-surface2);
+}
+.icf-stat-chip-clickable.active {
+  background: var(--icf-accent);
+  border-color: var(--icf-accent);
+  color: #ffffff;
+}
+.icf-stat-chip-clickable.active:hover {
+  background: var(--icf-accent);
+}
+
+.icf-date-toolbar input[type="date"].icf-filter-select {
+  padding: 7px 12px;
+  color-scheme: light;
+}
+
 .icf-error {
   background: rgba(239,68,68,0.12);
   border: 1px solid var(--icf-red);
@@ -522,5 +564,6 @@
   .icf-page { padding: 16px 14px 32px; }
   .icf-header { flex-direction: column; align-items: flex-start; }
   .icf-toolbar { flex-direction: column; align-items: flex-start; }
+  .icf-date-toolbar { flex-direction: row; flex-wrap: wrap; }
   .icf-table { min-width: 900px; }
 }

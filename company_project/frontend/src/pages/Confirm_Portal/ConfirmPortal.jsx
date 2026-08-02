@@ -993,7 +993,7 @@ export default function IssueConfirm() {
       {/* ── Date filter — Today (Sri Lanka time, default) / All / Custom
           range. Same toolbar pattern as Print Portal / Pick Portal / Check
           Portal / Delivery Portal. ── */}
-      <div className="icf-toolbar" style={{ marginTop: -6 }}>
+      <div className="icf-date-toolbar" style={{ marginTop: -6 }}>
         {DATE_FILTER_OPTIONS.map(opt => (
           <button
             key={opt.value}
