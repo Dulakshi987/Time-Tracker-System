@@ -949,7 +949,7 @@ export default function IssueConfirm() {
       </div>
 
       {/* Toolbar — Search + Filter */}
-      <div className="icf-toolbar">
+      <div className="icf-date-toolbar">
         <div className="icf-search-wrap" style={{ flex: 1, maxWidth: 420, display: "flex", gap: 8 }}>
           <span className="icf-search-icon">🔍</span>
           <input
@@ -961,7 +961,7 @@ export default function IssueConfirm() {
           />
         </div>
 
-        <select
+        {/* <select
           className="icf-filter-select"
           value={searchField}
           onChange={e => setSearchField(e.target.value)}
@@ -971,7 +971,7 @@ export default function IssueConfirm() {
           <option value="REQID">Search: Req ID</option>
           <option value="DOCNO">Search: Doc No</option>
           <option value="RESERVATION">Search: Reservation No</option>
-        </select>
+        </select> */}
 
         <select
           className="icf-filter-select"
