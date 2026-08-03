@@ -24,7 +24,7 @@ const PICKING_ERROR_REASONS = [
 
 // Maximum length allowed for a SKU / Description entry on a picking-error
 // material row.
-// const SKU_MAX_LENGTH = 8;
+const SKU_MAX_LENGTH = 80;
 
 // Status filters — normalized classes, shared between the dropdown and the
 // clickable stat chips so both always stay in sync. The "Wrong Material"
@@ -294,7 +294,7 @@ function HoldPopup({ people, peopleLoading, onConfirm, onCancel }) {
     }));
 
   const filledFor = (key) => (materialsByReason[key] || []).filter(m => m.sku.trim().length > 0 && m.qty.trim().length > 0);
-  const invalidSkuFor = (key) => filledFor(key).filter(m => m.sku.trim());
+  const invalidSkuFor = (key) => filledFor(key).filter(m => m.sku.trim().length > SKU_MAX_LENGTH);
 
   const allDetailsOk = errorReasons.every(
     r => filledFor(r.key).length > 0 && invalidSkuFor(r.key).length === 0
