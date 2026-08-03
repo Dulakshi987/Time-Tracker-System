@@ -861,7 +861,7 @@ function OperatorPanel({ tabKey }) {
 
   const load = useCallback(() => {
     apiGet(cfg.path).then(setRows).catch(e => setErr(e.message));
-    apiGet("/divisions").then(list => setDivisions(scopeDivisionsForCurrentUser(list))).catch(() => {});
+    apiGet("/divisions").then(setDivisions).catch(() => {});
   }, [cfg.path]);
   useEffect(() => { load(); const id = setInterval(load, AUTO_REFRESH); return () => clearInterval(id); }, [load]);
 
@@ -929,7 +929,7 @@ function JobCategoryPanel() {
   const [err, setErr] = useState(null);
 
   const load = useCallback(() => {
-    apiGet("/divisions").then(list => setDivisions(scopeDivisionsForCurrentUser(list).map(d => d.divisionName)));
+    apiGet("/divisions").then(list => setDivisions(list.map(d => d.divisionName)));
     apiGet("/job-categories").then(setRows).catch(e => setErr(e.message));
   }, []);
   useEffect(() => { load(); const id = setInterval(load, AUTO_REFRESH); return () => clearInterval(id); }, [load]);

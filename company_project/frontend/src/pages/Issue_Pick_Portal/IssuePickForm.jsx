@@ -2,8 +2,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import "./IssuePick.css";
 import { formatSriLankaTime } from "../../utils/dateUtils";
-import { getCurrentUser, canUseButton, logoutUser } from "../../config/permissions"; // adjust path to your project structure
-
+import { getCurrentUser, canUseButton, logoutUser, hasAllDivisionAccess, canSeeDivision } from "../../config/permissions";
 // const API_BASE = "http://localhost:8080/api/pick-portal";
 // const SETUP_API = "http://localhost:8080/api/admin-setup";
 const API_BASE = "https://time-tracker-system-production.up.railway.app/api/pick-portal";
@@ -935,26 +934,57 @@ export default function IssuPikFormt() {
   };
 
   const fetchDocuments = useCallback(async (silent = false) => {
-    if (!silent) setLoading(true);
-    else setRefreshing(true);
-    setError(null);
-    try {
-      const res = await fetch(API_BASE);
-      if (!res.ok) throw new Error(`Server error: ${res.status}`);
-      const data = await res.json();
-      // Only show documents that already have a Print Document Number.
-      const withPrintDocNo = data.filter(
-        d => d.printDocumentNo && String(d.printDocumentNo).trim() !== ""
-      );
-      setDocuments(withPrintDocNo);
-      setLastUpdated(new Date());
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  }, []);
+  if (!silent) setLoading(true);
+  else setRefreshing(true);
+  setError(null);
+  try {
+    const res = await fetch(API_BASE);
+    if (!res.ok) throw new Error(`Server error: ${res.status}`);
+    const data = await res.json();
+
+    const withPrintDocNo = data.filter(
+      d => d.printDocumentNo && String(d.printDocumentNo).trim() !== ""
+    );
+
+    // ── Division scoping ──────────────────────────────────────────────
+    // Admin / System Administrator (allDivisions: true) see everything.
+    // Every other role is hard-scoped to only the division(s) assigned
+    // to their User Account in Master Setup — same rule AdminDashboard
+    // already uses (hasAllDivisionAccess / canSeeDivision).
+    const divisionScoped = hasAllDivisionAccess(currentUser)
+      ? withPrintDocNo
+      : withPrintDocNo.filter(d => canSeeDivision(currentUser, d.divisionNo));
+
+    setDocuments(divisionScoped);
+    setLastUpdated(new Date());
+  } catch (err) {
+    setError(err.message);
+  } finally {
+    setLoading(false);
+    setRefreshing(false);
+  }
+}, [currentUser]);
+  // const fetchDocuments = useCallback(async (silent = false) => {
+  //   if (!silent) setLoading(true);
+  //   else setRefreshing(true);
+  //   setError(null);
+  //   try {
+  //     const res = await fetch(API_BASE);
+  //     if (!res.ok) throw new Error(`Server error: ${res.status}`);
+  //     const data = await res.json();
+  //     // Only show documents that already have a Print Document Number.
+  //     const withPrintDocNo = data.filter(
+  //       d => d.printDocumentNo && String(d.printDocumentNo).trim() !== ""
+  //     );
+  //     setDocuments(withPrintDocNo);
+  //     setLastUpdated(new Date());
+  //   } catch (err) {
+  //     setError(err.message);
+  //   } finally {
+  //     setLoading(false);
+  //     setRefreshing(false);
+  //   }
+  // }, []);
 
   const fetchDivisions = useCallback(async () => {
     try {
