@@ -9,7 +9,9 @@ import IssueCheckForm    from "../Issue_Check_Portal/IssueCheckForm";
 import IssueDeliveryForm from "../Issue_Delivery_Portal/IssueDeliveryForm";
 import ConfirmPortal     from "../Confirm_Portal/ConfirmPortal";
 import DocumentForm      from "../Documents_Portal/DocumentForm";
-import { getCurrentUser, canSeeNavKey } from "../../config/permissions";
+import {
+  getCurrentUser, canSeeNavKey, hasAllDivisionAccess, getUserDivisions, canSeeDivision,
+} from "../../config/permissions";
 import { formatSriLankaTime } from "../../utils/dateUtils";
 // NOTE: AdminConfigCenter (old "usersetup" page) removed — replaced by
 // MasterSetupPanel below, which now lives inside this same file and saves
@@ -48,15 +50,6 @@ function docDateKey(doc) {
 }
 
 // ── Timestamp display helper ────────────────────────────────────────────
-// Full LocalDateTime columns need UTC → Asia/Colombo conversion before
-// display, exactly like every portal card already does via
-// formatSriLankaTime() (see IssueCheckForm.jsx, Pick/Print/Delivery
-// portals). Plain date/time-only columns (requestDate, requestTime,
-// fromDate, toDate) are NOT in this set — those aren't stored with a
-// timezone component, so they render as-is. Previously the Report / Full
-// Report tables (and their Excel exports) rendered every column as a raw
-// String(value), which skipped this conversion — that's why times looked
-// right on the portal cards but wrong in Report / Full Report.
 const TIMESTAMP_COLUMNS = new Set([
   "printStartTime", "printHoldTime", "printResumeTime", "printEndTime", "printHandoverTime",
   "startTime", "holdTime", "resumeTime", "endTime",
@@ -66,9 +59,6 @@ const TIMESTAMP_COLUMNS = new Set([
   "emergencyResolvedTime", "createdDatetime",
 ]);
 
-// Single source of truth for how any table cell (Report / Full Report)
-// should be rendered — status columns get the badge, timestamp columns get
-// Sri-Lanka-converted formatting, everything else renders as-is.
 function renderCellValue(doc, col) {
   if (col.toLowerCase().includes("status")) return <StatusBadge status={doc[col]} />;
   if (TIMESTAMP_COLUMNS.has(col)) return formatSriLankaTime(doc[col]);
@@ -105,10 +95,6 @@ function deliveryStatusClass(s) {
 
 // ── Date range filter ─────────────────────────────────────────────────────
 
-// Generic range check against ANY date value — the range/CUSTOM logic is
-// identical no matter which date field is being checked, so this is the
-// single source of truth; inRange() and inRangeForStage() below both just
-// pick which date value to feed in.
 function inRangeGeneric(dateVal, range, fromDate, toDate) {
   const key = toDateKey(dateVal);
   if (range === "ALL") return true;
@@ -140,17 +126,10 @@ function inRangeGeneric(dateVal, range, fromDate, toDate) {
   }
 }
 
-// Request-date range check — used for "Total Jobs" / "Total Jobs by Job
-// Type" (how many requests came in during the selected range).
 function inRange(doc, range, fromDate, toDate) {
   return inRangeGeneric(doc.requestDate, range, fromDate, toDate);
 }
 
-// Portal-specific range check — Today/7D/30D/Year/Custom now means "this
-// portal's own start date falls in range", e.g. Today on the Pick Portal
-// card means picked today, not requested today. Falls back to requestDate
-// only if that portal was never started (keeps un-started docs out of a
-// "Today" filter unless they were also requested today).
 function inRangeForStage(doc, stage, range, fromDate, toDate) {
   const cfg = STAGE_CONFIG[stage];
   const dateVal = doc[cfg.startField] || doc.requestDate;
@@ -166,17 +145,7 @@ function docOperators(doc) {
   ].filter(Boolean);
 }
 
-// Division filter — every document already carries its own `divisionNo`
-// (set when the document was entered, in Document Portal / DocumentForm —
-// it's a real column on the Issue entity). That is the single source of
-// truth for which division a document belongs to. The previous version of
-// this function tried to re-derive division membership by matching
-// printedBy/pickedBy/checkedBy/deliveredBy names against the operator
-// master tables — that was unreliable (name mismatches, shared operator
-// names across divisions, and pending/un-touched documents never matched
-// anything), which is why selecting a division could still show every
-// document's totals. Matching on doc.divisionNo directly is both simpler
-// and correct.
+// Division filter — every document already carries its own `divisionNo`.
 function docMatchesDivision(doc, divisionNo) {
   if (!divisionNo || divisionNo === "ALL") return true;
   return String(doc.divisionNo || "") === String(divisionNo);
@@ -195,27 +164,6 @@ function portalCounts(docs, eligibleFn, statusFn) {
 
 // ═══════════════════════════════════════════════════════════════════════
 // ── HOLD-AWARE DURATION ENGINE ──────────────────────────────────────────
-// ═══════════════════════════════════════════════════════════════════════
-// This is the single source of truth for "how long did this job actually
-// take", for every portal (Print / Pick / Check / Delivery).
-//
-// The rule (same for every portal, and for however many hold/resume
-// cycles happen in between):
-//
-//   total working time = (End Time − Start Time) − (sum of every
-//                          hold→resume gap that happened in between)
-//
-// Example: start → work 10m → hold → (paused, doesn't count) → resume
-//          → work 5m more → end  =>  total working time = 15m, not 15m
-//          + however long the hold lasted.
-//
-// STAGE_CONFIG maps each portal to its own set of column names so one
-// function can drive all four. We compute this straight from the raw
-// timestamps + totalHoldSeconds columns rather than trusting only the
-// stored `durationSeconds`-style column — so even if a backend endpoint
-// forgets to (re)calculate it correctly, the dashboard still shows the
-// right number. If the stored duration is the only thing available
-// (e.g. timestamps were cleared), it falls back to that.
 // ═══════════════════════════════════════════════════════════════════════
 
 const STAGE_CONFIG = {
@@ -241,8 +189,6 @@ const STAGE_CONFIG = {
   },
 };
 
-// Live ticking duration for a job that is CURRENTLY in progress or on
-// hold (used for real-time badges/counters while the job is still open).
 function liveDurationSeconds(doc, stage, nowMs) {
   const cfg = STAGE_CONFIG[stage];
   const status = (doc[cfg.statusField] || "").toLowerCase();
@@ -262,10 +208,6 @@ function liveDurationSeconds(doc, stage, nowMs) {
   return Math.max((nowMs - start) / 1000 - totalHold, 0);
 }
 
-// Final (completed-job) duration — this is what feeds the efficiency
-// tables. Prefers a direct start→end calculation minus every hold gap
-// that was accumulated in totalHoldSeconds; falls back to the stored
-// duration column only if the raw timestamps aren't available.
 function computeFinalDuration(doc, stage) {
   const cfg = STAGE_CONFIG[stage];
   const totalHold = Number(doc[cfg.totalHoldField]) || 0;
@@ -279,12 +221,9 @@ function computeFinalDuration(doc, stage) {
       return Math.max((end - start) / 1000 - totalHold, 0);
     }
   }
-  // Fallback — trust whatever the backend already stored.
   return Number(doc[cfg.durationField]) || 0;
 }
 
-// Per-operator Total / Average time, using computeFinalDuration so hold
-// cycles (however many there were) are always subtracted correctly.
 function operatorEfficiency(docs, byField, stage, doneFn) {
   const groups = {};
   docs.forEach(d => {
@@ -482,9 +421,6 @@ function handleLogout() {
 }
 
 function Sidebar({ active, onSelect, open, onClose }) {
-  // Restrict which sidebar items render based on the logged-in user's
-  // role (see permissions.js -> ROLE_ACCESS[...].navKeys). Logout is
-  // rendered separately below and is always shown to everyone.
   const user = getCurrentUser();
   const visibleItems = NAV_ITEMS.filter(item => canSeeNavKey(user, item.key));
 
@@ -518,7 +454,7 @@ function Sidebar({ active, onSelect, open, onClose }) {
   );
 }
 
-// ── Filter bar ── (now includes a Division filter) ────────────────────────
+// ── Filter bar ────────────────────────────────────────────────────────────
 
 const RANGE_OPTIONS = [
   { key: "TODAY", label: "Today" },
@@ -571,7 +507,7 @@ function FilterBar({
 }
 
 // ═══════════════════════════════════════════════════════════════════════
-// ── MASTER SETUP PANEL — the 10 buttons in one row, all saving to the DB ──
+// ── MASTER SETUP PANEL ───────────────────────────────────────────────────
 // ═══════════════════════════════════════════════════════════════════════
 
 async function apiGet(path) {
@@ -615,9 +551,6 @@ const SETUP_TABS = [
   { key: "fileno",   label: "Document File No",       icon: Icon.fileno },
 ];
 
-// Configuration for the 5 identical "name master" panels (Picker, Print/
-// Document, Check, Delivery, Filed) — same UI, different endpoint/table.
-// Each now also carries a Division (divisionNo), saved to the same table.
 const OPERATOR_PANEL_CONFIG = {
   picker: {
     path: "/pickers", nameField: "pickerName", nicField: "nic", nicNameField: "pickerNicName",
@@ -669,7 +602,6 @@ function SetupTable({ rows, cols, onEdit, onDelete }) {
   );
 }
 
-// ── 1) Staff / User Character panel ──────────────────────────────────────
 function StaffPanel() {
   const [rows, setRows] = useState([]);
   const [name, setName] = useState("");
@@ -707,11 +639,6 @@ function StaffPanel() {
   );
 }
 
-// ── Reusable multi-select dropdown for divisions ─────────────────────────
-// Stores the selection as a single comma-separated string (e.g. "D1,D2")
-// so it drops straight into the existing `division_no` VARCHAR column —
-// no DB schema change needed. Click the box to open, tick as many
-// divisions as needed, click "Done" (or outside) to close.
 function MultiDivisionSelect({ divisions, value, onChange }) {
   const [open, setOpen] = useState(false);
   const selectedArr = (value || "").split(",").map(s => s.trim()).filter(Boolean);
@@ -738,7 +665,6 @@ function MultiDivisionSelect({ divisions, value, onChange }) {
 
       {open && (
         <>
-          {/* invisible backdrop so clicking outside closes the list */}
           <div
             onClick={() => setOpen(false)}
             style={{ position: "fixed", inset: 0, zIndex: 9 }}
@@ -781,7 +707,6 @@ function MultiDivisionSelect({ divisions, value, onChange }) {
   );
 }
 
-// ── 2) User Accounts panel ──────────────────────────────────────────────
 function UserAccountsPanel() {
   const [staffOptions, setStaffOptions] = useState([]);
   const [divisions, setDivisions] = useState([]);
@@ -800,8 +725,6 @@ function UserAccountsPanel() {
   }, []);
   useEffect(() => { load(); const id = setInterval(load, AUTO_REFRESH); return () => clearInterval(id); }, [load]);
 
-  // divisionNo -> divisionName, so the table can show full labels for
-  // each comma-separated code stored against a user.
   const divisionNameByNo = useMemo(() => {
     const map = {};
     divisions.forEach(d => { map[d.divisionNo] = d.divisionName; });
@@ -887,7 +810,6 @@ function UserAccountsPanel() {
   );
 }
 
-// ── Division panel ────────────────────────────────────────────────────────
 function DivisionPanel() {
   const [rows, setRows] = useState([]);
   const [form, setForm] = useState({ divisionName: "", divisionNo: "", divisionHead: "" });
@@ -928,9 +850,6 @@ function DivisionPanel() {
   );
 }
 
-// ── Generic "operator" master panel — reused for Picker / Print / Check /
-// Delivery / Filed. Now includes a Division dropdown (divisionNo), sourced
-// from the Division master table, and saved onto the same operator row. ──
 function OperatorPanel({ tabKey }) {
   const cfg = OPERATOR_PANEL_CONFIG[tabKey];
   const TabIcon = SETUP_TABS.find(t => t.key === tabKey)?.icon || Icon.staff;
@@ -946,7 +865,6 @@ function OperatorPanel({ tabKey }) {
   }, [cfg.path]);
   useEffect(() => { load(); const id = setInterval(load, AUTO_REFRESH); return () => clearInterval(id); }, [load]);
 
-  // divisionNo -> divisionName, so the table can show both together.
   const divisionNameByNo = useMemo(() => {
     const map = {};
     divisions.forEach(d => { map[d.divisionNo] = d.divisionName; });
@@ -1003,7 +921,6 @@ function OperatorPanel({ tabKey }) {
   );
 }
 
-// ── Job Category panel (dropdown from Division) ────────────────────────
 function JobCategoryPanel() {
   const [divisions, setDivisions] = useState([]);
   const [rows, setRows] = useState([]);
@@ -1050,10 +967,6 @@ function JobCategoryPanel() {
   );
 }
 
-// ── Document File No panel ───────────────────────────────────────────────
-// Manual "Active" checkbox stays (per file), alongside From Date / To Date.
-// There is NO exclusivity rule here — any number of file numbers can be
-// marked Active at the same time, independently of one another.
 function FileNumberPanel() {
   const [rows, setRows] = useState([]);
   const [form, setForm] = useState({ fileNo: "", fromDate: "", toDate: "", active: false });
@@ -1291,11 +1204,6 @@ function ReportPanel({ documents, jobTypes }) {
 
 // ── Dashboard panel ───────────────────────────────────────────────────────
 
-// One flat KPI card per Job Category — label is just the category name
-// (no division name/number attached). `documents` passed in is already
-// scoped to the selected Division (and date range) by the caller, so
-// picking a division in the filter bar automatically narrows these counts
-// correctly without any per-division splitting here.
 function buildJobTypeCards(jobTypes, documents) {
   return jobTypes.map(jt => ({
     key: jt,
@@ -1305,11 +1213,6 @@ function buildJobTypeCards(jobTypes, documents) {
 }
 
 function DashboardPanel({ documents, jobCategories, divisionsList, division, range, fromDate, toDate }) {
-  // Master Setup → Job Category stores each category against a Division
-  // (by divisionName). To scope the "Total Jobs by Job Type" cards to the
-  // Division selected in the filter bar, look up that division's name and
-  // keep only the categories linked to it. "All Divisions" shows every
-  // category, same as before.
   const selectedDivisionName = useMemo(() => {
     if (!division || division === "ALL") return null;
     const d = divisionsList.find(dv => dv.divisionNo === division);
@@ -1324,16 +1227,6 @@ function DashboardPanel({ documents, jobCategories, divisionsList, division, ran
     return Array.from(new Set(names)).sort((a, b) => a.localeCompare(b));
   }, [jobCategories, selectedDivisionName]);
 
-  // `documents` coming in is already scoped to the selected Division (and
-  // operator, if used) — NOT yet date-filtered. Two different date fields
-  // matter for two different things on this page:
-  //
-  //   1. "Total Jobs" / "Total Jobs by Job Type" — how many requests came
-  //      in during the selected range → filtered by REQUEST date.
-  //   2. Each portal's own Total/Ongoing/Completed cards + its Efficiency
-  //      table, and Document Filing Status — filtered by THAT portal's own
-  //      start date (Today on Pick Portal = picked today, not requested
-  //      today; Delivered/Filed/On Hold/Cancelled = delivered today).
   const requestDateFiltered = useMemo(
     () => documents.filter(d => inRangeGeneric(d.requestDate, range, fromDate, toDate)),
     [documents, range, fromDate, toDate]
@@ -1368,8 +1261,6 @@ function DashboardPanel({ documents, jobCategories, divisionsList, division, ran
   const cancelledCount = deliveryDocs.filter(d => deliveryStatusClass(d.deliveryStatus) === "cancelled").length;
   const pendingFileCount = deliveredDocs.length - filedCount;
 
-  // ── Efficiency tables — hold-aware (computeFinalDuration) AND now scoped
-  // to each portal's own date range via stageFiltered() above. ──
   const printEff    = operatorEfficiency(printDocs, "printedBy", "print", d => printStatusClass(d.printStatus) === "completed");
   const pickEff     = operatorEfficiency(pickDocs, "pickedBy", "pick", d => pickStatusClass(d.status) === "completed");
   const checkEff    = operatorEfficiency(checkDocs, "checkedBy", "check", d => checkStatusClass(d.checkStatus) === "completed");
@@ -1430,9 +1321,6 @@ export default function AdminDashboard() {
     } catch (e) { /* localStorage unavailable — fall back to default */ }
     return "dashboard";
   });
-  // Wraps setActiveView so every sidebar selection is also remembered —
-  // a page refresh (or reopening the tab) lands back on the same page
-  // instead of always redirecting to the Dashboard.
   const setActiveView = useCallback((key) => {
     setActiveViewState(key);
     try { localStorage.setItem(ACTIVE_VIEW_KEY, key); } catch (e) { /* ignore */ }
@@ -1452,13 +1340,17 @@ export default function AdminDashboard() {
   const [division, setDivision] = useState("ALL");
   const [divisionsList, setDivisionsList] = useState([]);
 
-  // ── Job types now come straight from the Job Category master data —
-  // add a category in Master Setup and it appears here automatically.
-  // Each category also carries a divisionName (see Master Setup → Job
-  // Category), so DashboardPanel can further scope the cards to whichever
-  // division is selected in the filter bar. This top-level `jobTypes` list
-  // (all categories, every division) still drives the Report / Full
-  // Report tabs' job-type dropdowns exactly as before. ───
+  // ── Logged-in user's own division access ─────────────────────────────
+  // Admin / System Administrator (allDivisions: true) still see everything.
+  // Every other role is now hard-scoped to only the division(s) assigned
+  // to their User Account — applied to EVERY view below (Dashboard, Full
+  // Report, Report, Notifications), not just the manual Division filter
+  // dropdown, which a restricted user could otherwise leave on
+  // "All Divisions" and still see every division's documents.
+  const currentUser = useMemo(() => getCurrentUser(), []);
+  const userHasAllDivisions = hasAllDivisionAccess(currentUser);
+  const userDivisionCodes = useMemo(() => getUserDivisions(currentUser), [currentUser]);
+
   const [jobCategories, setJobCategories] = useState([]);
   const jobTypes = useMemo(() => {
     const names = jobCategories.map(c => c.categoryName).filter(Boolean);
@@ -1480,7 +1372,6 @@ export default function AdminDashboard() {
     }
   }, []);
 
-  // Divisions for the FilterBar dropdown.
   const fetchDivisions = useCallback(async () => {
     try {
       const list = await apiGet("/divisions");
@@ -1488,7 +1379,6 @@ export default function AdminDashboard() {
     } catch (e) { /* non-fatal — filter just shows no divisions */ }
   }, []);
 
-  // Job categories — drives the dashboard's "Total Jobs by Job Type" cards.
   const fetchJobCategories = useCallback(async () => {
     try {
       const list = await apiGet("/job-categories");
@@ -1509,26 +1399,37 @@ export default function AdminDashboard() {
     return () => clearInterval(id);
   }, [fetchDivisions, fetchJobCategories]);
 
+  // Base data set for every view below — filtered down to only the
+  // divisions this user is allowed to see.
+  const divisionScopedDocuments = useMemo(() => {
+    if (userHasAllDivisions) return documents;
+    return documents.filter(d => canSeeDivision(currentUser, d.divisionNo));
+  }, [documents, userHasAllDivisions, currentUser]);
+
+  // The Division filter dropdown (and DashboardPanel's job-type scoping)
+  // should only ever offer divisions this user can actually see.
+  const visibleDivisionsList = useMemo(() => {
+    if (userHasAllDivisions) return divisionsList;
+    return divisionsList.filter(d => userDivisionCodes.includes(String(d.divisionNo)));
+  }, [divisionsList, userHasAllDivisions, userDivisionCodes]);
+
   const operators = useMemo(() => {
     const set = new Set();
-    documents.forEach(d => docOperators(d).forEach(n => set.add(n)));
+    divisionScopedDocuments.forEach(d => docOperators(d).forEach(n => set.add(n)));
     return Array.from(set).sort();
-  }, [documents]);
+  }, [divisionScopedDocuments]);
 
-  // Division + operator scoping only — NOT date-filtered here. Date range
-  // (Today/7D/30D/Year/Custom) is now applied inside DashboardPanel on a
-  // per-portal basis (each portal's own start date), so it's passed down
-  // as range/fromDate/toDate instead of being baked into this list.
-  // Division matching now uses each document's own divisionNo column
-  // directly (see docMatchesDivision above) — reliable regardless of
-  // whether the document has been printed/picked/checked/delivered yet.
+  // Division + operator scoping — division scoping is now two layers:
+  // the manual dropdown (docMatchesDivision) narrows within what the user
+  // is allowed to see, and divisionScopedDocuments (above) is the hard
+  // ceiling that manual filter can never exceed.
   const filtered = useMemo(() => {
-    return documents.filter(d => {
+    return divisionScopedDocuments.filter(d => {
       if (operator !== "ALL" && !docOperators(d).includes(operator)) return false;
       if (!docMatchesDivision(d, division)) return false;
       return true;
     });
-  }, [documents, operator, division]);
+  }, [divisionScopedDocuments, operator, division]);
 
   const activeLabel = NAV_ITEMS.find(n => n.key === activeView)?.label || "Dashboard";
 
@@ -1562,7 +1463,7 @@ export default function AdminDashboard() {
               operator={operator} setOperator={setOperator}
               operators={operators}
               division={division} setDivision={setDivision}
-              divisions={divisionsList}
+              divisions={visibleDivisionsList}
             />
 
             {loading && <div className="adm-loading">Loading dashboard…</div>}
@@ -1575,7 +1476,7 @@ export default function AdminDashboard() {
               <DashboardPanel
                 documents={filtered}
                 jobCategories={jobCategories}
-                divisionsList={divisionsList}
+                divisionsList={visibleDivisionsList}
                 division={division}
                 range={range}
                 fromDate={fromDate}
@@ -1591,10 +1492,10 @@ export default function AdminDashboard() {
         {activeView === "check"       && <IssueCheckForm />}
         {activeView === "delivery"    && <IssueDeliveryForm />}
         {activeView === "document"    && <ConfirmPortal />}
-        {activeView === "fullreport"  && <DocumentsExcelPanel documents={documents} jobTypes={jobTypes} />}
+        {activeView === "fullreport"  && <DocumentsExcelPanel documents={divisionScopedDocuments} jobTypes={jobTypes} />}
         {activeView === "mastersetup" && <MasterSetupPanel />}
-        {activeView === "notify"      && <NotificationPanel documents={documents} />}
-        {activeView === "report"      && <ReportPanel documents={documents} jobTypes={jobTypes} />}
+        {activeView === "notify"      && <NotificationPanel documents={divisionScopedDocuments} />}
+        {activeView === "report"      && <ReportPanel documents={divisionScopedDocuments} jobTypes={jobTypes} />}
       </div>
     </div>
   );
@@ -1653,10 +1554,6 @@ function dateFieldInRange(doc, field, fromDate, toDate) {
   return true;
 }
 
-// Builds Excel-export rows for a set of columns — timestamp columns are
-// converted through formatSriLankaTime() first, exactly like the on-screen
-// table, so the downloaded .xlsx matches what's shown in Report / Full
-// Report instead of the raw (UTC) DB value.
 function buildExportRow(doc, columns) {
   const row = {};
   columns.forEach(c => {
