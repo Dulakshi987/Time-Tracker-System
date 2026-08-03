@@ -3,8 +3,7 @@ import { useNavigate } from "react-router-dom";
 // import DateRangeFilter from "./DateRangeFilter";
 import "./IssueCheck.css";
 import { formatSriLankaTime } from "../../utils/dateUtils";
-import { getCurrentUser, canUseButton, logoutUser } from "../../config/permissions"; // adjust path to your project structure
-
+import { getCurrentUser, canUseButton, logoutUser, hasAllDivisionAccess, canSeeDivision } from "../../config/permissions";
 // const API_BASE = "http://localhost:8080/api/check-portal";
 // const SETUP_API = "http://localhost:8080/api/admin-setup";
 
@@ -1069,28 +1068,60 @@ export default function IssueCheckForm() {
 
   // ── Fetch documents ──
   const fetchDocuments = useCallback(async (silent = false) => {
-    if (!silent) setLoading(true);
-    else setRefreshing(true);
-    setError(null);
-    try {
-      const res  = await fetch(API_BASE);
-      if (!res.ok) throw new Error(`Server error: ${res.status}`);
-      const data = await res.json();
-      const readyForCheck = data.filter(d => {
-        const pickDone = statusClass(d.status) === "completed";
-        const hasDocNo = d.printDocumentNo && String(d.printDocumentNo).trim() !== "";
-        return pickDone && hasDocNo;
-      });
+  if (!silent) setLoading(true);
+  else setRefreshing(true);
+  setError(null);
+  try {
+    const res  = await fetch(API_BASE);
+    if (!res.ok) throw new Error(`Server error: ${res.status}`);
+    const data = await res.json();
+    const readyForCheck = data.filter(d => {
+      const pickDone = statusClass(d.status) === "completed";
+      const hasDocNo = d.printDocumentNo && String(d.printDocumentNo).trim() !== "";
+      return pickDone && hasDocNo;
+    });
 
-      setDocuments(readyForCheck);
-      setLastUpdated(new Date());
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  }, []);
+    // ── Division scoping ──────────────────────────────────────────────
+    // Admin / System Administrator (allDivisions: true) see everything.
+    // Every other role (Checker included) is hard-scoped to only the
+    // division(s) assigned to their User Account in Master Setup — same
+    // rule AdminDashboard already uses.
+    const divisionScoped = hasAllDivisionAccess(currentUser)
+      ? readyForCheck
+      : readyForCheck.filter(d => canSeeDivision(currentUser, d.divisionNo));
+
+    setDocuments(divisionScoped);
+    setLastUpdated(new Date());
+  } catch (err) {
+    setError(err.message);
+  } finally {
+    setLoading(false);
+    setRefreshing(false);
+  }
+}, [currentUser]);
+  // const fetchDocuments = useCallback(async (silent = false) => {
+  //   if (!silent) setLoading(true);
+  //   else setRefreshing(true);
+  //   setError(null);
+  //   try {
+  //     const res  = await fetch(API_BASE);
+  //     if (!res.ok) throw new Error(`Server error: ${res.status}`);
+  //     const data = await res.json();
+  //     const readyForCheck = data.filter(d => {
+  //       const pickDone = statusClass(d.status) === "completed";
+  //       const hasDocNo = d.printDocumentNo && String(d.printDocumentNo).trim() !== "";
+  //       return pickDone && hasDocNo;
+  //     });
+
+  //     setDocuments(readyForCheck);
+  //     setLastUpdated(new Date());
+  //   } catch (err) {
+  //     setError(err.message);
+  //   } finally {
+  //     setLoading(false);
+  //     setRefreshing(false);
+  //   }
+  // }, []);
 
   // ── Fetch divisions ──
   const fetchDivisions = useCallback(async () => {

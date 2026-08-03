@@ -2,8 +2,7 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import "./IssueDelivery.css";
 import { formatSriLankaTime } from "../../utils/dateUtils";
-import { getCurrentUser, canAccessRoute, canUseButton, logoutUser } from "../../config/permissions";
-// ⚠️ Adjust the path above ("../../config/permissions") to match where
+import { getCurrentUser, canAccessRoute, canUseButton, logoutUser, hasAllDivisionAccess, canSeeDivision } from "../../config/permissions";// ⚠️ Adjust the path above ("../../config/permissions") to match where
 //    permissions.js actually sits relative to this file.
 
 // const API_BASE = "http://localhost:8080/api/delivery-portal";
@@ -1011,22 +1010,49 @@ export default function IssueDeliveryForm() {
 
   // ── Fetch — only Check Done documents come back from this endpoint ──
   const fetchDocuments = useCallback(async (silent = false) => {
-    if (!silent) setLoading(true);
-    else setRefreshing(true);
-    setError(null);
-    try {
-      const res  = await fetch(API_BASE);
-      if (!res.ok) throw new Error(`Server error: ${res.status}`);
-      const data = await res.json();
-      setDocuments(data);
-      setLastUpdated(new Date());
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  }, []);
+  if (!silent) setLoading(true);
+  else setRefreshing(true);
+  setError(null);
+  try {
+    const res  = await fetch(API_BASE);
+    if (!res.ok) throw new Error(`Server error: ${res.status}`);
+    const data = await res.json();
+
+    // ── Division scoping ──────────────────────────────────────────────
+    // Admin / System Administrator (allDivisions: true) see everything.
+    // Every other role (Deliver included) is hard-scoped to only the
+    // division(s) assigned to their User Account in Master Setup — same
+    // rule AdminDashboard / Pick Portal / Check Portal already use.
+    const divisionScoped = hasAllDivisionAccess(currentUser)
+      ? data
+      : data.filter(d => canSeeDivision(currentUser, d.divisionNo));
+
+    setDocuments(divisionScoped);
+    setLastUpdated(new Date());
+  } catch (err) {
+    setError(err.message);
+  } finally {
+    setLoading(false);
+    setRefreshing(false);
+  }
+}, [currentUser]);
+  // const fetchDocuments = useCallback(async (silent = false) => {
+  //   if (!silent) setLoading(true);
+  //   else setRefreshing(true);
+  //   setError(null);
+  //   try {
+  //     const res  = await fetch(API_BASE);
+  //     if (!res.ok) throw new Error(`Server error: ${res.status}`);
+  //     const data = await res.json();
+  //     setDocuments(data);
+  //     setLastUpdated(new Date());
+  //   } catch (err) {
+  //     setError(err.message);
+  //   } finally {
+  //     setLoading(false);
+  //     setRefreshing(false);
+  //   }
+  // }, []);
 
   const fetchDivisions = useCallback(async () => {
     try {
