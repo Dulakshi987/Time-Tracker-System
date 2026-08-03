@@ -720,7 +720,7 @@ function UserAccountsPanel() {
 
   const load = useCallback(() => {
     apiGet("/staff").then(list => setStaffOptions(list.map(s => s.name)));
-    apiGet("/divisions").then(setDivisions).catch(() => {});
+    apiGet("/divisions").then(list => setDivisions(scopeDivisionsForCurrentUser(list))).catch(() => {});
     apiGet("/users").then(setRows).catch(e => setErr(e.message));
   }, []);
   useEffect(() => { load(); const id = setInterval(load, AUTO_REFRESH); return () => clearInterval(id); }, [load]);
@@ -861,7 +861,7 @@ function OperatorPanel({ tabKey }) {
 
   const load = useCallback(() => {
     apiGet(cfg.path).then(setRows).catch(e => setErr(e.message));
-    apiGet("/divisions").then(setDivisions).catch(() => {});
+    apiGet("/divisions").then(list => setDivisions(scopeDivisionsForCurrentUser(list))).catch(() => {});
   }, [cfg.path]);
   useEffect(() => { load(); const id = setInterval(load, AUTO_REFRESH); return () => clearInterval(id); }, [load]);
 
@@ -929,7 +929,7 @@ function JobCategoryPanel() {
   const [err, setErr] = useState(null);
 
   const load = useCallback(() => {
-    apiGet("/divisions").then(list => setDivisions(list.map(d => d.divisionName)));
+    apiGet("/divisions").then(list => setDivisions(scopeDivisionsForCurrentUser(list).map(d => d.divisionName)));
     apiGet("/job-categories").then(setRows).catch(e => setErr(e.message));
   }, []);
   useEffect(() => { load(); const id = setInterval(load, AUTO_REFRESH); return () => clearInterval(id); }, [load]);
@@ -1568,6 +1568,18 @@ function exportToExcel(docs, columns, filename, sheetName) {
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, sheetName);
   XLSX.writeFile(wb, `${filename}_${toDateKey(new Date())}.xlsx`);
+}
+
+// Scopes a /divisions list down to only the divisions the current
+// logged-in user is allowed to see — same rule Dashboard already uses
+// (hasAllDivisionAccess / getUserDivisions), now reused for every
+// Master Setup division dropdown (User Accounts, Picker/Print/Check/
+// Delivery/Filed operators, Job Category).
+function scopeDivisionsForCurrentUser(divisions) {
+  const user = getCurrentUser();
+  if (hasAllDivisionAccess(user)) return divisions;
+  const allowed = getUserDivisions(user);
+  return divisions.filter(d => allowed.includes(String(d.divisionNo)));
 }
 
 function DocumentsExcelPanel({ documents, jobTypes }) {
