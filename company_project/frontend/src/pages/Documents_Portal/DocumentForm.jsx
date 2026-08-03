@@ -9,7 +9,7 @@ import {
   fetchPrintOperatorsByDivision,
   fetchDivisions,
 } from "../../services/Documents_Portal/api";
-import { getCurrentUser, canUseButton } from "../../config/permissions";
+import { getCurrentUser, canUseButton, hasAllDivisionAccess, canSeeDivision } from "../../config/permissions";
 import "./DocumentsForm.css";
 
 const getCurrentDate = () => new Date().toISOString().split("T")[0];
@@ -45,6 +45,52 @@ const emptyTableFilters = () => ({
   status: "ALL",
 });
 
+// ── Date filter options — Today (Sri Lanka time, default) / All / Custom
+// range. Same pattern as Print Portal / Pick Portal / Check Portal.
+const DATE_FILTER_OPTIONS = [
+  { value: "TODAY", label: "Today" },
+  { value: "ALL", label: "All" },
+  { value: "CUSTOM", label: "Custom" },
+];
+
+// Returns today's date key (YYYY-MM-DD) in Sri Lanka time (UTC+5:30, no
+// DST), regardless of what timezone the browser/server/device is actually
+// running in. Mirrors Check Portal / Print Portal / Pick Portal exactly.
+function getSriLankaTodayKey() {
+  const now = new Date();
+  const utcMs = now.getTime() + now.getTimezoneOffset() * 60000;
+  const colomboMs = utcMs + 5.5 * 60 * 60000;
+  const colombo = new Date(colomboMs);
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${colombo.getFullYear()}-${pad(colombo.getMonth() + 1)}-${pad(colombo.getDate())}`;
+}
+
+// requestDate is stored as a plain date (no time/timezone component), so a
+// straight string comparison against YYYY-MM-DD keys is correct as-is.
+function docDateKey(row) {
+  return row.requestDate ? String(row.requestDate).substring(0, 10) : null;
+}
+
+function matchesDateFilter(row, mode, fromDate, toDate) {
+  if (mode === "ALL") return true;
+
+  const key = docDateKey(row);
+
+  if (mode === "TODAY") {
+    return key === getSriLankaTodayKey();
+  }
+
+  if (mode === "CUSTOM") {
+    if (!fromDate && !toDate) return true;
+    if (!key) return false;
+    if (fromDate && key < fromDate) return false;
+    if (toDate && key > toDate) return false;
+    return true;
+  }
+
+  return true;
+}
+
 const DocumentForm = ({ selectedType }) => {
   const safeSelectedType = selectedType || "Summary";
   const isSummary = safeSelectedType === "Summary" || safeSelectedType === "All";
@@ -76,6 +122,13 @@ const DocumentForm = ({ selectedType }) => {
   const [rowsLoading, setRowsLoading] = useState(true);
   const [rowsError, setRowsError] = useState(null);
   const [tableFilters, setTableFilters] = useState(emptyTableFilters());
+
+  // ── Date filter — defaults to "Today" (Sri Lanka time). "All" clears
+  // it, "Custom" opens a From/To range. Mirrors Check Portal / Print
+  // Portal / Pick Portal.
+  const [dateFilterMode, setDateFilterMode] = useState("TODAY"); // "TODAY" | "ALL" | "CUSTOM"
+  const [fromDate, setFromDate] = useState("");
+  const [toDate, setToDate] = useState("");
 
   const [saving, setSaving] = useState(false);
   const [saveMsg, setSaveMsg] = useState(null);
@@ -153,6 +206,17 @@ const DocumentForm = ({ selectedType }) => {
   }, []);
 
   useEffect(() => { loadRows(); }, [loadRows]);
+
+  // ── Division scoping (login-wise access) ────────────────────────────
+  // Admin / System Administrator (allDivisions: true) see every document.
+  // Every other role is hard-scoped to only the division(s) assigned to
+  // their User Account in Master Setup — same rule Check Portal /
+  // AdminDashboard already use.
+  const scopedRows = useMemo(() => {
+    return hasAllDivisionAccess(user)
+      ? rows
+      : rows.filter(r => canSeeDivision(user, r.divisionNo));
+  }, [rows, user]);
 
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -286,17 +350,19 @@ const DocumentForm = ({ selectedType }) => {
     }
   };
 
+  // Job type / status filter dropdown options — scoped to what this user
+  // is actually allowed to see, same rule as the table itself.
   const rowJobTypeOptions = useMemo(() => {
     const set = new Set();
-    rows.forEach(r => { if (r.jobType) set.add(r.jobType); });
+    scopedRows.forEach(r => { if (r.jobType) set.add(r.jobType); });
     return Array.from(set).sort();
-  }, [rows]);
+  }, [scopedRows]);
 
   const rowStatusOptions = useMemo(() => {
     const set = new Set();
-    rows.forEach(r => { if (r.status) set.add(r.status); });
+    scopedRows.forEach(r => { if (r.status) set.add(r.status); });
     return Array.from(set).sort();
-  }, [rows]);
+  }, [scopedRows]);
 
   const handleTableFilterChange = (field, value) => {
     setTableFilters(prev => ({ ...prev, [field]: value }));
@@ -307,10 +373,11 @@ const DocumentForm = ({ selectedType }) => {
   const filteredRows = useMemo(() => {
     const s = tableFilters.search.trim().toLowerCase();
 
-    return rows.filter(row => {
+    return scopedRows.filter(row => {
       if (tableFilters.jobType !== "ALL" && (row.jobType || "") !== tableFilters.jobType) return false;
       if (tableFilters.divisionNo !== "ALL" && (row.divisionNo || "") !== tableFilters.divisionNo) return false;
       if (tableFilters.status !== "ALL" && (row.status || "Draft") !== tableFilters.status) return false;
+      if (!matchesDateFilter(row, dateFilterMode, fromDate, toDate)) return false;
 
       if (!s) return true;
 
@@ -339,13 +406,14 @@ const DocumentForm = ({ selectedType }) => {
 
       return hay.includes(s);
     });
-  }, [rows, tableFilters, divisionNoToName]);
+  }, [scopedRows, tableFilters, divisionNoToName, dateFilterMode, fromDate, toDate]);
 
   const hasActiveTableFilters =
     tableFilters.search.trim() !== "" ||
     tableFilters.jobType !== "ALL" ||
     tableFilters.divisionNo !== "ALL" ||
-    tableFilters.status !== "ALL";
+    tableFilters.status !== "ALL" ||
+    dateFilterMode !== "TODAY";
 
   const tableColumnCount = showActionsColumn ? 14 : 13;
 
@@ -536,8 +604,58 @@ const DocumentForm = ({ selectedType }) => {
       <div className="docf-card">
         <div className="docf-table-header">
           <h3 className="docf-table-title">
-            All Documents ({filteredRows.length}{filteredRows.length !== rows.length ? ` of ${rows.length}` : ""})
+            All Documents ({filteredRows.length}{filteredRows.length !== scopedRows.length ? ` of ${scopedRows.length}` : ""})
           </h3>
+        </div>
+
+        {/* ── Date filter — Today (Sri Lanka time, default) / All / Custom
+            range. Same toolbar pattern as Check Portal / Print Portal /
+            Pick Portal. ── */}
+        <div className="docf-table-filterbar" style={{ marginBottom: 10, flexWrap: "wrap", gap: 8 }}>
+          {DATE_FILTER_OPTIONS.map(opt => (
+            <button
+              key={opt.value}
+              type="button"
+              className="docf-btn docf-btn-ghost"
+              style={{
+                fontWeight: dateFilterMode === opt.value ? 700 : 500,
+                borderColor: dateFilterMode === opt.value ? "#3b82f6" : undefined,
+                color: dateFilterMode === opt.value ? "#3b82f6" : undefined,
+              }}
+              onClick={() => setDateFilterMode(opt.value)}
+            >
+              {opt.label}
+            </button>
+          ))}
+
+          {dateFilterMode === "CUSTOM" && (
+            <>
+              <input
+                type="date"
+                className="docf-input"
+                value={fromDate}
+                onChange={e => setFromDate(e.target.value)}
+                style={{ maxWidth: 160 }}
+              />
+              <span>—</span>
+              <input
+                type="date"
+                className="docf-input"
+                value={toDate}
+                onChange={e => setToDate(e.target.value)}
+                style={{ maxWidth: 160 }}
+              />
+              {(fromDate || toDate) && (
+                <button
+                  type="button"
+                  className="docf-btn docf-btn-ghost"
+                  onClick={() => { setFromDate(""); setToDate(""); }}
+                >
+                  ✕ Clear
+                </button>
+              )}
+            </>
+          )}
         </div>
 
         <div className="docf-table-filterbar">
@@ -549,8 +667,46 @@ const DocumentForm = ({ selectedType }) => {
             onChange={e => handleTableFilterChange("search", e.target.value)}
           />
 
+          <select
+            className="docf-input"
+            value={tableFilters.jobType}
+            onChange={e => handleTableFilterChange("jobType", e.target.value)}
+            style={{ maxWidth: 200 }}
+          >
+            <option value="ALL">All Job Types</option>
+            {rowJobTypeOptions.map(jt => (
+              <option key={jt} value={jt}>{jt}</option>
+            ))}
+          </select>
+
+          <select
+            className="docf-input"
+            value={tableFilters.divisionNo}
+            onChange={e => handleTableFilterChange("divisionNo", e.target.value)}
+            style={{ maxWidth: 220 }}
+          >
+            <option value="ALL">All Divisions</option>
+            {divisions.map(d => (
+              <option key={d.id ?? d.divisionNo} value={d.divisionNo}>
+                {d.divisionNo} — {d.divisionName}
+              </option>
+            ))}
+          </select>
+
+          <select
+            className="docf-input"
+            value={tableFilters.status}
+            onChange={e => handleTableFilterChange("status", e.target.value)}
+            style={{ maxWidth: 200 }}
+          >
+            <option value="ALL">All Status</option>
+            {rowStatusOptions.map(st => (
+              <option key={st} value={st}>{st}</option>
+            ))}
+          </select>
+
           {hasActiveTableFilters && (
-            <button type="button" className="docf-btn docf-btn-ghost" onClick={clearTableFilters}>
+            <button type="button" className="docf-btn docf-btn-ghost" onClick={() => { clearTableFilters(); setDateFilterMode("TODAY"); setFromDate(""); setToDate(""); }}>
               ✕ Clear filters
             </button>
           )}
