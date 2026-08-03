@@ -85,7 +85,9 @@ export const ROLE_ACCESS = {
       "start", "hold", "end", "handover", "emergency_done",
       "deliver", "cancel", "add_to_file",
     ],
-    navKeys: ["docentry", "print", "pick", "check", "delivery"],
+    // Added "fullreport" and "report" so an "All" role account sees the
+    // Full Report and Report items in the Admin Dashboard sidebar too.
+    navKeys: ["docentry", "print", "pick", "check", "delivery", "fullreport", "report"],
     hiddenColumns: {
       docentry: ["actions"],
       print: ["actions"],
