@@ -512,32 +512,37 @@ function FilterBar({
         {operators.map(o => <option key={o} value={o}>{o}</option>)}
       </select> */}
 
-      <select
-        className="adm-operator-select"
-        value={division}
-        onChange={e => {
-          setDivision(e.target.value);
-          // Selecting a new division invalidates the previous job-type
-          // pick, since job categories are scoped per division.
-          setJobType("ALL");
-        }}
-      >
-        <option value="ALL">All Divisions</option>
-        {divisions.map(d => (
-          <option key={d.id ?? d.divisionNo} value={d.divisionNo}>
-            {d.divisionNo} — {d.divisionName}
-          </option>
-        ))}
-      </select>
+      {/* Division + Job Category are kept together as one group with a
+          small gap between them, instead of getting spread apart by the
+          filterbar's own flex spacing (adm-filterbar). */}
+      <div style={{ display: "flex", gap: 8, marginLeft: "auto" }}>
+        <select
+          className="adm-operator-select"
+          value={division}
+          onChange={e => {
+            setDivision(e.target.value);
+            // Selecting a new division invalidates the previous job-type
+            // pick, since job categories are scoped per division.
+            setJobType("ALL");
+          }}
+        >
+          <option value="ALL">All Divisions</option>
+          {divisions.map(d => (
+            <option key={d.id ?? d.divisionNo} value={d.divisionNo}>
+              {d.divisionNo} — {d.divisionName}
+            </option>
+          ))}
+        </select>
 
-      <select
-        className="adm-operator-select"
-        value={jobType}
-        onChange={e => setJobType(e.target.value)}
-      >
-        <option value="ALL">All Job Categories</option>
-        {jobTypeOptions.map(t => <option key={t} value={t}>{t}</option>)}
-      </select>
+        <select
+          className="adm-operator-select"
+          value={jobType}
+          onChange={e => setJobType(e.target.value)}
+        >
+          <option value="ALL">All Job Categories</option>
+          {jobTypeOptions.map(t => <option key={t} value={t}>{t}</option>)}
+        </select>
+      </div>
     </div>
   );
 }
