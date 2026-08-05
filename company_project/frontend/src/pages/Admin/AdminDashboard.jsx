@@ -151,6 +151,12 @@ function docMatchesDivision(doc, divisionNo) {
   return String(doc.divisionNo || "") === String(divisionNo);
 }
 
+// Job type / job category filter — every document carries its own `jobType`.
+function docMatchesJobType(doc, jobType) {
+  if (!jobType || jobType === "ALL") return true;
+  return String(doc.jobType || "").toLowerCase() === String(jobType).toLowerCase();
+}
+
 // ── Aggregation ────────────────────────────────────────────────────────────
 
 function portalCounts(docs, eligibleFn, statusFn) {
@@ -158,8 +164,11 @@ function portalCounts(docs, eligibleFn, statusFn) {
   const total = eligible.length;
   const completed = eligible.filter(d => statusFn(d) === "completed").length;
   const cancelled = eligible.filter(d => statusFn(d) === "cancelled").length;
+  const onhold = eligible.filter(d => statusFn(d) === "onhold").length;
+  const inprogress = eligible.filter(d => statusFn(d) === "inprogress").length;
+  const pending = total - completed - cancelled - onhold - inprogress;
   const ongoing = total - completed - cancelled;
-  return { total, ongoing, completed, cancelled };
+  return { total, ongoing, completed, cancelled, onhold, inprogress, pending };
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -259,13 +268,21 @@ function SectionTitle({ children }) {
   return <div className="adm-section-title">{children}</div>;
 }
 
-function TripleStat({ title, total, ongoing, completed, cancelled }) {
+function TripleStat({ title, total, ongoing, completed, cancelled, pending, inprogress, onhold }) {
   return (
     <div className="adm-triple-card">
       <div className="adm-triple-title">{title}</div>
       <div className="adm-triple-stats">
         <div><div className="adm-stat-label">Total</div><div className="adm-stat-value">{total}</div></div>
-        <div><div className="adm-stat-label">Ongoing</div><div className="adm-stat-value ongoing">{ongoing}</div></div>
+        {pending !== undefined && (
+          <div><div className="adm-stat-label">Pending</div><div className="adm-stat-value pending">{pending}</div></div>
+        )}
+        {inprogress !== undefined && (
+          <div><div className="adm-stat-label">In Progress</div><div className="adm-stat-value inprogress">{inprogress}</div></div>
+        )}
+        {onhold !== undefined && (
+          <div><div className="adm-stat-label">On Hold</div><div className="adm-stat-value onhold">{onhold}</div></div>
+        )}
         <div><div className="adm-stat-label">Completed</div><div className="adm-stat-value completed">{completed}</div></div>
         {cancelled !== undefined && (
           <div><div className="adm-stat-label">Cancelled</div><div className="adm-stat-value cancelled">{cancelled}</div></div>
@@ -468,6 +485,7 @@ function FilterBar({
   range, setRange, fromDate, setFromDate, toDate, setToDate,
   operator, setOperator, operators,
   division, setDivision, divisions,
+  jobType, setJobType, jobTypeOptions,
 }) {
   return (
     <div className="adm-filterbar">
@@ -494,13 +512,31 @@ function FilterBar({
         {operators.map(o => <option key={o} value={o}>{o}</option>)}
       </select> */}
 
-      <select className="adm-operator-select" value={division} onChange={e => setDivision(e.target.value)}>
+      <select
+        className="adm-operator-select"
+        value={division}
+        onChange={e => {
+          setDivision(e.target.value);
+          // Selecting a new division invalidates the previous job-type
+          // pick, since job categories are scoped per division.
+          setJobType("ALL");
+        }}
+      >
         <option value="ALL">All Divisions</option>
         {divisions.map(d => (
           <option key={d.id ?? d.divisionNo} value={d.divisionNo}>
             {d.divisionNo} — {d.divisionName}
           </option>
         ))}
+      </select>
+
+      <select
+        className="adm-operator-select"
+        value={jobType}
+        onChange={e => setJobType(e.target.value)}
+      >
+        <option value="ALL">All Job Categories</option>
+        {jobTypeOptions.map(t => <option key={t} value={t}>{t}</option>)}
       </select>
     </div>
   );
@@ -1212,7 +1248,7 @@ function buildJobTypeCards(jobTypes, documents) {
   }));
 }
 
-function DashboardPanel({ documents, jobCategories, divisionsList, division, range, fromDate, toDate }) {
+function DashboardPanel({ documents, jobCategories, divisionsList, division, jobType, range, fromDate, toDate }) {
   const selectedDivisionName = useMemo(() => {
     if (!division || division === "ALL") return null;
     const d = divisionsList.find(dv => dv.divisionNo === division);
@@ -1266,10 +1302,18 @@ function DashboardPanel({ documents, jobCategories, divisionsList, division, ran
   const checkEff    = operatorEfficiency(checkDocs, "checkedBy", "check", d => checkStatusClass(d.checkStatus) === "completed");
   const deliveryEff = operatorEfficiency(deliveryDocs, "deliveredBy", "delivery", d => deliveryStatusClass(d.deliveryStatus) === "completed");
 
+  const scopeLabel = [
+    division && division !== "ALL" ? division : null,
+    jobType && jobType !== "ALL" ? jobType : null,
+  ].filter(Boolean).join(" · ");
+
   return (
     <div>
       <h2 className="adm-title">Fentons Operation Efficiency Dashboard</h2>
-      <p className="adm-subtitle">Live view, recalculates automatically as documents update.</p>
+      <p className="adm-subtitle">
+        Live view, recalculates automatically as documents update.
+        {scopeLabel && <> — filtered to <strong>{scopeLabel}</strong></>}
+      </p>
 
       <SectionTitle>Total Jobs by Job Type</SectionTitle>
       <div className="adm-kpi-row adm-jobtype-grid">
@@ -1296,7 +1340,7 @@ function DashboardPanel({ documents, jobCategories, divisionsList, division, ran
         <KpiCard label="Cancelled" value={cancelledCount} colorClass="red" />
       </div>
 
-      <SectionTitle>System Efficiency — by Operator</SectionTitle>
+      <SectionTitle>System Efficiency — by Operator{scopeLabel ? ` (${scopeLabel})` : ""}</SectionTitle>
       <div className="adm-eff-row">
         <EfficiencyTable title="Print Efficiency" rows={printEff} />
         <EfficiencyTable title="Picking Efficiency" rows={pickEff} />
@@ -1340,6 +1384,11 @@ export default function AdminDashboard() {
   const [division, setDivision] = useState("ALL");
   const [divisionsList, setDivisionsList] = useState([]);
 
+  // ── Job category / job type filter state ─────────────────────────────
+  // Scoped to the selected division below (jobTypeOptionsForDivision) so
+  // the dropdown only ever shows categories that belong to that division.
+  const [jobType, setJobType] = useState("ALL");
+
   // ── Logged-in user's own division access ─────────────────────────────
   // Admin / System Administrator (allDivisions: true) still see everything.
   // Every other role is now hard-scoped to only the division(s) assigned
@@ -1356,6 +1405,25 @@ export default function AdminDashboard() {
     const names = jobCategories.map(c => c.categoryName).filter(Boolean);
     return Array.from(new Set(names)).sort((a, b) => a.localeCompare(b));
   }, [jobCategories]);
+
+  // Division name that corresponds to the currently selected division code
+  // — job categories are stored against divisionName, not divisionNo.
+  const selectedDivisionName = useMemo(() => {
+    if (!division || division === "ALL") return null;
+    const d = divisionsList.find(dv => dv.divisionNo === division);
+    return d ? d.divisionName : null;
+  }, [division, divisionsList]);
+
+  // Job type dropdown options, scoped to the selected division. Selecting
+  // "4017 — Solar" here means only that division's job categories show up
+  // in the Job Category dropdown, per the requested flow.
+  const jobTypeOptionsForDivision = useMemo(() => {
+    const relevant = selectedDivisionName
+      ? jobCategories.filter(c => c.divisionName === selectedDivisionName)
+      : jobCategories;
+    const names = relevant.map(c => c.categoryName).filter(Boolean);
+    return Array.from(new Set(names)).sort((a, b) => a.localeCompare(b));
+  }, [jobCategories, selectedDivisionName]);
 
   const fetchDocuments = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
@@ -1419,17 +1487,21 @@ export default function AdminDashboard() {
     return Array.from(set).sort();
   }, [divisionScopedDocuments]);
 
-  // Division + operator scoping — division scoping is now two layers:
-  // the manual dropdown (docMatchesDivision) narrows within what the user
-  // is allowed to see, and divisionScopedDocuments (above) is the hard
-  // ceiling that manual filter can never exceed.
+  // Division + job type + operator scoping — division scoping is now two
+  // layers: the manual dropdown (docMatchesDivision) narrows within what
+  // the user is allowed to see, and divisionScopedDocuments (above) is the
+  // hard ceiling that manual filter can never exceed. Job type narrows the
+  // same result set further, so every KPI, the four portal triple-stat
+  // cards, and all four efficiency tables move together whenever either
+  // dropdown changes.
   const filtered = useMemo(() => {
     return divisionScopedDocuments.filter(d => {
       if (operator !== "ALL" && !docOperators(d).includes(operator)) return false;
       if (!docMatchesDivision(d, division)) return false;
+      if (!docMatchesJobType(d, jobType)) return false;
       return true;
     });
-  }, [divisionScopedDocuments, operator, division]);
+  }, [divisionScopedDocuments, operator, division, jobType]);
 
   const activeLabel = NAV_ITEMS.find(n => n.key === activeView)?.label || "Dashboard";
 
@@ -1464,6 +1536,8 @@ export default function AdminDashboard() {
               operators={operators}
               division={division} setDivision={setDivision}
               divisions={visibleDivisionsList}
+              jobType={jobType} setJobType={setJobType}
+              jobTypeOptions={jobTypeOptionsForDivision}
             />
 
             {loading && <div className="adm-loading">Loading dashboard…</div>}
@@ -1478,6 +1552,7 @@ export default function AdminDashboard() {
                 jobCategories={jobCategories}
                 divisionsList={visibleDivisionsList}
                 division={division}
+                jobType={jobType}
                 range={range}
                 fromDate={fromDate}
                 toDate={toDate}
