@@ -178,59 +178,89 @@ function portalCounts(docs, eligibleFn, statusFn) {
 const STAGE_CONFIG = {
   print: {
     statusField: "printStatus", startField: "printStartTime", endField: "printEndTime",
-    holdField: "printHoldTime", totalHoldField: "printTotalHoldSeconds",
+    holdField: "printHoldTime", resumeField: "printResumeTime", totalHoldField: "printTotalHoldSeconds",
     durationField: "printDurationSeconds",
   },
   pick: {
     statusField: "status", startField: "startTime", endField: "endTime",
-    holdField: "holdTime", totalHoldField: "totalHoldSeconds",
+    holdField: "holdTime", resumeField: "resumeTime", totalHoldField: "totalHoldSeconds",
     durationField: "durationSeconds",
   },
   check: {
     statusField: "checkStatus", startField: "checkStartTime", endField: "checkEndTime",
-    holdField: "checkHoldTime", totalHoldField: "checkTotalHoldSeconds",
+    holdField: "checkHoldTime", resumeField: "checkResumeTime", totalHoldField: "checkTotalHoldSeconds",
     durationField: "checkDurationSeconds",
   },
   delivery: {
     statusField: "deliveryStatus", startField: "deliveryStartTime", endField: "deliveryEndTime",
-    holdField: "deliveryHoldTime", totalHoldField: "deliveryTotalHoldSeconds",
+    holdField: "deliveryHoldTime", resumeField: "deliveryResumeTime", totalHoldField: "deliveryTotalHoldSeconds",
     durationField: "deliveryDurationSeconds",
   },
 };
 
+// Total worked time = (HoldTime − StartTime) + (EndTime − ResumeTime).
+// This counts only the two "working" segments — before the hold and after
+// the resume — and drops the hold gap itself entirely, without relying on
+// any separately-accumulated totalHoldSeconds column. If a job was never
+// held, worked time is simply EndTime − StartTime.
+function workedSecondsFromSegments(startRaw, endRaw, holdRaw, resumeRaw, nowMs) {
+  if (!startRaw) return 0;
+  const start = new Date(startRaw).getTime();
+  if (isNaN(start)) return 0;
+
+  const endPoint = endRaw ? new Date(endRaw).getTime() : nowMs;
+  if (isNaN(endPoint)) return 0;
+
+  // No hold ever recorded — plain start-to-end (or start-to-now if still running).
+  if (!holdRaw) {
+    return Math.max((endPoint - start) / 1000, 0);
+  }
+
+  const hold = new Date(holdRaw).getTime();
+  if (isNaN(hold)) {
+    return Math.max((endPoint - start) / 1000, 0);
+  }
+
+  // Held, not yet resumed — worked time stops accumulating at the hold point.
+  if (!resumeRaw) {
+    return Math.max((hold - start) / 1000, 0);
+  }
+
+  const resume = new Date(resumeRaw).getTime();
+  if (isNaN(resume)) {
+    return Math.max((hold - start) / 1000, 0);
+  }
+
+  // Held and resumed: (Hold − Start) + (End/Now − Resume).
+  return Math.max((hold - start) / 1000, 0) + Math.max((endPoint - resume) / 1000, 0);
+}
+
 function liveDurationSeconds(doc, stage, nowMs) {
   const cfg = STAGE_CONFIG[stage];
   const status = (doc[cfg.statusField] || "").toLowerCase();
-  const totalHold = Number(doc[cfg.totalHoldField]) || 0;
 
   if (status.includes("complete") || status.includes("done")) {
     return computeFinalDuration(doc, stage);
   }
   if (!doc[cfg.startField]) return 0;
 
-  const start = new Date(doc[cfg.startField]).getTime();
-
-  if (status.includes("hold")) {
-    const holdStart = doc[cfg.holdField] ? new Date(doc[cfg.holdField]).getTime() : nowMs;
-    return Math.max((holdStart - start) / 1000 - totalHold, 0);
-  }
-  return Math.max((nowMs - start) / 1000 - totalHold, 0);
+  return workedSecondsFromSegments(
+    doc[cfg.startField], null, doc[cfg.holdField], doc[cfg.resumeField], nowMs
+  );
 }
 
 function computeFinalDuration(doc, stage) {
   const cfg = STAGE_CONFIG[stage];
-  const totalHold = Number(doc[cfg.totalHoldField]) || 0;
   const startRaw = doc[cfg.startField];
   const endRaw = doc[cfg.endField];
 
-  if (startRaw && endRaw) {
-    const start = new Date(startRaw).getTime();
-    const end = new Date(endRaw).getTime();
-    if (!isNaN(start) && !isNaN(end) && end >= start) {
-      return Math.max((end - start) / 1000 - totalHold, 0);
-    }
-  }
-  return Number(doc[cfg.durationField]) || 0;
+  if (!startRaw || !endRaw) return Number(doc[cfg.durationField]) || 0;
+
+  const start = new Date(startRaw).getTime();
+  const end = new Date(endRaw).getTime();
+  if (isNaN(start) || isNaN(end) || end < start) return Number(doc[cfg.durationField]) || 0;
+
+  return workedSecondsFromSegments(startRaw, endRaw, doc[cfg.holdField], doc[cfg.resumeField], end);
 }
 
 function operatorEfficiency(docs, byField, stage, doneFn) {
