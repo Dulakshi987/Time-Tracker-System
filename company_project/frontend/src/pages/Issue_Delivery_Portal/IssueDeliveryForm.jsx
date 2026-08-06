@@ -2,7 +2,16 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import "./IssueDelivery.css";
 import { formatSriLankaTime } from "../../utils/dateUtils";
-import { getCurrentUser, canAccessRoute, canUseButton, logoutUser, hasAllDivisionAccess, canSeeDivision } from "../../config/permissions";// ⚠️ Adjust the path above ("../../config/permissions") to match where
+import {
+  getCurrentUser,
+  canAccessRoute,
+  canUseButton,
+  logoutUser,
+  hasAllDivisionAccess,
+  canSeeDivision,
+  getUserDivisions,
+} from "../../config/permissions";
+// ⚠️ Adjust the path above ("../../config/permissions") to match where
 //    permissions.js actually sits relative to this file.
 
 // const API_BASE = "http://localhost:8080/api/delivery-portal";
@@ -963,15 +972,19 @@ export default function IssueDeliveryForm() {
     navigate("/login", { replace: true });
   };
 
-  // The Deliver role's ROLE_ACCESS entry only lists "deliver", "hold",
-  // "cancel" — no "edit"/"delete" — so canUseButton correctly returns
-  // false for them here. Admin/System Administrator have buttons: ["*"]
-  // and always pass.
-  const canManageDocs = canUseButton(currentUser, "edit") || canUseButton(currentUser, "delete");
-  // The Deliver role's ROLE_ACCESS entry doesn't list "handover" either
-  // (only "deliver", "hold", "cancel") — Handover is a Picker-only workflow
-  // button in this system, so canUseButton returns false for Deliver here.
-  const canHandoverAccess = canUseButton(currentUser, "handover");
+  // ── Division access ──
+  // Admin / System Administrator (allDivisions: true in permissions.js) see
+  // every division. Every other login only sees documents whose divisionNo
+  // matches the division(s) assigned to their account in Master Setup
+  // (User Accounts → divisionNo, comma-separated for multi-division staff).
+  const hasAllDiv = hasAllDivisionAccess(currentUser);
+  const userDivisions = useMemo(() => getUserDivisions(currentUser), [currentUser]);
+
+  // Manage (Edit/Delete) + Handover columns — Admin / System Administrator only.
+  // Every other login never sees these two columns, regardless of their
+  // ROLE_ACCESS.buttons list.
+  const canManageDocs = isAdminRole;
+  const canHandoverAccess = isAdminRole;
   const visibleColumnCount = COLUMN_COUNT - (canManageDocs ? 0 : 1) - (canHandoverAccess ? 0 : 1);
 
   const [documents,    setDocuments]    = useState([]);
@@ -980,6 +993,7 @@ export default function IssueDeliveryForm() {
   const [search,       setSearch]       = useState("");
   const [filterType,   setFilterType]   = useState("ALL");
   const [filterStatus, setFilterStatus] = useState("ALL");
+  const [filterDivision, setFilterDivision] = useState("ALL"); // Division filter — mirrors Job Type dropdown
   const [statFilter,   setStatFilter]   = useState("ALL"); // ALL | pending | onhold | completed | cancelled — driven by the stat chips
   const [lastUpdated,  setLastUpdated]  = useState(null);
   const [refreshing,   setRefreshing]   = useState(false);
@@ -1072,7 +1086,18 @@ export default function IssueDeliveryForm() {
     return () => clearInterval(id);
   }, [fetchDocuments]);
 
-  const getDocById = useCallback((id) => documents.find(d => d.id === id), [documents]);
+  // ── Access-scoped documents ──
+  // Admin / System Administrator (or any role with allDivisions: true) see
+  // every document. Every other login only ever sees documents belonging to
+  // the division(s) assigned to their account — this feeds the table,
+  // stats, dropdowns, and request-ID numbering below, so nothing in the UI
+  // ever shows another division's data to a non-admin login.
+  const accessScopedDocuments = useMemo(() => {
+    if (hasAllDiv) return documents;
+    return documents.filter((doc) => canSeeDivision(currentUser, doc.divisionNo));
+  }, [documents, hasAllDiv, currentUser]);
+
+  const getDocById = useCallback((id) => accessScopedDocuments.find(d => d.id === id), [accessScopedDocuments]);
 
   const handleDeliveredClick = (id) => { setActiveId(id); setActivePopup("delivered"); };
   const handleHoldClick      = (id) => { setActiveId(id); setActivePopup("hold"); };
@@ -1225,10 +1250,22 @@ export default function IssueDeliveryForm() {
   };
 
   // ── Filters ──
-  const jobTypes = ["ALL", ...new Set(documents.map(d => d.jobType).filter(Boolean))];
-  const statuses = ["ALL", ...new Set(documents.map(d => d.deliveryStatus).filter(Boolean))];
+  // Job Type / Status / Division dropdown option lists are all built off
+  // accessScopedDocuments, so a non-admin login never even sees another
+  // division's divisionNo as an option.
+  const jobTypes = ["ALL", ...new Set(accessScopedDocuments.map(d => d.jobType).filter(Boolean))];
+  const statuses = ["ALL", ...new Set(accessScopedDocuments.map(d => d.deliveryStatus).filter(Boolean))];
 
-  const visible = documents.filter(doc => {
+  // Division dropdown — Admin/System Admin get every division that appears
+  // in the data; every other login only gets their own assigned division(s).
+  const divisionOptions = useMemo(() => {
+    const list = hasAllDiv
+      ? [...new Set(accessScopedDocuments.map(d => d.divisionNo).filter(Boolean))]
+      : userDivisions;
+    return ["ALL", ...list];
+  }, [hasAllDiv, userDivisions, accessScopedDocuments]);
+
+  const visible = accessScopedDocuments.filter(doc => {
     const q = search.toLowerCase();
     const matchSearch = !q || [
       String(doc.id), doc.customerName, doc.jobwbs,
@@ -1236,21 +1273,23 @@ export default function IssueDeliveryForm() {
       doc.requestedBy, doc.vehicleNo, doc.deliveryVehicleNo,
     ].some(v => (v || "").toLowerCase().includes(q));
 
-    const matchType   = filterType   === "ALL" || doc.jobType === filterType;
-    const matchStatus = filterStatus === "ALL" || doc.deliveryStatus === filterStatus;
-    const matchStat   = statFilter   === "ALL" || statusClass(doc.deliveryStatus) === statFilter;
-    const matchDate   = matchesDateFilter(doc, dateFilterMode, fromDate, toDate);
+    const matchType     = filterType     === "ALL" || doc.jobType === filterType;
+    const matchStatus   = filterStatus   === "ALL" || doc.deliveryStatus === filterStatus;
+    const matchDivision = filterDivision === "ALL" || doc.divisionNo === filterDivision;
+    const matchStat     = statFilter     === "ALL" || statusClass(doc.deliveryStatus) === statFilter;
+    const matchDate     = matchesDateFilter(doc, dateFilterMode, fromDate, toDate);
 
-    return matchSearch && matchType && matchStatus && matchStat && matchDate;
+    return matchSearch && matchType && matchStatus && matchDivision && matchStat && matchDate;
   });
 
-  // Stats — scoped by the date filter too, so counts on screen always match
-  // what's actually shown in the table below (e.g. "Today" only counts
-  // today's documents, not every document ever entered). Mirrors Print
-  // Portal / Pick Portal / Check Portal.
+  // Stats — scoped by division access + the date filter too, so counts on
+  // screen always match what's actually shown in the table below (e.g.
+  // "Today" only counts today's documents, not every document ever
+  // entered, and a non-admin login only ever counts their own division).
+  // Mirrors Print Portal / Pick Portal / Check Portal.
   const dateScoped = useMemo(
-    () => documents.filter(doc => matchesDateFilter(doc, dateFilterMode, fromDate, toDate)),
-    [documents, dateFilterMode, fromDate, toDate]
+    () => accessScopedDocuments.filter(doc => matchesDateFilter(doc, dateFilterMode, fromDate, toDate)),
+    [accessScopedDocuments, dateFilterMode, fromDate, toDate]
   );
 
   const total     = dateScoped.length;
@@ -1265,7 +1304,7 @@ export default function IssueDeliveryForm() {
   });
   const overdueCount = overdueDocs.length;
 
-  const requestIdMap = useMemo(() => computeRequestIds(documents), [documents]);
+  const requestIdMap = useMemo(() => computeRequestIds(accessScopedDocuments), [accessScopedDocuments]);
 
   const activeDoc = getDocById(activeId);
   const activeOperatorNames = useMemo(
@@ -1375,6 +1414,16 @@ export default function IssueDeliveryForm() {
         </select>
         <select className="ip-filter-select" value={filterStatus} onChange={e => setFilterStatus(e.target.value)}>
           {statuses.map(s => <option key={s} value={s}>{s === "ALL" ? "All Status" : s}</option>)}
+        </select>
+        {/* Division filter — Admin/System Admin see every division that has
+            data; every other login only ever sees their own assigned
+            division(s) here, same as the rest of the portal. */}
+        <select className="ip-filter-select" value={filterDivision} onChange={e => setFilterDivision(e.target.value)}>
+          {divisionOptions.map(d => (
+            <option key={d} value={d}>
+              {d === "ALL" ? "All Divisions" : `${d} — ${divisionNoToName[d] || ""}`}
+            </option>
+          ))}
         </select>
       </div>
 
@@ -1524,7 +1573,7 @@ export default function IssueDeliveryForm() {
                   <div className="ip-empty">
                     <div className="ip-empty-icon">📭</div>
                     <p>
-                      {documents.length === 0
+                      {accessScopedDocuments.length === 0
                         ? "No Check Done documents yet. Complete checks first."
                         : `No documents found${search ? ` for "${search}"` : ""}.`}
                     </p>
