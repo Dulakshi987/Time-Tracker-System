@@ -86,16 +86,9 @@ export const ROLE_ACCESS = {
       "start", "hold", "end", "handover", "emergency_done",
       "deliver", "cancel", "add_to_file",
     ],
-    allDivisions: true,
-    // Full admin-dashboard sidebar access: dashboard, every portal,
-    // full report, master setup, notifications and report — this role
-    // now sees the same sidebar an Admin would, minus the "*" wildcard
-    // (buttons above still gate individual start/hold/end/etc actions
-    // inside each portal).
-    navKeys: [
-      "dashboard", "docentry", "print", "pick", "check", "delivery",
-      "document", "fullreport", "mastersetup", "notify", "report",
-    ],
+    // Added "dashboard" so an "All" role account sees the Admin Dashboard
+    // KPI/overview page in the sidebar too, alongside the existing portals.
+    navKeys: ["dashboard", "docentry", "print", "pick", "check", "delivery", "document", "report"],
     hiddenColumns: {
       docentry: ["actions"],
       print: ["actions"],
