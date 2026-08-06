@@ -46,12 +46,13 @@ export const ROLE_ACCESS = {
   },
   [ROLES.PRINT_WITH_DOCUMENT_ENTER]: {
     defaultRoute: "/admin",
-    allowedRoutes: ["/admin", "/print", "/documents"],
+    allowedRoutes: ["/admin", "/print", "/documents", "/confirm"],
     buttons: ["start", "hold", "end"],
-    navKeys: ["docentry", "print"],
+    navKeys: ["docentry", "print", "document"],
     hiddenColumns: {
       docentry: ["actions"],
       print: ["actions"],
+      document: ["actions"]
     },
   },
   [ROLES.PICKER]: {
@@ -80,19 +81,20 @@ export const ROLE_ACCESS = {
   },
   [ROLES.ALL]: {
     defaultRoute: "/admin",
-    allowedRoutes: ["/admin", "/documents", "/print", "/pick", "/check", "/delivery"],
+    allowedRoutes: ["/admin", "/documents", "/print", "/pick", "/check", "/delivery","/confirm"],
     buttons: [
       "start", "hold", "end", "handover", "emergency_done",
       "deliver", "cancel", "add_to_file",
     ],
     // Added "fullreport" and "report" so an "All" role account sees the
     // Full Report and Report items in the Admin Dashboard sidebar too.
-    navKeys: ["docentry", "print", "pick", "check", "delivery", "report"],
+    navKeys: ["docentry", "print", "pick", "check", "delivery", , "document","report"],
     hiddenColumns: {
       docentry: ["actions"],
       print: ["actions"],
       pick: ["actions"],
       check: ["actions"],
+      document: ["actions"],
       delivery: ["actions", "manage", "handover"],
     },
   },

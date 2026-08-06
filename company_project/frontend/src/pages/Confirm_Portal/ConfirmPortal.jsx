@@ -2,7 +2,10 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import "./ConfirmPortal.css";
 import { formatSriLankaTime } from "../../utils/dateUtils"; 
-import { getCurrentUser, canAccessRoute, canUseButton, logoutUser } from "../../config/permissions";
+import {
+  getCurrentUser, canAccessRoute, canUseButton, logoutUser,
+  hasAllDivisionAccess, canSeeDivision,
+} from "../../config/permissions";
 // ⚠️ Adjust the path above ("../../config/permissions") to match where
 //    permissions.js actually sits relative to this file.
 
@@ -641,8 +644,21 @@ export default function IssueConfirm() {
 
   const reqIdMap = useMemo(() => computeRequestIds(documents), [documents]);
 
+  // ── Division-wise access scoping ──────────────────────────────────────
+  // Admin / System Administrator (allDivisions: true) still see every
+  // document. Every other role — including "Print with Document Enter" —
+  // is hard-scoped to only the division(s) assigned to their User Account
+  // (Master Setup → User Accounts → Division(s)), the same rule already
+  // used on the Admin Dashboard. This runs BEFORE any status/search/date
+  // filtering below, so a restricted user can never see another
+  // division's documents no matter what they type in the search box.
+  const divisionScopedDocuments = useMemo(() => {
+    if (hasAllDivisionAccess(currentUser)) return documents;
+    return documents.filter(d => canSeeDivision(currentUser, d.divisionNo));
+  }, [documents, currentUser]);
+
   // Only Delivered + Cancelled
-  const relevant = documents.filter(d => ["completed", "cancelled"].includes(statusClass(d.deliveryStatus)));
+  const relevant = divisionScopedDocuments.filter(d => ["completed", "cancelled"].includes(statusClass(d.deliveryStatus)));
 
   const visible = relevant.filter(doc => {
     const sc = statusClass(doc.deliveryStatus);
