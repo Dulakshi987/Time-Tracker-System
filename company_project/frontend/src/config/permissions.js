@@ -81,14 +81,21 @@ export const ROLE_ACCESS = {
   },
   [ROLES.ALL]: {
     defaultRoute: "/admin",
-    allowedRoutes: ["/admin", "/documents", "/print", "/pick", "/check", "/delivery","/confirm"],
+    allowedRoutes: ["/admin", "/documents", "/print", "/pick", "/check", "/delivery", "/confirm"],
     buttons: [
       "start", "hold", "end", "handover", "emergency_done",
       "deliver", "cancel", "add_to_file",
     ],
-    // Added "fullreport" and "report" so an "All" role account sees the
-    // Full Report and Report items in the Admin Dashboard sidebar too.
-    navKeys: ["docentry", "print", "pick", "check", "delivery", , "document","report"],
+    allDivisions: true,
+    // Full admin-dashboard sidebar access: dashboard, every portal,
+    // full report, master setup, notifications and report — this role
+    // now sees the same sidebar an Admin would, minus the "*" wildcard
+    // (buttons above still gate individual start/hold/end/etc actions
+    // inside each portal).
+    navKeys: [
+      "dashboard", "docentry", "print", "pick", "check", "delivery",
+      "document", "fullreport", "mastersetup", "notify", "report",
+    ],
     hiddenColumns: {
       docentry: ["actions"],
       print: ["actions"],
@@ -98,7 +105,7 @@ export const ROLE_ACCESS = {
       delivery: ["actions", "manage", "handover"],
     },
   },
-};
+}
 
 const STORAGE_KEY = "fentons_user";
 
