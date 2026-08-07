@@ -278,8 +278,65 @@ const DocumentForm = ({ selectedType }) => {
     [rowHighlightMap]
   );
 
+  // ── Job WBS lookup — dropdown + free typing, with auto-fill ──────────
+  // wbsOptions feeds the <datalist> so the WBS field behaves as a
+  // combobox: pick an existing WBS from the dropdown, or type a brand new
+  // one freely. wbsHistoryByKey keeps the most recently entered row for
+  // each WBS value (across ALL divisions the user can see) so that
+  // selecting a known WBS can auto-fill Customer, Reservation No, and the
+  // other related fields from that prior entry.
+  const wbsOptions = useMemo(() => {
+    const pool = formData.divisionNo
+      ? scopedRows.filter(r => String(r.divisionNo) === String(formData.divisionNo))
+      : scopedRows;
+    const set = new Set();
+    pool.forEach(r => {
+      const wbs = String(r.jobwbs || r.jobWBS || "").trim();
+      if (wbs) set.add(wbs);
+    });
+    return Array.from(set).sort();
+  }, [scopedRows, formData.divisionNo]);
+
+  const wbsHistoryByKey = useMemo(() => {
+    const map = {};
+    scopedRows.forEach(r => {
+      const wbs = String(r.jobwbs || r.jobWBS || "").trim();
+      if (!wbs) return;
+      // Keep whichever row was entered most recently for this WBS.
+      if (!map[wbs] || Number(r.id) > Number(map[wbs].id)) {
+        map[wbs] = r;
+      }
+    });
+    return map;
+  }, [scopedRows]);
+
   const handleChange = (e) => {
     const { name, value } = e.target;
+
+    // Job WBS — combobox (typeable + pick from datalist). When the typed/
+    // selected value matches a WBS that's already been entered before,
+    // auto-fill Customer, Reservation No, Requested By, Vehicle No, SAP
+    // Line No and Entered By from that earlier entry. Every auto-filled
+    // field lands in normal editable inputs, so it can be changed right
+    // away if needed.
+    if (name === "jobWBS") {
+      const match = wbsHistoryByKey[value.trim()];
+      if (match) {
+        setFormData(prev => ({
+          ...prev,
+          jobWBS: value,
+          customerName: match.customerName || prev.customerName,
+          reservationNo: match.reservationNo || prev.reservationNo,
+          requestedBy: match.requestedBy || prev.requestedBy,
+          vehicleNo: match.vehicleNo || prev.vehicleNo,
+          sapIssueLineNo: match.sapIssueLineNo || prev.sapIssueLineNo,
+          enteredBy: match.enteredBy || prev.enteredBy,
+        }));
+      } else {
+        setFormData(prev => ({ ...prev, jobWBS: value }));
+      }
+      return;
+    }
 
     // Reservation No: allow digits only, max 8 characters
     if (name === "reservationNo") {
@@ -480,7 +537,7 @@ const DocumentForm = ({ selectedType }) => {
   // ── Pagination — 5 rows per page, with numbered page buttons + Next/
   // Prev. Any change to filters/search/date resets back to page 1 so the
   // user doesn't land on an empty page after narrowing the result set.
-  const PAGE_SIZE = 5;
+  const PAGE_SIZE = 50;
   const [currentPage, setCurrentPage] = useState(1);
 
   useEffect(() => {
@@ -571,9 +628,20 @@ const DocumentForm = ({ selectedType }) => {
             <div className="docf-field">
               <label>Job WBS</label>
               <input
-                type="text" name="jobWBS" placeholder="Job WBS"
-                value={formData.jobWBS} onChange={handleChange} className="docf-input"
+                type="text"
+                name="jobWBS"
+                placeholder="Type new WBS or pick an existing one"
+                value={formData.jobWBS}
+                onChange={handleChange}
+                className="docf-input"
+                list="jobwbs-options"
+                autoComplete="off"
               />
+              <datalist id="jobwbs-options">
+                {wbsOptions.map(wbs => (
+                  <option key={wbs} value={wbs} />
+                ))}
+              </datalist>
             </div>
 
             <div className="docf-field">
@@ -755,20 +823,30 @@ const DocumentForm = ({ selectedType }) => {
           )}
         </div>
 
-        <div className="docf-table-filterbar">
+        <div
+          className="docf-table-filterbar"
+          style={{
+            display: "flex",
+            alignItems: "center",
+            flexWrap: "wrap",
+            gap: 12,
+            marginBottom: 4,
+          }}
+        >
           <input
             type="text"
             className="docf-search"
             placeholder="Search any column (id, WBS, reservation, customer, entered by, vehicle...)"
             value={tableFilters.search}
             onChange={e => handleTableFilterChange("search", e.target.value)}
+            style={{ flex: "1 1 260px", minWidth: 220 }}
           />
 
           <select
             className="docf-input"
             value={tableFilters.jobType}
             onChange={e => handleTableFilterChange("jobType", e.target.value)}
-            style={{ maxWidth: 200 }}
+            style={{ maxWidth: 200, minWidth: 160 }}
           >
             <option value="ALL">All Job Types</option>
             {rowJobTypeOptions.map(jt => (
@@ -780,7 +858,7 @@ const DocumentForm = ({ selectedType }) => {
             className="docf-input"
             value={tableFilters.divisionNo}
             onChange={e => handleTableFilterChange("divisionNo", e.target.value)}
-            style={{ maxWidth: 220 }}
+            style={{ maxWidth: 220, minWidth: 180 }}
           >
             <option value="ALL">All Divisions</option>
             {divisions.map(d => (
@@ -794,7 +872,7 @@ const DocumentForm = ({ selectedType }) => {
             className="docf-input"
             value={tableFilters.status}
             onChange={e => handleTableFilterChange("status", e.target.value)}
-            style={{ maxWidth: 200 }}
+            style={{ maxWidth: 200, minWidth: 160 }}
           >
             <option value="ALL">All Status</option>
             {rowStatusOptions.map(st => (
@@ -803,7 +881,12 @@ const DocumentForm = ({ selectedType }) => {
           </select>
 
           {hasActiveTableFilters && (
-            <button type="button" className="docf-btn docf-btn-ghost" onClick={() => { clearTableFilters(); setDateFilterMode("TODAY"); setFromDate(""); setToDate(""); }}>
+            <button
+              type="button"
+              className="docf-btn docf-btn-ghost"
+              style={{ flex: "0 0 auto", whiteSpace: "nowrap" }}
+              onClick={() => { clearTableFilters(); setDateFilterMode("TODAY"); setFromDate(""); setToDate(""); }}
+            >
               ✕ Clear filters
             </button>
           )}
