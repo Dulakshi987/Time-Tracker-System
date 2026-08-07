@@ -701,7 +701,9 @@ function DocumentCard({
   // permitted to use that button (permissions.js).
   const canStart = (isPending || isOnHold) && canStartBtn;
   const canHold = isStarted && canHoldBtn;
-  const canEnd = (isStarted || isOnHold) && canEndBtn;
+  // On Hold state: only Resume is enabled. End only becomes available
+  // after Resume has been clicked (i.e. status is back to In Progress).
+  const canEnd = isStarted && canEndBtn;
 
   const cardClassName =
     `ip-card status-${sc}` +
