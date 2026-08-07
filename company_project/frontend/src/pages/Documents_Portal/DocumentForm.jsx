@@ -477,6 +477,43 @@ const DocumentForm = ({ selectedType }) => {
 
   const tableColumnCount = showActionsColumn ? 14 : 13;
 
+  // ── Pagination — 5 rows per page, with numbered page buttons + Next/
+  // Prev. Any change to filters/search/date resets back to page 1 so the
+  // user doesn't land on an empty page after narrowing the result set.
+  const PAGE_SIZE = 5;
+  const [currentPage, setCurrentPage] = useState(1);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [tableFilters, dateFilterMode, fromDate, toDate]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredRows.length / PAGE_SIZE));
+
+  useEffect(() => {
+    if (currentPage > totalPages) setCurrentPage(totalPages);
+  }, [currentPage, totalPages]);
+
+  const paginatedRows = useMemo(() => {
+    const start = (currentPage - 1) * PAGE_SIZE;
+    return filteredRows.slice(start, start + PAGE_SIZE);
+  }, [filteredRows, currentPage]);
+
+  const goToPage = (p) => setCurrentPage(Math.min(Math.max(1, p), totalPages));
+
+  // Compact page-number list: always show first, last, current ±1, and
+  // "…" gaps in between, so it doesn't blow up with dozens of buttons.
+  const pageNumbers = useMemo(() => {
+    const pages = [];
+    for (let p = 1; p <= totalPages; p++) {
+      if (p === 1 || p === totalPages || Math.abs(p - currentPage) <= 1) {
+        pages.push(p);
+      } else if (pages[pages.length - 1] !== "…") {
+        pages.push("…");
+      }
+    }
+    return pages;
+  }, [totalPages, currentPage]);
+
   return (
     <div className="docf-page">
       <div className="docf-card">
@@ -814,9 +851,9 @@ const DocumentForm = ({ selectedType }) => {
                 </tr>
               </thead>
               <tbody>
-                {filteredRows.length === 0 ? (
+                {paginatedRows.length === 0 ? (
                   <tr><td colSpan={tableColumnCount} className="docf-empty-row">No documents match this filter</td></tr>
-                ) : filteredRows.map(row => {
+                ) : paginatedRows.map(row => {
                   const highlight = rowHighlightMap[row.id]; // "first" | "duplicate" | undefined
                   const rowStyle =
                     highlight === "duplicate"
@@ -864,6 +901,67 @@ const DocumentForm = ({ selectedType }) => {
                 })}
               </tbody>
             </table>
+          </div>
+        )}
+
+        {!rowsLoading && !rowsError && filteredRows.length > 0 && (
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: 6,
+              flexWrap: "wrap",
+              marginTop: 14,
+            }}
+          >
+            <button
+              type="button"
+              className="docf-btn docf-btn-ghost"
+              style={{ padding: "6px 12px" }}
+              disabled={currentPage === 1}
+              onClick={() => goToPage(currentPage - 1)}
+            >
+              ‹ Prev
+            </button>
+
+            {pageNumbers.map((p, idx) =>
+              p === "…" ? (
+                <span key={`gap-${idx}`} style={{ padding: "0 4px", color: "#7c8db0" }}>
+                  …
+                </span>
+              ) : (
+                <button
+                  key={p}
+                  type="button"
+                  className="docf-btn docf-btn-ghost"
+                  style={{
+                    padding: "6px 12px",
+                    minWidth: 36,
+                    fontWeight: p === currentPage ? 700 : 500,
+                    borderColor: p === currentPage ? "#3b82f6" : undefined,
+                    color: p === currentPage ? "#3b82f6" : undefined,
+                  }}
+                  onClick={() => goToPage(p)}
+                >
+                  {p}
+                </button>
+              )
+            )}
+
+            <button
+              type="button"
+              className="docf-btn docf-btn-ghost"
+              style={{ padding: "6px 12px" }}
+              disabled={currentPage === totalPages}
+              onClick={() => goToPage(currentPage + 1)}
+            >
+              Next ›
+            </button>
+
+            <span style={{ marginLeft: 10, fontSize: "0.8rem", color: "#7c8db0" }}>
+              Page {currentPage} of {totalPages}
+            </span>
           </div>
         )}
       </div>
