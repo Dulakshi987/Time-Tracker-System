@@ -223,12 +223,27 @@ function HoldPopup({ onConfirm, onCancel, printOperators, operatorsLoading }) {
 }
 
 // ── Print Done Popup (also used for Edit of a completed document) ──────────
-function PrintDonePopup({ onConfirm, onCancel, printOperators, operatorsLoading, initialDocumentNo, initialPrintedBy, isEdit }) {
+// `existingDocumentNos` = document numbers already used by OTHER documents
+// (the current document's own number, when editing, is excluded by the
+// caller before this prop is passed in) — used to block duplicates.
+function PrintDonePopup({
+  onConfirm,
+  onCancel,
+  printOperators,
+  operatorsLoading,
+  initialDocumentNo,
+  initialPrintedBy,
+  isEdit,
+  existingDocumentNos = [],
+}) {
   const [documentNo, setDocumentNo] = useState(initialDocumentNo || "");
   const [printedBy, setPrintedBy] = useState(initialPrintedBy || "");
   const [docNoError, setDocNoError] = useState("");
 
-  const canConfirm = isValidDocumentNo(documentNo) && !!printedBy;
+  const isDuplicate = (value) => existingDocumentNos.includes(value);
+
+  const canConfirm =
+    isValidDocumentNo(documentNo) && !isDuplicate(documentNo) && !!printedBy;
 
   const handleDocumentNoChange = (e) => {
     // numbers only, max 10 digits
@@ -239,6 +254,8 @@ function PrintDonePopup({ onConfirm, onCancel, printOperators, operatorsLoading,
       setDocNoError("");
     } else if (!isValidDocumentNo(digitsOnly)) {
       setDocNoError(`Document Number must be numbers only (max ${DOC_NO_MAX_LENGTH} digits).`);
+    } else if (isDuplicate(digitsOnly)) {
+      setDocNoError("This Document Number is already used by another document.");
     } else {
       setDocNoError("");
     }
@@ -297,9 +314,16 @@ function DocumentCard({ doc, requestId, divisionLabel, perms, onStart, onHold, o
   const isDone = sc === "completed";
 
   // Role permission gates ANDed with the normal status-based gates.
+  //
+  // Hold -> Resume -> End flow:
+  //   While a document is On Hold, ONLY "Resume" (the Start button, which
+  //   relabels itself to "Resume") is available. "End" must NOT be
+  //   accessible until the user has clicked Resume and the document is
+  //   back "In Progress". So `canEnd` only checks isInProgress — it no
+  //   longer includes isOnHold.
   const canStart = (isPending || isOnHold) && perms.start;
   const canHold = isInProgress && perms.hold;
-  const canEnd = (isInProgress || isOnHold) && perms.end;
+  const canEnd = isInProgress && perms.end;
 
   const canEdit = isDone && perms.edit;
   const canDelete = isDone && perms.delete;
@@ -639,6 +663,19 @@ export default function IssuPrinFormt() {
     [documents, user]
   );
 
+  // Document Numbers already used by OTHER documents — passed into the
+  // Print Done / Edit popup so it can block duplicates. When editing an
+  // existing document, that document's own current number is excluded
+  // (so saving the same value back doesn't trip the duplicate check).
+  const existingDocumentNos = useMemo(
+    () =>
+      documents
+        .filter(d => d.id !== activeId)
+        .map(d => d.printDocumentNo)
+        .filter(Boolean),
+    [documents, activeId]
+  );
+
   const jobTypes = ["ALL", ...new Set(divisionScoped.map(d => d.jobType).filter(Boolean))];
 
   const STATUS_FILTERS = [
@@ -705,6 +742,7 @@ export default function IssuPrinFormt() {
           initialDocumentNo={editValues.documentNo}
           initialPrintedBy={editValues.printedBy}
           isEdit={!!editValues.documentNo || !!editValues.printedBy}
+          existingDocumentNos={existingDocumentNos}
         />
       )}
 

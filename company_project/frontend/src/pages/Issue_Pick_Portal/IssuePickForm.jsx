@@ -81,7 +81,9 @@ function jobTypeColor(jt) {
 // ── Status helpers ───────────────────────────────────────────────────────────
 // PENDING → [Handover] → HANDED_OVER → [Start] → IN_PROGRESS
 // IN_PROGRESS → [Hold] → ON_HOLD → [Start = Resume] → IN_PROGRESS
-// IN_PROGRESS / ON_HOLD → [End] → COMPLETED
+// IN_PROGRESS → [End] → COMPLETED   (End is ONLY available while In Progress —
+// after a Hold, the user must click Resume first before End becomes
+// available again.)
 
 function statusClass(s) {
   const v = (s || "").toLowerCase();
@@ -140,11 +142,6 @@ function parsePickingErrorGroups(doc) {
 }
 
 // ── Date filter helpers ──────────────────────────────────────────────────
-// Returns today's date key (YYYY-MM-DD) in Sri Lanka time (UTC+5:30, no
-// DST), regardless of what timezone the browser/server/device is actually
-// running in. This is what "Today" always compares against, so the filter
-// is correct no matter where the page is opened from. Mirrors the Print
-// Portal's implementation exactly.
 function getSriLankaTodayKey() {
   const now = new Date();
   const utcMs = now.getTime() + now.getTimezoneOffset() * 60000;
@@ -154,8 +151,6 @@ function getSriLankaTodayKey() {
   return `${colombo.getFullYear()}-${pad(colombo.getMonth() + 1)}-${pad(colombo.getDate())}`;
 }
 
-// requestDate is stored as a plain date (no time/timezone component), so a
-// straight string comparison against YYYY-MM-DD keys is correct as-is.
 function docDateKey(doc) {
   return doc.requestDate ? String(doc.requestDate).substring(0, 10) : null;
 }
@@ -180,11 +175,7 @@ function matchesDateFilter(doc, mode, fromDate, toDate) {
   return true;
 }
 
-// ── Person Picker (division-scoped — Only Master Data, no "Other") ─────────
-// Mirrors the Print Portal's PersonPicker exactly: the `people` list handed
-// in is already filtered down to whichever Division the current document
-// belongs to, so whatever gets picked here always matches Admin Master Setup
-// for that division.
+// ── Person Picker ─────────────────────────────────────────────────────────
 function PersonPicker({ value, onChange, people, loading }) {
   return (
     <div className="ip-popup-options">
@@ -328,10 +319,7 @@ function PickedByPopup({ onConfirm, onCancel, pickers, pickersLoading }) {
   );
 }
 
-// ── Popup: Emergency Pick Done (re-pick after Check reported an error) ──────
-// Every picking-error reason logged by the Check Portal is shown here as its
-// own group with its own SKU + Quantity, so the person knows exactly what to
-// re-pick before they confirm and pick their name below.
+// ── Popup: Emergency Pick Done ──────────────────────────────────────────────
 function EmergencyPickDonePopup({ doc, onConfirm, onCancel, pickers, pickersLoading }) {
   const [resolvedBy, setResolvedBy] = useState("");
   const groups = parsePickingErrorGroups(doc);
@@ -390,7 +378,7 @@ function EmergencyPickDonePopup({ doc, onConfirm, onCancel, pickers, pickersLoad
   );
 }
 
-// ── Popup: Edit (Held By / Picked By only) — mirrors Print Portal's Edit ────
+// ── Popup: Edit (Held By / Picked By only) ──────────────────────────────────
 function EditPopup({ doc, onConfirm, onCancel, pickers, pickersLoading }) {
   const [heldBy, setHeldBy] = useState(doc?.heldBy || "");
   const [pickedBy, setPickedBy] = useState(doc?.pickedBy || "");
@@ -499,10 +487,6 @@ function ViewDetailsPopup({ doc, requestId, divisionLabel, onClose }) {
           {row("Print Duration", `⏱ ${formatDuration(doc.printDurationSeconds)}`)}
         </div>
 
-        {/* Picking error section — each reason (Shortage / Collected
-            Different Material) shown as its own group with its own SKU +
-            Quantity, both while pending AND after it's been resolved, so
-            the full picture stays visible in the history. */}
         {isFlagged && (() => {
           const groups = parsePickingErrorGroups(doc);
           return (
@@ -552,7 +536,7 @@ function ViewDetailsPopup({ doc, requestId, divisionLabel, onClose }) {
   );
 }
 
-// ── Popup: New Picking Error Alert (from Check Portal) ──────────────────────
+// ── Popup: New Picking Error Alert ──────────────────────────────────────────
 function PickingErrorAlertPopup({ docs, requestIdMap, onJump, onClose }) {
   return (
     <div className="ip-popup-overlay">
@@ -606,9 +590,6 @@ function DocumentCard({
   onHandover, onStart, onHold, onEnd, onView, onEmergencyDone,
   onEdit, onDelete,
   cardRef, jumpHighlighted,
-  // Role-based permission flags (from permissions.js → canUseButton).
-  // These are computed once in the parent and passed down so this
-  // component never has to know about the current user directly.
   canHandoverBtn, canStartBtn, canHoldBtn, canEndBtn, canEmergencyBtn,
   canEditBtn, canDeleteBtn,
 }) {
@@ -622,19 +603,23 @@ function DocumentCard({
 
   // Button availability = correct workflow state AND the logged-in role is
   // permitted to use that button (permissions.js).
+  //
+  // Hold -> Resume -> End flow:
+  //   While a document is On Hold, ONLY "Resume" (the Start button, which
+  //   relabels itself to "Resume") is available. "End" must NOT be
+  //   accessible until the user has clicked Resume and the document is
+  //   back "In Progress". So `canEnd` only checks isStarted — it no
+  //   longer includes isOnHold.
   const canHandover = isPending && canHandoverBtn;
   const canStart = (isHandedOver || isOnHold) && canStartBtn;
   const canHold = isStarted && canHoldBtn;
-  const canEnd = (isStarted || isOnHold) && canEndBtn;
+  const canEnd = isStarted && canEndBtn;
 
   const hasCheckError =
     (doc.hasWrongMaterial || "").toUpperCase() === "YES" && !doc.emergencyPickResolved;
 
   const cardClassName = `ip-card status-${sc}${hasCheckError ? " ip-card-emergency" : ""}`;
 
-  // Hard red border + tinted background on the card itself whenever there's
-  // an unresolved picking error — set inline so it doesn't depend on a CSS
-  // class being present/loaded.
   const cardBorderStyle = hasCheckError
     ? {
         border: "2px solid #ef4444",
@@ -744,10 +729,6 @@ function DocumentCard({
   </div>
 )}
 
-        {/* Picking error details — every reason logged by Check Portal shown
-            as its own small group (Reason + SKU + Qty), right above the
-            Emergency Pick Done button, font kept small to match the card's
-            other stat text. */}
         {hasCheckError && (
           <div
             style={{
@@ -781,10 +762,6 @@ function DocumentCard({
       <div className="ip-card-foot">
         {isDone ? (
           <>
-            {/* Edit/Delete are hidden entirely (not just disabled) unless
-                the logged-in role has "edit"/"delete" in permissions.js.
-                Picker's button list does not include them, so a Picker
-                never sees these two on a completed card. */}
             {canEditBtn && (
               <button className="ip-btn ip-btn-edit" onClick={() => onEdit(doc)}>
                 ✎ Edit
@@ -818,12 +795,6 @@ function DocumentCard({
             </button>
           </>
         )}
-        {/* Emergency Pick Done button — always shown below the normal
-            action row when there's an unresolved picking error AND the
-            logged-in role is allowed to use it, hard red background +
-            darker red border so it's unmistakable. Clicking it opens
-            EmergencyPickDonePopup where the reasons/materials are shown
-            again before picking who re-picked. */}
         {hasCheckError && canEmergencyBtn && (
           <button
             className="ip-btn ip-btn-emergency"
@@ -860,14 +831,8 @@ function SkeletonCard() {
 export default function IssuPikFormt() {
   const navigate = useNavigate();
 
-  // Logged-in user (from sessionStorage via permissions.js) — read once on
-  // mount. Used to compute which buttons this role is allowed to see/use,
-  // and whether to show the in-portal Logout button below.
   const currentUser = useMemo(() => getCurrentUser(), []);
 
-  // Admin / System Administrator already have logout available elsewhere
-  // (their own dashboard/navbar) — hide the in-portal Logout button for
-  // them, same pattern as the Delivery Portal.
   const isAdminRole =
     currentUser?.staffName === "Admin" ||
     currentUser?.staffName === "System Administrator";
@@ -886,11 +851,6 @@ export default function IssuPikFormt() {
   const [lastUpdated, setLastUpdated] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
 
-  // ── Date filter — defaults to "Today" (Sri Lanka time). "All" clears
-  // it, "Custom" opens a From/To range. Recomputes on every render (and
-  // the auto-refresh timer keeps this component re-rendering), so at
-  // midnight Colombo time "Today" automatically rolls over to the new
-  // day without needing a page reload. Mirrors the Print Portal exactly.
   const [dateFilterMode, setDateFilterMode] = useState("TODAY"); // "TODAY" | "ALL" | "CUSTOM"
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
@@ -905,20 +865,14 @@ export default function IssuPikFormt() {
     delete: canUseButton(currentUser, "delete"),
   }), [currentUser]);
 
-  // Divisions (Admin Master Data) — used only to label each card, exactly
-  // like the Print Portal does with divisionNoToName.
   const [divisions, setDivisions] = useState([]);
 
-  // Pickers shown in the currently open popup — scoped to that document's
-  // Division (Admin Master Data, division-wise), fetched fresh each time a
-  // popup opens — same pattern as the Print Portal's popupOperators.
   const [popupPickers, setPopupPickers] = useState([]);
   const [popupPickersLoading, setPopupPickersLoading] = useState(false);
 
-  const [activePopup, setActivePopup] = useState(null); // "handover" | "hold" | "end" | "view" | "emergency" | "edit" | null
+  const [activePopup, setActivePopup] = useState(null);
   const [activeId, setActiveId] = useState(null);
 
-  // "New Picking Error" alert popup
   const [errorAlertDocs, setErrorAlertDocs] = useState([]);
   const [seenErrorIds, setSeenErrorIds] = useState(() => new Set());
 
@@ -946,11 +900,6 @@ export default function IssuPikFormt() {
       d => d.printDocumentNo && String(d.printDocumentNo).trim() !== ""
     );
 
-    // ── Division scoping ──────────────────────────────────────────────
-    // Admin / System Administrator (allDivisions: true) see everything.
-    // Every other role is hard-scoped to only the division(s) assigned
-    // to their User Account in Master Setup — same rule AdminDashboard
-    // already uses (hasAllDivisionAccess / canSeeDivision).
     const divisionScoped = hasAllDivisionAccess(currentUser)
       ? withPrintDocNo
       : withPrintDocNo.filter(d => canSeeDivision(currentUser, d.divisionNo));
@@ -964,27 +913,6 @@ export default function IssuPikFormt() {
     setRefreshing(false);
   }
 }, [currentUser]);
-  // const fetchDocuments = useCallback(async (silent = false) => {
-  //   if (!silent) setLoading(true);
-  //   else setRefreshing(true);
-  //   setError(null);
-  //   try {
-  //     const res = await fetch(API_BASE);
-  //     if (!res.ok) throw new Error(`Server error: ${res.status}`);
-  //     const data = await res.json();
-  //     // Only show documents that already have a Print Document Number.
-  //     const withPrintDocNo = data.filter(
-  //       d => d.printDocumentNo && String(d.printDocumentNo).trim() !== ""
-  //     );
-  //     setDocuments(withPrintDocNo);
-  //     setLastUpdated(new Date());
-  //   } catch (err) {
-  //     setError(err.message);
-  //   } finally {
-  //     setLoading(false);
-  //     setRefreshing(false);
-  //   }
-  // }, []);
 
   const fetchDivisions = useCallback(async () => {
     try {
@@ -1004,11 +932,6 @@ export default function IssuPikFormt() {
     return map;
   }, [divisions]);
 
-  // Division-wise pickers — only the names added under that specific
-  // Division in Admin Master Setup → Picker. The backend's /pickers
-  // endpoint returns ALL pickers, so we fetch them all and filter
-  // client-side on divisionNo, exactly like the Print Portal does for
-  // /print-operators.
   const fetchPickersForDivision = useCallback(async (divisionNo) => {
     if (!divisionNo) {
       setPopupPickers([]);
@@ -1064,10 +987,6 @@ export default function IssuPikFormt() {
     }
   };
 
-  // ── Open popups — each pulls the division-scoped picker list first ──
-  // Every entry point below also re-checks the role permission before doing
-  // any work, so even a manually-triggered call (e.g. from devtools) can't
-  // open a popup the current user isn't allowed to use.
   const handleHandoverClick = async (id) => {
     if (!buttonPerms.handover) return;
     const doc = getDocById(id);
@@ -1102,9 +1021,6 @@ export default function IssuPikFormt() {
     await fetchPickersForDivision(doc?.divisionNo);
   };
 
-  // Edit — reopens pre-filled with the completed document's values, exactly
-  // like the Print Portal's Edit action. Blocked for any role without the
-  // "edit" permission (e.g. Picker).
   const handleEditClick = async (doc) => {
     if (!buttonPerms.edit) return;
     setActiveId(doc.id);
@@ -1112,7 +1028,6 @@ export default function IssuPikFormt() {
     await fetchPickersForDivision(doc?.divisionNo);
   };
 
-  // ── Confirm handlers ──
   const handleHandoverConfirm = async (handedOverBy) => {
     const id = activeId; closePopup();
     try {
@@ -1249,9 +1164,6 @@ export default function IssuPikFormt() {
     return matchSearch && matchType && matchStatus && matchDate;
   });
 
-  // Stat chips reflect the date filter too, so the counts on screen always
-  // match what's actually shown in the grid below (e.g. "Today" only
-  // counts today's documents, not every document ever entered).
   const dateScoped = useMemo(
     () => documents.filter(doc => matchesDateFilter(doc, dateFilterMode, fromDate, toDate)),
     [documents, dateFilterMode, fromDate, toDate]
@@ -1264,7 +1176,6 @@ export default function IssuPikFormt() {
   const onHold = dateScoped.filter(d => statusClass(d.status) === "onhold").length;
   const completed = dateScoped.filter(d => statusClass(d.status) === "completed").length;
 
-  // clicking a stat chip filters the grid by that status (Total clears it)
   const handleStatClick = (statusValue) => setFilterStatus(statusValue);
 
   const activeDoc = documents.find(d => d.id === activeId) || null;
@@ -1386,8 +1297,6 @@ export default function IssuPikFormt() {
         </select>
       </div>
 
-      {/* Date filter — Today (Sri Lanka time, default) / All / Custom range.
-          Same toolbar pattern as the Print Portal. */}
       <div className="ip-toolbar" style={{ marginTop: -6 }}>
         {DATE_FILTER_OPTIONS.map(opt => (
           <button
