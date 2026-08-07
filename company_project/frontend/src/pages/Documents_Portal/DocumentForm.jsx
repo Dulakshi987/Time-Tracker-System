@@ -18,8 +18,8 @@ const getCurrentTime = () => {
   return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 };
 
-// Reservation No must be exactly 8 digits, numbers only
-const RESERVATION_NO_LENGTH = 8;
+// Reservation No must be exactly 10 digits, numbers only
+const RESERVATION_NO_LENGTH = 10;
 const isValidReservationNo = (value) =>
   new RegExp(`^\\d{${RESERVATION_NO_LENGTH}}$`).test(value || "");
 
@@ -89,6 +89,35 @@ function matchesDateFilter(row, mode, fromDate, toDate) {
   }
 
   return true;
+}
+
+// ── Duplicate row detection (ALL columns must match) ────────────────────
+// A row is only flagged red when every visible column matches another
+// row's — WBS and Reservation No alone being the same is fine on its own
+// and does NOT trigger the highlight. Only a fully identical row (same
+// Job Type, Division, WBS, Reservation No, Customer, Entered By, Requested
+// By, Vehicle No, SAP Line No, Request Date, Request Time and Status)
+// counts as a duplicate.
+function duplicateKeyOf(row) {
+  const parts = [
+    row.jobType,
+    row.divisionNo,
+    row.jobwbs || row.jobWBS,
+    row.reservationNo,
+    row.customerName,
+    row.enteredBy,
+    row.requestedBy,
+    row.vehicleNo,
+    row.sapIssueLineNo,
+    row.requestDate,
+    row.requestTime,
+    row.status,
+  ].map(v => String(v ?? "").trim().toLowerCase());
+
+  // Nothing meaningful to compare (an entirely blank row) — never flag it.
+  if (parts.every(p => p === "")) return null;
+
+  return parts.join("||");
 }
 
 const DocumentForm = ({ selectedType }) => {
@@ -217,6 +246,26 @@ const DocumentForm = ({ selectedType }) => {
       ? rows
       : rows.filter(r => canSeeDivision(user, r.divisionNo));
   }, [rows, user]);
+
+  // ── Duplicate WBS + Reservation No detection ────────────────────────
+  // Scanned across ALL rows the user can see (not just the filtered/
+  // visible subset), so a duplicate is still flagged even if one of the
+  // two matching rows is currently hidden by a search/filter.
+  const duplicateRowIds = useMemo(() => {
+    const counts = {};
+    scopedRows.forEach(r => {
+      const key = duplicateKeyOf(r);
+      if (!key) return;
+      counts[key] = (counts[key] || 0) + 1;
+    });
+
+    const dupIds = new Set();
+    scopedRows.forEach(r => {
+      const key = duplicateKeyOf(r);
+      if (key && counts[key] > 1) dupIds.add(r.id);
+    });
+    return dupIds;
+  }, [scopedRows]);
 
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -484,7 +533,7 @@ const DocumentForm = ({ selectedType }) => {
               <input
                 type="text"
                 name="reservationNo"
-                placeholder="8 digit Reservation No"
+                placeholder="10 digit Reservation No"
                 value={formData.reservationNo}
                 onChange={handleChange}
                 className={`docf-input ${fieldErrors.reservationNo ? "docf-input-error" : ""}`}
@@ -712,6 +761,23 @@ const DocumentForm = ({ selectedType }) => {
           )}
         </div>
 
+        {duplicateRowIds.size > 0 && (
+          <div
+            style={{
+              background: "rgba(239,68,68,0.12)",
+              border: "1px solid #ef4444",
+              borderRadius: 8,
+              padding: "8px 14px",
+              marginBottom: 10,
+              color: "#ef4444",
+              fontWeight: 600,
+              fontSize: "0.85rem",
+            }}
+          >
+            ⚠ {duplicateRowIds.size} row{duplicateRowIds.size > 1 ? "s" : ""} are exact duplicates of another row (every column matches) — highlighted in red below.
+          </div>
+        )}
+
         {rowsLoading && <div className="docf-status-text">Loading…</div>}
         {rowsError && <div className="docf-message error">{rowsError}</div>}
 
@@ -739,33 +805,44 @@ const DocumentForm = ({ selectedType }) => {
               <tbody>
                 {filteredRows.length === 0 ? (
                   <tr><td colSpan={tableColumnCount} className="docf-empty-row">No documents match this filter</td></tr>
-                ) : filteredRows.map(row => (
-                  <tr key={row.id}>
-                    <td>{row.id}</td>
-                    <td>{row.jobType}</td>
-                    <td>{row.divisionNo ? `${row.divisionNo} — ${divisionNoToName[row.divisionNo] || ""}` : "—"}</td>
-                    <td>{row.jobwbs || row.jobWBS || "—"}</td>
-                    <td>{row.reservationNo || "—"}</td>
-                    <td>{row.customerName || "—"}</td>
-                    <td>{row.enteredBy || "—"}</td>
-                    <td>{row.requestedBy || "—"}</td>
-                    <td>{row.vehicleNo || "—"}</td>
-                    <td>{row.sapIssueLineNo || "—"}</td>
-                    <td>{row.requestDate || "—"}</td>
-                    <td>{row.requestTime || "—"}</td>
-                    <td><span className="docf-badge">{row.status || "Draft"}</span></td>
-                    {showActionsColumn && (
-                      <td className="docf-actions-cell">
-                        {canEdit && (
-                          <button className="docf-edit-btn" onClick={() => startEdit(row)}>Edit</button>
-                        )}
-                        {canDelete && (
-                          <button className="docf-del-btn" onClick={() => removeRow(row.id)}>Delete</button>
-                        )}
-                      </td>
-                    )}
-                  </tr>
-                ))}
+                ) : filteredRows.map(row => {
+                  const isDuplicate = duplicateRowIds.has(row.id);
+                  return (
+                    <tr
+                      key={row.id}
+                      className={isDuplicate ? "docf-row-duplicate" : ""}
+                      style={
+                        isDuplicate
+                          ? { background: "rgba(239,68,68,0.12)", color: "#ef4444" }
+                          : undefined
+                      }
+                    >
+                      <td>{row.id}</td>
+                      <td>{row.jobType}</td>
+                      <td>{row.divisionNo ? `${row.divisionNo} — ${divisionNoToName[row.divisionNo] || ""}` : "—"}</td>
+                      <td>{row.jobwbs || row.jobWBS || "—"}</td>
+                      <td>{row.reservationNo || "—"}</td>
+                      <td>{row.customerName || "—"}</td>
+                      <td>{row.enteredBy || "—"}</td>
+                      <td>{row.requestedBy || "—"}</td>
+                      <td>{row.vehicleNo || "—"}</td>
+                      <td>{row.sapIssueLineNo || "—"}</td>
+                      <td>{row.requestDate || "—"}</td>
+                      <td>{row.requestTime || "—"}</td>
+                      <td><span className="docf-badge">{row.status || "Draft"}</span></td>
+                      {showActionsColumn && (
+                        <td className="docf-actions-cell">
+                          {canEdit && (
+                            <button className="docf-edit-btn" onClick={() => startEdit(row)}>Edit</button>
+                          )}
+                          {canDelete && (
+                            <button className="docf-del-btn" onClick={() => removeRow(row.id)}>Delete</button>
+                          )}
+                        </td>
+                      )}
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
