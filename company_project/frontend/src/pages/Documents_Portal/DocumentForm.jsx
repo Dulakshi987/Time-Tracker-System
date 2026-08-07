@@ -91,13 +91,14 @@ function matchesDateFilter(row, mode, fromDate, toDate) {
   return true;
 }
 
-// ── Duplicate row detection (ALL columns must match) ────────────────────
-// A row is only flagged red when every visible column matches another
-// row's — WBS and Reservation No alone being the same is fine on its own
-// and does NOT trigger the highlight. Only a fully identical row (same
-// Job Type, Division, WBS, Reservation No, Customer, Entered By, Requested
-// By, Vehicle No, SAP Line No, Request Date, Request Time and Status)
-// counts as a duplicate.
+// ── Duplicate row detection (ALL columns must match, incl. Request Time
+// and Request Date) ──────────────────────────────────────────────────────
+// A row is only flagged as a duplicate when EVERY column matches another
+// row's — Job Type, Division, WBS, Reservation No, Customer, Entered By,
+// Requested By, Vehicle No, SAP Line No, Request Date AND Request Time.
+// Status is still excluded, since it changes as a document moves through
+// Print/Pick/Check Portal — that's workflow progress, not a difference in
+// what was entered.
 function duplicateKeyOf(row) {
   const parts = [
     row.jobType,
@@ -111,7 +112,6 @@ function duplicateKeyOf(row) {
     row.sapIssueLineNo,
     row.requestDate,
     row.requestTime,
-    row.status,
   ].map(v => String(v ?? "").trim().toLowerCase());
 
   // Nothing meaningful to compare (an entirely blank row) — never flag it.
@@ -247,25 +247,36 @@ const DocumentForm = ({ selectedType }) => {
       : rows.filter(r => canSeeDivision(user, r.divisionNo));
   }, [rows, user]);
 
-  // ── Duplicate WBS + Reservation No detection ────────────────────────
+  // ── Duplicate row detection & first/duplicate marking ───────────────
   // Scanned across ALL rows the user can see (not just the filtered/
   // visible subset), so a duplicate is still flagged even if one of the
-  // two matching rows is currently hidden by a search/filter.
-  const duplicateRowIds = useMemo(() => {
-    const counts = {};
+  // matching rows is currently hidden by a search/filter. Within each
+  // group of fully-matching rows, the FIRST one to appear (the one higher
+  // up / entered earlier) is marked "first" (green) and every later
+  // occurrence is marked "duplicate" (red).
+  const rowHighlightMap = useMemo(() => {
+    const groups = {};
     scopedRows.forEach(r => {
       const key = duplicateKeyOf(r);
       if (!key) return;
-      counts[key] = (counts[key] || 0) + 1;
+      if (!groups[key]) groups[key] = [];
+      groups[key].push(r.id);
     });
 
-    const dupIds = new Set();
-    scopedRows.forEach(r => {
-      const key = duplicateKeyOf(r);
-      if (key && counts[key] > 1) dupIds.add(r.id);
+    const map = {};
+    Object.values(groups).forEach(ids => {
+      if (ids.length < 2) return; // no duplicate — leave unmarked
+      ids.forEach((id, idx) => {
+        map[id] = idx === 0 ? "first" : "duplicate";
+      });
     });
-    return dupIds;
+    return map;
   }, [scopedRows]);
+
+  const duplicateCount = useMemo(
+    () => Object.values(rowHighlightMap).filter(v => v === "duplicate").length,
+    [rowHighlightMap]
+  );
 
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -761,7 +772,7 @@ const DocumentForm = ({ selectedType }) => {
           )}
         </div>
 
-        {duplicateRowIds.size > 0 && (
+        {duplicateCount > 0 && (
           <div
             style={{
               background: "rgba(239,68,68,0.12)",
@@ -774,7 +785,7 @@ const DocumentForm = ({ selectedType }) => {
               fontSize: "0.85rem",
             }}
           >
-            ⚠ {duplicateRowIds.size} row{duplicateRowIds.size > 1 ? "s" : ""} are exact duplicates of another row (every column matches) — highlighted in red below.
+            ⚠ {duplicateCount} row{duplicateCount > 1 ? "s" : ""} are exact duplicates of an earlier row (every column, including Request Date &amp; Time, matches) — the original is highlighted green, the duplicate(s) red.
           </div>
         )}
 
@@ -806,16 +817,24 @@ const DocumentForm = ({ selectedType }) => {
                 {filteredRows.length === 0 ? (
                   <tr><td colSpan={tableColumnCount} className="docf-empty-row">No documents match this filter</td></tr>
                 ) : filteredRows.map(row => {
-                  const isDuplicate = duplicateRowIds.has(row.id);
+                  const highlight = rowHighlightMap[row.id]; // "first" | "duplicate" | undefined
+                  const rowStyle =
+                    highlight === "duplicate"
+                      ? { background: "rgba(239,68,68,0.14)", color: "#ef4444" }
+                      : highlight === "first"
+                      ? { background: "rgba(52,211,153,0.14)", color: "#16a34a" }
+                      : undefined;
                   return (
                     <tr
                       key={row.id}
-                      className={isDuplicate ? "docf-row-duplicate" : ""}
-                      style={
-                        isDuplicate
-                          ? { background: "rgba(239,68,68,0.12)", color: "#ef4444" }
-                          : undefined
+                      className={
+                        highlight === "duplicate"
+                          ? "docf-row-duplicate"
+                          : highlight === "first"
+                          ? "docf-row-duplicate-original"
+                          : ""
                       }
+                      style={rowStyle}
                     >
                       <td>{row.id}</td>
                       <td>{row.jobType}</td>
