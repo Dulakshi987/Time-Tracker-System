@@ -722,20 +722,6 @@ export default function IssueConfirm() {
     return matchStatus && matchDivision && matchSearch && matchDate;
   });
 
-  // Counts — scoped by the date filter too, so the chip numbers on screen
-  // always match what's actually shown in the table below. Mirrors Print
-  // Portal / Pick Portal / Check Portal / Delivery Portal.
-  const dateScopedRelevant = useMemo(
-    () => relevant.filter(doc => matchesDateFilter(doc, dateFilterMode, fromDate, toDate)),
-    [relevant, dateFilterMode, fromDate, toDate]
-  );
-
-  const counts = {
-    completed: dateScopedRelevant.filter(d => displayStatus(d).cls === "completed").length,
-    cancelled: dateScopedRelevant.filter(d => displayStatus(d).cls === "cancelled").length,
-    filed:     dateScopedRelevant.filter(d => displayStatus(d).cls === "filed").length,
-  };
-
   const hasActiveToolbarFilters =
     search.trim() !== "" || filterStatus !== "ALL" || filterDivision !== "ALL";
 
@@ -1051,13 +1037,6 @@ export default function IssueConfirm() {
             ✕ Clear
           </button>
         )}
-
-        <div className="icf-stats">
-          <div className="icf-stat-chip completed">Delivered <strong>{counts.completed}</strong></div>
-          <div className="icf-stat-chip cancelled">Cancelled <strong>{counts.cancelled}</strong></div>
-          <div className="icf-stat-chip filed">Filed <strong>{counts.filed}</strong></div>
-          <div className="icf-stat-chip">Showing <strong style={{ color: "#a78bfa" }}>{visible.length}</strong></div>
-        </div>
       </div>
 
       {/* ── Date filter — Today (Sri Lanka time, default) / All / Custom
