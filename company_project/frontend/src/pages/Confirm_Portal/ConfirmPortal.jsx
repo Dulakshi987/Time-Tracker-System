@@ -27,6 +27,17 @@ const DATE_FILTER_OPTIONS = [
   { value: "CUSTOM", label: "Custom" },
 ];
 
+// ── Status filter options — clickable pill buttons (same look as the
+// date filter buttons above). "filed" matches displayStatus(doc).cls,
+// i.e. any document that has a File Number attached, regardless of
+// whether it was Delivered or Cancelled underneath.
+const STATUS_FILTER_OPTIONS = [
+  { value: "ALL", label: "All Status" },
+  { value: "completed", label: "Delivered" },
+  { value: "cancelled", label: "Cancelled" },
+  { value: "filed", label: "Filed" },
+];
+
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
 function formatDate(d) { return d || "—"; }
@@ -587,7 +598,8 @@ export default function IssueConfirm() {
   const [error,       setError]       = useState(null);
   const [lastUpdated, setLastUpdated] = useState(null);
   const [refreshing,  setRefreshing]  = useState(false);
-  const [filterStatus, setFilterStatus] = useState("ALL");
+  const [filterStatus, setFilterStatus] = useState("ALL"); // "ALL" | "completed" | "cancelled" | "filed"
+  const [filterDivision, setFilterDivision] = useState("ALL");
   const [search,      setSearch]      = useState("");
   const [searchField, setSearchField] = useState("ALL");
   const [savingId,    setSavingId]    = useState(null);
@@ -660,9 +672,19 @@ export default function IssueConfirm() {
   // Only Delivered + Cancelled
   const relevant = divisionScopedDocuments.filter(d => ["completed", "cancelled"].includes(statusClass(d.deliveryStatus)));
 
+  // ── Division filter dropdown options — built from whatever divisions
+  // actually appear in the documents this user is allowed to see (same
+  // scoping rule as everything else on this page).
+  const divisionOptions = useMemo(() => {
+    const set = new Set();
+    divisionScopedDocuments.forEach(d => { if (d.divisionNo) set.add(String(d.divisionNo)); });
+    return Array.from(set).sort();
+  }, [divisionScopedDocuments]);
+
   const visible = relevant.filter(doc => {
-    const sc = statusClass(doc.deliveryStatus);
-    const matchStatus = filterStatus === "ALL" || sc === filterStatus;
+    const dsCls = displayStatus(doc).cls; // "completed" | "cancelled" | "filed"
+    const matchStatus = filterStatus === "ALL" || dsCls === filterStatus;
+    const matchDivision = filterDivision === "ALL" || String(doc.divisionNo || "") === String(filterDivision);
 
     const q = search.toLowerCase().trim();
     const reqId = (doc.reqId || reqIdMap[doc.id] || "").toLowerCase();
@@ -694,9 +716,10 @@ export default function IssueConfirm() {
 
     const matchDate = matchesDateFilter(doc, dateFilterMode, fromDate, toDate);
 
-    // Status filter and search filter always combine — "All Status" simply
-    // means matchStatus is always true, so search alone still narrows results.
-    return matchStatus && matchSearch && matchDate;
+    // Status filter, division filter, search filter and date filter all
+    // combine — "All Status" / "All Divisions" simply mean that part of
+    // the check always passes.
+    return matchStatus && matchDivision && matchSearch && matchDate;
   });
 
   // Counts — scoped by the date filter too, so the chip numbers on screen
@@ -708,9 +731,13 @@ export default function IssueConfirm() {
   );
 
   const counts = {
-    completed: dateScopedRelevant.filter(d => statusClass(d.deliveryStatus) === "completed").length,
-    cancelled: dateScopedRelevant.filter(d => statusClass(d.deliveryStatus) === "cancelled").length,
+    completed: dateScopedRelevant.filter(d => displayStatus(d).cls === "completed").length,
+    cancelled: dateScopedRelevant.filter(d => displayStatus(d).cls === "cancelled").length,
+    filed:     dateScopedRelevant.filter(d => displayStatus(d).cls === "filed").length,
   };
+
+  const hasActiveToolbarFilters =
+    search.trim() !== "" || filterStatus !== "ALL" || filterDivision !== "ALL";
 
   useEffect(() => {
     if (!viewDoc) return;
@@ -964,9 +991,10 @@ export default function IssueConfirm() {
         </div>
       </div>
 
-      {/* Toolbar — Search + Filter */}
+      {/* Toolbar — Search + clickable Status filter (Delivered / Cancelled /
+          Filed) + Division No filter */}
       <div className="icf-date-toolbar">
-        <div className="icf-search-wrap" style={{ flex: 1, maxWidth: 420, display: "flex", gap: 8 }}>
+        <div className="icf-search-wrap">
           <span className="icf-search-icon">🔍</span>
           <input
             className="icf-search"
@@ -989,19 +1017,45 @@ export default function IssueConfirm() {
           <option value="RESERVATION">Search: Reservation No</option>
         </select> */}
 
+        {STATUS_FILTER_OPTIONS.map(opt => (
+          <button
+            key={opt.value}
+            type="button"
+            className={`icf-filter-select icf-stat-chip-clickable ${filterStatus === opt.value ? "active" : ""}`}
+            style={{ cursor: "pointer", fontWeight: filterStatus === opt.value ? 700 : 500 }}
+            onClick={() => setFilterStatus(opt.value)}
+          >
+            {opt.label}
+          </button>
+        ))}
+
         <select
           className="icf-filter-select"
-          value={filterStatus}
-          onChange={e => setFilterStatus(e.target.value)}
+          value={filterDivision}
+          onChange={e => setFilterDivision(e.target.value)}
+          title="Filter by Division No"
         >
-          <option value="ALL">All Status</option>
-          <option value="completed">Delivered</option>
-          <option value="cancelled">Cancelled</option>
+          <option value="ALL">All Divisions</option>
+          {divisionOptions.map(dv => (
+            <option key={dv} value={dv}>{dv}</option>
+          ))}
         </select>
+
+        {hasActiveToolbarFilters && (
+          <button
+            type="button"
+            className="icf-btn icf-btn-outline"
+            style={{ flex: "unset", padding: "8px 18px" }}
+            onClick={() => { setSearch(""); setFilterStatus("ALL"); setFilterDivision("ALL"); }}
+          >
+            ✕ Clear
+          </button>
+        )}
 
         <div className="icf-stats">
           <div className="icf-stat-chip completed">Delivered <strong>{counts.completed}</strong></div>
           <div className="icf-stat-chip cancelled">Cancelled <strong>{counts.cancelled}</strong></div>
+          <div className="icf-stat-chip filed">Filed <strong>{counts.filed}</strong></div>
           <div className="icf-stat-chip">Showing <strong style={{ color: "#a78bfa" }}>{visible.length}</strong></div>
         </div>
       </div>

@@ -11,6 +11,7 @@
   --icf-orange:      #fb923c;
   --icf-red:         #ef4444;
   --icf-purple:      #7348f1;
+  --icf-blue-filed:  #1d4ed8;
   --icf-text:        #050505;
   --icf-muted:       #01060e;
   --icf-radius:      10px;
@@ -97,15 +98,23 @@
   font-size: 0.875rem;
   outline: none;
   cursor: pointer;
-  transition: border-color 0.2s;
+  transition: border-color 0.2s, background 0.15s, color 0.15s;
   font-family: inherit;
 }
 .icf-filter-select:focus { border-color: var(--icf-accent); }
+
+/* Buttons rendered with .icf-filter-select (status filter, date filter)
+   need button-specific resets since <button> carries its own UA styles
+   that <select> doesn't. */
+button.icf-filter-select {
+  white-space: nowrap;
+}
 
 .icf-stats {
   display: flex;
   gap: 12px;
   flex-wrap: wrap;
+  margin-left: auto;
 }
 
 .icf-stat-chip {
@@ -118,19 +127,21 @@
   align-items: center;
   gap: 6px;
   color: var(--icf-muted);
+  white-space: nowrap;
 }
 .icf-stat-chip strong { font-weight: 700; }
 .icf-stat-chip.completed strong { color: var(--icf-green); }
 .icf-stat-chip.onhold    strong { color: var(--icf-orange); }
 .icf-stat-chip.cancelled strong { color: var(--icf-red); }
+.icf-stat-chip.filed     strong { color: var(--icf-blue-filed); }
 
-/* ─── Date filter row (Today / All / Custom) ──────────────────────────
-   Separate from .icf-toolbar on purpose — .icf-toolbar uses
-   justify-content: space-between which is fine when it holds unrelated
-   groups (search, selects, stats) that should sit at opposite ends, but
-   it spreads a 3-button row across the whole width. This row instead
-   packs the buttons together on the left, with the date inputs (Custom
-   mode) flowing right after them. */
+/* ─── Toolbar rows (search + status/division filters, and Today/All/
+   Custom date filter) ───────────────────────────────────────────────
+   Both rows share this class on purpose so the pill buttons, selects,
+   and search box all line up with the same height/gap rhythm. It packs
+   items together on the left and wraps cleanly on narrow screens; the
+   stat chips use margin-left:auto to push themselves to the right when
+   there's room, and wrap underneath when there isn't. */
 .icf-date-toolbar {
   display: flex;
   align-items: center;
@@ -143,8 +154,9 @@
   padding: 8px 18px;
 }
 
-/* Clickable pill buttons — used for Today/All/Custom, and reusable
-   anywhere else a filter needs to look like an active/inactive toggle. */
+/* Clickable pill buttons — used for Today/All/Custom, Delivered/
+   Cancelled/Filed, and reusable anywhere else a filter needs to look
+   like an active/inactive toggle. */
 .icf-stat-chip-clickable {
   transition: background 0.15s, border-color 0.15s, color 0.15s, transform 0.12s;
 }
@@ -165,6 +177,48 @@
   padding: 7px 12px;
   color-scheme: light;
 }
+
+/* ─── Search box ─────────────────────────────────────────────────────
+   Previously .icf-search / .icf-search-wrap / .icf-search-icon had no
+   rules at all, so the input fell back to bare browser styling (no
+   border, no rounded corners, icon and box misaligned). This gives it
+   the same bordered-pill look as the rest of the toolbar. */
+.icf-search-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--icf-surface);
+  border: 1px solid var(--icf-border);
+  border-radius: var(--icf-radius);
+  padding: 0 14px;
+  flex: 1 1 240px;
+  max-width: 420px;
+  min-width: 200px;
+  transition: border-color 0.2s;
+}
+.icf-search-wrap:focus-within {
+  border-color: var(--icf-accent);
+}
+
+.icf-search-icon {
+  font-size: 0.85rem;
+  color: var(--icf-muted);
+  flex-shrink: 0;
+  line-height: 1;
+}
+
+.icf-search {
+  flex: 1;
+  border: none;
+  background: transparent;
+  outline: none;
+  color: var(--icf-text);
+  font-size: 0.875rem;
+  padding: 9px 0;
+  font-family: inherit;
+  min-width: 0;
+}
+.icf-search::placeholder { color: var(--icf-muted); opacity: 0.65; }
 
 .icf-error {
   background: rgba(239,68,68,0.12);
@@ -565,5 +619,7 @@
   .icf-header { flex-direction: column; align-items: flex-start; }
   .icf-toolbar { flex-direction: column; align-items: flex-start; }
   .icf-date-toolbar { flex-direction: row; flex-wrap: wrap; }
+  .icf-stats { margin-left: 0; }
+  .icf-search-wrap { max-width: none; flex: 1 1 100%; }
   .icf-table { min-width: 900px; }
 }

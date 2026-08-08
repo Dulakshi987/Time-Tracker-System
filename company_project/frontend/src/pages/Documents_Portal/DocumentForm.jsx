@@ -18,8 +18,8 @@ const getCurrentTime = () => {
   return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 };
 
-// Reservation No must be exactly 10 digits, numbers only
-const RESERVATION_NO_LENGTH = 10;
+// Reservation No must be exactly 8 digits, numbers only
+const RESERVATION_NO_LENGTH = 8;
 const isValidReservationNo = (value) =>
   new RegExp(`^\\d{${RESERVATION_NO_LENGTH}}$`).test(value || "");
 
@@ -278,67 +278,10 @@ const DocumentForm = ({ selectedType }) => {
     [rowHighlightMap]
   );
 
-  // ── Job WBS lookup — dropdown + free typing, with auto-fill ──────────
-  // wbsOptions feeds the <datalist> so the WBS field behaves as a
-  // combobox: pick an existing WBS from the dropdown, or type a brand new
-  // one freely. wbsHistoryByKey keeps the most recently entered row for
-  // each WBS value (across ALL divisions the user can see) so that
-  // selecting a known WBS can auto-fill Customer, Reservation No, and the
-  // other related fields from that prior entry.
-  const wbsOptions = useMemo(() => {
-    const pool = formData.divisionNo
-      ? scopedRows.filter(r => String(r.divisionNo) === String(formData.divisionNo))
-      : scopedRows;
-    const set = new Set();
-    pool.forEach(r => {
-      const wbs = String(r.jobwbs || r.jobWBS || "").trim();
-      if (wbs) set.add(wbs);
-    });
-    return Array.from(set).sort();
-  }, [scopedRows, formData.divisionNo]);
-
-  const wbsHistoryByKey = useMemo(() => {
-    const map = {};
-    scopedRows.forEach(r => {
-      const wbs = String(r.jobwbs || r.jobWBS || "").trim();
-      if (!wbs) return;
-      // Keep whichever row was entered most recently for this WBS.
-      if (!map[wbs] || Number(r.id) > Number(map[wbs].id)) {
-        map[wbs] = r;
-      }
-    });
-    return map;
-  }, [scopedRows]);
-
   const handleChange = (e) => {
     const { name, value } = e.target;
 
-    // Job WBS — combobox (typeable + pick from datalist). When the typed/
-    // selected value matches a WBS that's already been entered before,
-    // auto-fill Customer, Reservation No, Requested By, Vehicle No, SAP
-    // Line No and Entered By from that earlier entry. Every auto-filled
-    // field lands in normal editable inputs, so it can be changed right
-    // away if needed.
-    if (name === "jobWBS") {
-      const match = wbsHistoryByKey[value.trim()];
-      if (match) {
-        setFormData(prev => ({
-          ...prev,
-          jobWBS: value,
-          customerName: match.customerName || prev.customerName,
-          reservationNo: match.reservationNo || prev.reservationNo,
-          requestedBy: match.requestedBy || prev.requestedBy,
-          vehicleNo: match.vehicleNo || prev.vehicleNo,
-          sapIssueLineNo: match.sapIssueLineNo || prev.sapIssueLineNo,
-          enteredBy: match.enteredBy || prev.enteredBy,
-        }));
-      } else {
-        setFormData(prev => ({ ...prev, jobWBS: value }));
-      }
-      return;
-    }
-
-    // Reservation No: allow digits only, max 8 characters
+    // Reservation No: allow digits only, max RESERVATION_NO_LENGTH characters
     if (name === "reservationNo") {
       const digitsOnly = value.replace(/\D/g, "").slice(0, RESERVATION_NO_LENGTH);
       setFormData(prev => ({ ...prev, reservationNo: digitsOnly }));
@@ -630,18 +573,12 @@ const DocumentForm = ({ selectedType }) => {
               <input
                 type="text"
                 name="jobWBS"
-                placeholder="Type new WBS or pick an existing one"
+                placeholder="Job WBS"
                 value={formData.jobWBS}
                 onChange={handleChange}
                 className="docf-input"
-                list="jobwbs-options"
                 autoComplete="off"
               />
-              <datalist id="jobwbs-options">
-                {wbsOptions.map(wbs => (
-                  <option key={wbs} value={wbs} />
-                ))}
-              </datalist>
             </div>
 
             <div className="docf-field">
@@ -649,7 +586,7 @@ const DocumentForm = ({ selectedType }) => {
               <input
                 type="text"
                 name="reservationNo"
-                placeholder="10 digit Reservation No"
+                placeholder={`${RESERVATION_NO_LENGTH} digit Reservation No`}
                 value={formData.reservationNo}
                 onChange={handleChange}
                 className={`docf-input ${fieldErrors.reservationNo ? "docf-input-error" : ""}`}
