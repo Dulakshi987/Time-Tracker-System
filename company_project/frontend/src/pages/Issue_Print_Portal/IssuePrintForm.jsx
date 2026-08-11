@@ -489,7 +489,7 @@ export default function IssuPrinFormt() {
       const res = await fetch(API_BASE);
       if (!res.ok) throw new Error(`Server error: ${res.status}`);
       const data = await res.json();
-      setDocuments(data);
+      setDocuments(data.content || []);
       setLastUpdated(new Date());
     } catch (err) {
       setError(err.message);
