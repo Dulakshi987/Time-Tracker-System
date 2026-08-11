@@ -14,7 +14,7 @@ import {
 
 const API_BASE = "https://time-tracker-system-production.up.railway.app/api/print-portal";
 const SETUP_API = "https://time-tracker-system-production.up.railway.app/api/admin-setup";
-const AUTO_REFRESH = 10000;
+// const AUTO_REFRESH = 10000;
 
 const HOLD_REASONS = [
   "Printer not available",
@@ -558,12 +558,12 @@ export default function IssuPrinFormt() {
     fetchDivisions();
   }, [fetchDocuments, fetchDivisions]);
 
-  useEffect(() => {
-    const id = setInterval(() => {
-      fetchDocuments(true);
-    }, AUTO_REFRESH);
-    return () => clearInterval(id);
-  }, [fetchDocuments]);
+  // useEffect(() => {
+  //   const id = setInterval(() => {
+  //     fetchDocuments(true);
+  //   }, AUTO_REFRESH);
+  //   return () => clearInterval(id);
+  // }, [fetchDocuments]);
 
   const getDocById = useCallback(
     (id) => documents.find(d => d.id === id),

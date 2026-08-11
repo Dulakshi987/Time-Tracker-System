@@ -16,7 +16,7 @@ import {
 const DELIVERY_API = "https://time-tracker-system-production.up.railway.app/api/delivery-portal";
 const CONFIRM_API = "https://time-tracker-system-production.up.railway.app/api/issue-confirm";
 const SETUP_API = "https://time-tracker-system-production.up.railway.app/api/admin-setup";
-const AUTO_REFRESH = 10000;
+// const AUTO_REFRESH = 10000;
 
 // ── Date filter options — Today (Sri Lanka time, default) / All / Custom
 // range. Same pattern as Print Portal / Pick Portal / Check Portal /
@@ -649,10 +649,10 @@ export default function IssueConfirm() {
   }, []);
 
   useEffect(() => { fetchDocuments(false); }, [fetchDocuments]);
-  useEffect(() => {
-    const id = setInterval(() => fetchDocuments(true), AUTO_REFRESH);
-    return () => clearInterval(id);
-  }, [fetchDocuments]);
+  // useEffect(() => {
+  //   const id = setInterval(() => fetchDocuments(true), AUTO_REFRESH);
+  //   return () => clearInterval(id);
+  // }, [fetchDocuments]);
 
   const reqIdMap = useMemo(() => computeRequestIds(documents), [documents]);
 
