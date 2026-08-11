@@ -16,6 +16,8 @@ const API_BASE = "https://time-tracker-system-production.up.railway.app/api/prin
 const SETUP_API = "https://time-tracker-system-production.up.railway.app/api/admin-setup";
 // const AUTO_REFRESH = 10000;
 
+const PAGE_SIZE = 25;
+
 const HOLD_REASONS = [
   "Printer not available",
   "Material shortage",
@@ -27,6 +29,14 @@ const HOLD_REASONS = [
 // Document Number rule: numbers only, max 10 digits
 const DOC_NO_MAX_LENGTH = 10;
 const isValidDocumentNo = (value) => /^\d{1,10}$/.test(value || "");
+
+// Client-side status labels -> backend printStatus values
+const STATUS_TO_BACKEND = {
+  pending: "PENDING",
+  inprogress: "IN_PROGRESS",
+  onhold: "ON_HOLD",
+  completed: "COMPLETED",
+};
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -112,32 +122,6 @@ function getSriLankaTodayKey() {
   const colombo = new Date(colomboMs);
   const pad = (n) => String(n).padStart(2, "0");
   return `${colombo.getFullYear()}-${pad(colombo.getMonth() + 1)}-${pad(colombo.getDate())}`;
-}
-
-// requestDate is stored as a plain date (no time/timezone component), so a
-// straight string comparison against YYYY-MM-DD keys is correct as-is.
-function docDateKey(doc) {
-  return doc.requestDate ? String(doc.requestDate).substring(0, 10) : null;
-}
-
-function matchesDateFilter(doc, mode, fromDate, toDate) {
-  if (mode === "ALL") return true;
-
-  const key = docDateKey(doc);
-
-  if (mode === "TODAY") {
-    return key === getSriLankaTodayKey();
-  }
-
-  if (mode === "CUSTOM") {
-    if (!fromDate && !toDate) return true;
-    if (!key) return false;
-    if (fromDate && key < fromDate) return false;
-    if (toDate && key > toDate) return false;
-    return true;
-  }
-
-  return true;
 }
 
 // ── Person Picker (Only Master Data - No "Other") ───────────────────────────
@@ -460,11 +444,24 @@ export default function IssuPrinFormt() {
   const [lastUpdated, setLastUpdated] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
 
+  // ── Pagination — 25 per page, matches backend (page/size params) ──────
+  const [page, setPage] = useState(0);
+  const [totalPages, setTotalPages] = useState(0);
+  const [totalElements, setTotalElements] = useState(0);
+
+  // ── Stat chip counts — from the backend /stats endpoint (DB counts,
+  // independent of what's loaded on the current page). Reflects the date
+  // filter, same as before, but NOT jobType/search/division scoping since
+  // the backend endpoint doesn't accept those.
+  const [stats, setStats] = useState({ total: 0, pending: 0, inprogress: 0, onhold: 0, completed: 0 });
+
+  // Job types seen so far (accumulated across pages) — used to populate
+  // the "Job Type" filter dropdown, since we no longer hold the full
+  // unpaginated document list on the client.
+  const [knownJobTypes, setKnownJobTypes] = useState([]);
+
   // ── Date filter — defaults to "Today" (Sri Lanka time). "All" clears
-  // it, "Custom" opens a From/To range. Recomputes on every render (and
-  // the auto-refresh timer keeps this component re-rendering), so at
-  // midnight Colombo time "Today" automatically rolls over to the new
-  // day without needing a page reload.
+  // it, "Custom" opens a From/To range.
   const [dateFilterMode, setDateFilterMode] = useState("TODAY"); // "TODAY" | "ALL" | "CUSTOM"
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
@@ -481,15 +478,40 @@ export default function IssuPrinFormt() {
   const [activeId, setActiveId] = useState(null);
   const [editValues, setEditValues] = useState({ documentNo: "", printedBy: "" });
 
-  const fetchDocuments = useCallback(async (silent = false) => {
+  // Build the query params for the paginated list endpoint from current filters.
+  const buildListParams = useCallback((pageNum) => {
+    const params = new URLSearchParams();
+    params.set("page", String(pageNum));
+    params.set("size", String(PAGE_SIZE));
+    if (filterStatus !== "ALL") params.set("status", STATUS_TO_BACKEND[filterStatus] || filterStatus);
+    if (filterType !== "ALL") params.set("jobType", filterType);
+    if (search.trim()) params.set("search", search.trim());
+    if (dateFilterMode === "TODAY") {
+      const today = getSriLankaTodayKey();
+      params.set("fromDate", today);
+      params.set("toDate", today);
+    } else if (dateFilterMode === "CUSTOM") {
+      if (fromDate) params.set("fromDate", fromDate);
+      if (toDate) params.set("toDate", toDate);
+    }
+    return params;
+  }, [filterStatus, filterType, search, dateFilterMode, fromDate, toDate]);
+
+  const fetchDocuments = useCallback(async (pageNum = 0, silent = false) => {
     if (!silent) setLoading(true);
     else setRefreshing(true);
     setError(null);
     try {
-      const res = await fetch(API_BASE);
+      const params = buildListParams(pageNum);
+      const res = await fetch(`${API_BASE}?${params.toString()}`);
       if (!res.ok) throw new Error(`Server error: ${res.status}`);
       const data = await res.json();
-      setDocuments(data);
+      const content = data.content || [];
+      setDocuments(content);
+      setTotalPages(data.totalPages ?? 0);
+      setTotalElements(data.totalElements ?? content.length);
+      setPage(data.number ?? pageNum);
+      setKnownJobTypes(prev => Array.from(new Set([...prev, ...content.map(d => d.jobType).filter(Boolean)])));
       setLastUpdated(new Date());
     } catch (err) {
       setError(err.message);
@@ -497,7 +519,35 @@ export default function IssuPrinFormt() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, []);
+  }, [buildListParams]);
+
+  // Global stat chip counts (date-scoped only — see note above).
+  const fetchStats = useCallback(async () => {
+    try {
+      const params = new URLSearchParams();
+      if (dateFilterMode === "TODAY") {
+        const today = getSriLankaTodayKey();
+        params.set("fromDate", today);
+        params.set("toDate", today);
+      } else if (dateFilterMode === "CUSTOM") {
+        if (fromDate) params.set("fromDate", fromDate);
+        if (toDate) params.set("toDate", toDate);
+      }
+      const res = await fetch(`${API_BASE}/stats?${params.toString()}`);
+      if (res.ok) {
+        const data = await res.json();
+        setStats({
+          total: data.total || 0,
+          pending: data.pending || 0,
+          inprogress: data.inprogress || 0,
+          onhold: data.onhold || 0,
+          completed: data.completed || 0,
+        });
+      }
+    } catch (e) {
+      console.warn("Failed to load stats", e);
+    }
+  }, [dateFilterMode, fromDate, toDate]);
 
   const fetchDivisions = useCallback(async () => {
     try {
@@ -553,17 +603,29 @@ export default function IssuPrinFormt() {
     }
   }, []);
 
+  // Initial load
   useEffect(() => {
-    fetchDocuments(false);
     fetchDivisions();
-  }, [fetchDocuments, fetchDivisions]);
+  }, [fetchDivisions]);
+
+  // Re-fetch page 0 + stats whenever a filter changes (debounced for the
+  // free-text search box so we don't hit the API on every keystroke).
+  useEffect(() => {
+    const delay = search ? 400 : 0;
+    const t = setTimeout(() => {
+      fetchDocuments(0, false);
+      fetchStats();
+    }, delay);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filterStatus, filterType, search, dateFilterMode, fromDate, toDate]);
 
   // useEffect(() => {
   //   const id = setInterval(() => {
-  //     fetchDocuments(true);
+  //     fetchDocuments(page, true);
   //   }, AUTO_REFRESH);
   //   return () => clearInterval(id);
-  // }, [fetchDocuments]);
+  // }, [fetchDocuments, page]);
 
   const getDocById = useCallback(
     (id) => documents.find(d => d.id === id),
@@ -577,11 +639,17 @@ export default function IssuPrinFormt() {
     setPopupOperators([]);
   };
 
+  const goToPage = (p) => {
+    if (p < 0 || p >= totalPages || p === page) return;
+    fetchDocuments(p, true);
+  };
+
   const handleStart = async (id) => {
     if (!perms.start) return;
     try {
       await fetch(`${API_BASE}/${id}/start`, { method: "PUT" });
-      fetchDocuments(true);
+      fetchDocuments(page, true);
+      fetchStats();
     } catch (err) { alert("Start failed: " + err.message); }
   };
 
@@ -621,7 +689,8 @@ export default function IssuPrinFormt() {
     try {
       const res = await fetch(`${API_BASE}/${id}`, { method: "DELETE" });
       if (!res.ok) throw new Error(`Server error: ${res.status}`);
-      fetchDocuments(true);
+      fetchDocuments(page, true);
+      fetchStats();
     } catch (err) {
       alert("Delete failed: " + err.message);
     }
@@ -636,7 +705,8 @@ export default function IssuPrinFormt() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ holdReason, heldBy }),
       });
-      fetchDocuments(true);
+      fetchDocuments(page, true);
+      fetchStats();
     } catch (err) { alert("Hold failed: " + err.message); }
   };
 
@@ -649,7 +719,8 @@ export default function IssuPrinFormt() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ printDocumentNo, printedBy }),
       });
-      fetchDocuments(true);
+      fetchDocuments(page, true);
+      fetchStats();
     } catch (err) { alert("Print Done failed: " + err.message); }
   };
 
@@ -658,15 +729,15 @@ export default function IssuPrinFormt() {
   // ── Division-wise scoping ────────────────────────────────────────────
   // Admin / System Administrator see every division. Everyone else only
   // sees documents whose divisionNo is in their own `user.divisions` list.
-  const divisionScoped = useMemo(
+  // NOTE: this runs on the current PAGE only (backend doesn't filter by
+  // division), so a restricted role may see fewer than PAGE_SIZE cards.
+  const visible = useMemo(
     () => documents.filter(doc => canSeeDivision(user, doc.divisionNo)),
     [documents, user]
   );
 
-  // Document Numbers already used by OTHER documents — passed into the
-  // Print Done / Edit popup so it can block duplicates. When editing an
-  // existing document, that document's own current number is excluded
-  // (so saving the same value back doesn't trip the duplicate check).
+  // Document Numbers already used by OTHER documents on the current page —
+  // passed into the Print Done / Edit popup to block obvious duplicates.
   const existingDocumentNos = useMemo(
     () =>
       documents
@@ -676,7 +747,7 @@ export default function IssuPrinFormt() {
     [documents, activeId]
   );
 
-  const jobTypes = ["ALL", ...new Set(divisionScoped.map(d => d.jobType).filter(Boolean))];
+  const jobTypes = ["ALL", ...knownJobTypes.sort()];
 
   const STATUS_FILTERS = [
     { value: "ALL", label: "All Status" },
@@ -692,33 +763,7 @@ export default function IssuPrinFormt() {
     { value: "CUSTOM", label: "Custom" },
   ];
 
-  const visible = divisionScoped.filter(doc => {
-    const q = search.toLowerCase();
-    const matchSearch = !q || [
-      String(doc.id), doc.jobwbs, doc.reservationNo,
-      doc.enteredBy, doc.jobType, doc.requestedBy, doc.vehicleNo
-    ].some(v => (v || "").toLowerCase().includes(q));
-
-    const matchType = filterType === "ALL" || doc.jobType === filterType;
-    const matchStatus = filterStatus === "ALL" || statusClass(doc.printStatus) === filterStatus;
-    const matchDate = matchesDateFilter(doc, dateFilterMode, fromDate, toDate);
-
-    return matchSearch && matchType && matchStatus && matchDate;
-  });
-
-  // Stat chips reflect the date filter too, so the counts on screen always
-  // match what's actually shown in the grid below (e.g. "Today" only
-  // counts today's documents, not every document ever entered).
-  const dateScoped = useMemo(
-    () => divisionScoped.filter(doc => matchesDateFilter(doc, dateFilterMode, fromDate, toDate)),
-    [divisionScoped, dateFilterMode, fromDate, toDate]
-  );
-
-  const total = dateScoped.length;
-  const pending = dateScoped.filter(d => statusClass(d.printStatus) === "pending").length;
-  const inProg = dateScoped.filter(d => statusClass(d.printStatus) === "inprogress").length;
-  const onHold = dateScoped.filter(d => statusClass(d.printStatus) === "onhold").length;
-  const completed = dateScoped.filter(d => statusClass(d.printStatus) === "completed").length;
+  const { total, pending, inprogress: inProg, onhold: onHold, completed } = stats;
 
   // clicking a stat chip filters the grid by that status (Total clears the filter)
   const handleStatClick = (statusValue) => setFilterStatus(statusValue);
@@ -768,7 +813,7 @@ export default function IssuPrinFormt() {
           <button
             className="ip-btn ip-btn-outline"
             style={{ flex: "unset", padding: "8px 18px" }}
-            onClick={() => fetchDocuments(false)}
+            onClick={() => { fetchDocuments(page, false); fetchStats(); }}
           >
             ↻ Refresh
           </button>
@@ -891,7 +936,7 @@ export default function IssuPrinFormt() {
 
       {error && (
         <div style={{ background: "rgba(239,68,68,0.08)", border: "1px solid #ef4444", borderRadius: 8, padding: "12px 16px", color: "#b91c1c", marginBottom: 18 }}>
-          ⚠ {error} — <button onClick={() => fetchDocuments(false)} style={{ color: "#1d4ed8", textDecoration: "underline" }}>retry</button>
+          ⚠ {error} — <button onClick={() => fetchDocuments(page, false)} style={{ color: "#1d4ed8", textDecoration: "underline" }}>retry</button>
         </div>
       )}
 
@@ -928,6 +973,34 @@ export default function IssuPrinFormt() {
           ))
         )}
       </div>
+
+      {/* Pagination — 25 per page, matches backend default */}
+      {!loading && totalPages > 1 && (
+        <div
+          className="ip-pagination"
+          style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 14, marginTop: 22 }}
+        >
+          <button
+            className="ip-btn ip-btn-outline"
+            style={{ flex: "unset", padding: "8px 16px" }}
+            disabled={page <= 0}
+            onClick={() => goToPage(page - 1)}
+          >
+            ‹ Prev
+          </button>
+          <span style={{ color: "#6c8bb3", fontSize: "0.85rem" }}>
+            Page {page + 1} of {totalPages} · {totalElements} total
+          </span>
+          <button
+            className="ip-btn ip-btn-outline"
+            style={{ flex: "unset", padding: "8px 16px" }}
+            disabled={page >= totalPages - 1}
+            onClick={() => goToPage(page + 1)}
+          >
+            Next ›
+          </button>
+        </div>
+      )}
     </div>
   );
 }
