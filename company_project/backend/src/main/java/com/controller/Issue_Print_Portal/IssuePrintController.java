@@ -5,6 +5,8 @@ import com.service.IssuePrintService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
 
 import java.util.List;
 import java.util.Map;
@@ -17,9 +19,16 @@ public class IssuePrintController {
     @Autowired
     private IssuePrintService issuePrintService;
 
-    @GetMapping
-    public ResponseEntity<List<Issue>> getAll() {
-        return ResponseEntity.ok(issuePrintService.getAllDocuments());
+   @GetMapping
+    public ResponseEntity<Page<Issue>> getAll(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "25") int size) {
+
+        return ResponseEntity.ok(
+            issuePrintService.getAllDocuments(
+                PageRequest.of(page, size)
+            )
+        );
     }
 
     @GetMapping("/{id}")
