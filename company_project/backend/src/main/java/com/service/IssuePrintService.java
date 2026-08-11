@@ -4,8 +4,6 @@ import com.entity.Issue;
 import com.repository.IssueRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
-import org.springframework.data.domain.Page;
-import org.springframework.data.domain.Pageable;
 
 import java.time.Duration;
 import java.time.LocalDateTime;
@@ -17,8 +15,8 @@ public class IssuePrintService {
     @Autowired
     private IssueRepository issueRepository;
 
-   public Page<Issue> getAllDocuments(Pageable pageable) {
-    return issueRepository.findAll(pageable);
+    public List<Issue> getAllDocuments() {
+        return issueRepository.findAll();
     }
 
     public Issue getById(Long id) {
