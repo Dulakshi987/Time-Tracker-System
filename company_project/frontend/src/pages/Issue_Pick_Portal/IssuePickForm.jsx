@@ -7,7 +7,9 @@ import { getCurrentUser, canUseButton, logoutUser, hasAllDivisionAccess, canSeeD
 // const SETUP_API = "http://localhost:8080/api/admin-setup";
 const API_BASE = "https://time-tracker-system-production.up.railway.app/api/pick-portal";
 const SETUP_API = "https://time-tracker-system-production.up.railway.app/api/admin-setup";
-// const AUTO_REFRESH = 10000;
+
+const PAGE_SIZE = 27;
+const SEARCH_DEBOUNCE_MS = 400;
 
 const HOLD_REASONS = [
   "Printer not available",
@@ -38,8 +40,11 @@ function formatDuration(seconds) {
   return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
 }
 
-// Same scheme as Print Portal — groups by request date, numbers within the
-// day, e.g. 20260816/0001. Resets automatically when the date changes.
+// Groups by request date, numbers within the day, e.g. 20260816/0001.
+// NOTE: this now only sees the current page's documents (server-side
+// pagination), so numbering restarts per page rather than being a single
+// continuous sequence across the whole day. If you need a single
+// continuous per-day number, that has to be computed/stored server-side.
 function computeRequestIds(documents) {
   const dateKeyOf = (doc) => {
     if (doc.requestDate) return String(doc.requestDate).substring(0, 10);
@@ -151,28 +156,13 @@ function getSriLankaTodayKey() {
   return `${colombo.getFullYear()}-${pad(colombo.getMonth() + 1)}-${pad(colombo.getDate())}`;
 }
 
-function docDateKey(doc) {
-  return doc.requestDate ? String(doc.requestDate).substring(0, 10) : null;
-}
-
-function matchesDateFilter(doc, mode, fromDate, toDate) {
-  if (mode === "ALL") return true;
-
-  const key = docDateKey(doc);
-
-  if (mode === "TODAY") {
-    return key === getSriLankaTodayKey();
-  }
-
-  if (mode === "CUSTOM") {
-    if (!fromDate && !toDate) return true;
-    if (!key) return false;
-    if (fromDate && key < fromDate) return false;
-    if (toDate && key > toDate) return false;
-    return true;
-  }
-
-  return true;
+// Backend only supports filtering by a single exact date (?date=yyyy-MM-dd),
+// not a from/to range — so "Custom" here is a single date picker, and "All"
+// simply omits the date param.
+function resolveDateParam(mode, customDate) {
+  if (mode === "TODAY") return getSriLankaTodayKey();
+  if (mode === "CUSTOM") return customDate || null;
+  return null; // ALL
 }
 
 // ── Person Picker ─────────────────────────────────────────────────────────
@@ -546,7 +536,7 @@ function PickingErrorAlertPopup({ docs, requestIdMap, onJump, onClose }) {
           <button className="ip-popup-close" onClick={onClose}>✕</button>
         </div>
         <p className="ip-popup-sub">
-          Check Portal found {docs.length} issue{docs.length > 1 ? "s" : ""} — click one to jump to it
+          Check Portal found {docs.length} issue{docs.length > 1 ? "s" : ""} on this page — click one to jump to it
         </p>
 
         <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 16 }}>
@@ -846,14 +836,24 @@ export default function IssuPikFormt() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [search, setSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
   const [filterType, setFilterType] = useState("ALL");
   const [filterStatus, setFilterStatus] = useState("ALL");
   const [lastUpdated, setLastUpdated] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
 
   const [dateFilterMode, setDateFilterMode] = useState("TODAY"); // "TODAY" | "ALL" | "CUSTOM"
-  const [fromDate, setFromDate] = useState("");
-  const [toDate, setToDate] = useState("");
+  const [customDate, setCustomDate] = useState(""); // single date, backend only supports exact-date filter
+
+  // Server-side pagination (Spring Data Page<Issue> shape: content/number/totalPages/totalElements)
+  const [page, setPage] = useState(0);
+  const [totalPages, setTotalPages] = useState(0);
+  const [totalElements, setTotalElements] = useState(0);
+
+  // Stat chips — from /stats, independent of the current page
+  const [stats, setStats] = useState({
+    total: 0, pending: 0, handedOver: 0, inProgress: 0, onHold: 0, completed: 0,
+  });
 
   const buttonPerms = useMemo(() => ({
     handover: canUseButton(currentUser, "handover"),
@@ -866,6 +866,7 @@ export default function IssuPikFormt() {
   }), [currentUser]);
 
   const [divisions, setDivisions] = useState([]);
+  const [divisionsLoaded, setDivisionsLoaded] = useState(false);
 
   const [popupPickers, setPopupPickers] = useState([]);
   const [popupPickersLoading, setPopupPickersLoading] = useState(false);
@@ -878,42 +879,20 @@ export default function IssuPikFormt() {
 
   const cardRefs = useRef({});
   const [jumpHighlightId, setJumpHighlightId] = useState(null);
+  const [jumpMissId, setJumpMissId] = useState(null);
 
-  const handleJumpToCard = (id) => {
-    setErrorAlertDocs([]);
-    const el = cardRefs.current[id];
-    if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
-    setJumpHighlightId(id);
-    setTimeout(() => setJumpHighlightId(prev => (prev === id ? null : prev)), 2500);
-  };
+  // ── Debounce search (Railway usage — don't fire a request per keystroke) ──
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(search), SEARCH_DEBOUNCE_MS);
+    return () => clearTimeout(t);
+  }, [search]);
 
-  const fetchDocuments = useCallback(async (silent = false) => {
-  if (!silent) setLoading(true);
-  else setRefreshing(true);
-  setError(null);
-  try {
-    const res = await fetch(API_BASE);
-    if (!res.ok) throw new Error(`Server error: ${res.status}`);
-    const data = await res.json();
+  // ── Any filter change resets back to page 0 ──
+  useEffect(() => {
+    setPage(0);
+  }, [debouncedSearch, filterType, filterStatus, dateFilterMode, customDate]);
 
-    const withPrintDocNo = data.filter(
-      d => d.printDocumentNo && String(d.printDocumentNo).trim() !== ""
-    );
-
-    const divisionScoped = hasAllDivisionAccess(currentUser)
-      ? withPrintDocNo
-      : withPrintDocNo.filter(d => canSeeDivision(currentUser, d.divisionNo));
-
-    setDocuments(divisionScoped);
-    setLastUpdated(new Date());
-  } catch (err) {
-    setError(err.message);
-  } finally {
-    setLoading(false);
-    setRefreshing(false);
-  }
-}, [currentUser]);
-
+  // ── Division scoping: non-admins only see their allowed divisions ──
   const fetchDivisions = useCallback(async () => {
     try {
       const res = await fetch(`${SETUP_API}/divisions`);
@@ -923,14 +902,32 @@ export default function IssuPikFormt() {
       }
     } catch (e) {
       console.warn("Failed to load divisions", e);
+    } finally {
+      setDivisionsLoaded(true);
     }
   }, []);
+
+  useEffect(() => { fetchDivisions(); }, [fetchDivisions]);
 
   const divisionNoToName = useMemo(() => {
     const map = {};
     divisions.forEach(d => { map[d.divisionNo] = d.divisionName; });
     return map;
   }, [divisions]);
+
+  // comma-separated divisionNo string for the API, or null = "all divisions" (admin)
+  const divisionsParam = useMemo(() => {
+    if (hasAllDivisionAccess(currentUser)) return null;
+    const allowed = divisions
+      .filter(d => canSeeDivision(currentUser, d.divisionNo))
+      .map(d => d.divisionNo);
+    return allowed.length > 0 ? allowed.join(",") : "__none__"; // no divisions => guaranteed-empty filter
+  }, [currentUser, divisions]);
+
+  const dateParam = useMemo(
+    () => resolveDateParam(dateFilterMode, customDate),
+    [dateFilterMode, customDate]
+  );
 
   const fetchPickersForDivision = useCallback(async (divisionNo) => {
     if (!divisionNo) {
@@ -962,15 +959,60 @@ export default function IssuPikFormt() {
     }
   }, []);
 
-  useEffect(() => {
-    fetchDocuments(false);
-    fetchDivisions();
-  }, [fetchDocuments, fetchDivisions]);
+  // ── Fetch current page + stats together ──
+  const fetchDocuments = useCallback(async (silent = false) => {
+    if (!divisionsLoaded) return; // wait for division scoping to resolve first
+    if (!silent) setLoading(true); else setRefreshing(true);
+    setError(null);
+    try {
+      const pagedParams = new URLSearchParams({
+        page: String(page),
+        size: String(PAGE_SIZE),
+      });
+      if (debouncedSearch) pagedParams.set("search", debouncedSearch);
+      if (filterType !== "ALL") pagedParams.set("jobType", filterType);
+      if (filterStatus !== "ALL") pagedParams.set("status", filterStatus);
+      if (dateParam) pagedParams.set("date", dateParam);
+      if (divisionsParam) pagedParams.set("divisions", divisionsParam);
 
-  // useEffect(() => {
-  //   const id = setInterval(() => fetchDocuments(true), AUTO_REFRESH);
-  //   return () => clearInterval(id);
-  // }, [fetchDocuments]);
+      const statsParams = new URLSearchParams();
+      if (dateParam) statsParams.set("date", dateParam);
+      if (divisionsParam) statsParams.set("divisions", divisionsParam);
+
+      const [pagedRes, statsRes] = await Promise.all([
+        fetch(`${API_BASE}/paged?${pagedParams.toString()}`),
+        fetch(`${API_BASE}/stats?${statsParams.toString()}`),
+      ]);
+
+      if (!pagedRes.ok) throw new Error(`Server error: ${pagedRes.status}`);
+      const paged = await pagedRes.json(); // Spring Data Page<Issue>: content/number/totalPages/totalElements
+
+      setDocuments(paged.content || []);
+      setTotalPages(paged.totalPages ?? 0);
+      setTotalElements(paged.totalElements ?? 0);
+
+      if (statsRes.ok) {
+        const s = await statsRes.json();
+        setStats({
+          total: s.total ?? 0,
+          pending: s.pending ?? 0,
+          handedOver: s.handedOver ?? 0,
+          inProgress: s.inProgress ?? 0,
+          onHold: s.onHold ?? 0,
+          completed: s.completed ?? 0,
+        });
+      }
+
+      setLastUpdated(new Date());
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, [divisionsLoaded, page, debouncedSearch, filterType, filterStatus, dateParam, divisionsParam]);
+
+  useEffect(() => { fetchDocuments(false); }, [fetchDocuments]);
 
   const getDocById = useCallback((id) => documents.find(d => d.id === id), [documents]);
 
@@ -1114,6 +1156,9 @@ export default function IssuPikFormt() {
 
   const requestIdMap = useMemo(() => computeRequestIds(documents), [documents]);
 
+  // NOTE: this only scans the CURRENT PAGE's documents (server paginates now),
+  // so the "new picking error" popup/banner only reacts to errors that land
+  // on the page you're currently viewing — not the whole dataset.
   const activeCheckErrorDocs = useMemo(
     () => documents.filter(d =>
       (d.hasWrongMaterial || "").toUpperCase() === "YES" && !d.emergencyPickResolved
@@ -1134,6 +1179,20 @@ export default function IssuPikFormt() {
     });
   }, [activeCheckErrorDocs]);
 
+  const handleJumpToCard = (id) => {
+    setErrorAlertDocs([]);
+    const el = cardRefs.current[id];
+    if (el) {
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+      setJumpHighlightId(id);
+      setTimeout(() => setJumpHighlightId(prev => (prev === id ? null : prev)), 2500);
+    } else {
+      // Not on the current page — let the person know instead of silently doing nothing.
+      setJumpMissId(id);
+      setTimeout(() => setJumpMissId(prev => (prev === id ? null : prev)), 4000);
+    }
+  };
+
   const jobTypes = ["ALL", ...new Set(documents.map(d => d.jobType).filter(Boolean))];
 
   const STATUS_FILTERS = [
@@ -1150,31 +1209,6 @@ export default function IssuPikFormt() {
     { value: "ALL", label: "All" },
     { value: "CUSTOM", label: "Custom" },
   ];
-
-  const visible = documents.filter(doc => {
-    const q = search.toLowerCase();
-    const matchSearch = !q || [
-      String(doc.id), doc.jobwbs, doc.reservationNo, doc.enteredBy, doc.jobType,
-    ].some(v => (v || "").toLowerCase().includes(q));
-
-    const matchType = filterType === "ALL" || doc.jobType === filterType;
-    const matchStatus = filterStatus === "ALL" || statusClass(doc.status) === filterStatus;
-    const matchDate = matchesDateFilter(doc, dateFilterMode, fromDate, toDate);
-
-    return matchSearch && matchType && matchStatus && matchDate;
-  });
-
-  const dateScoped = useMemo(
-    () => documents.filter(doc => matchesDateFilter(doc, dateFilterMode, fromDate, toDate)),
-    [documents, dateFilterMode, fromDate, toDate]
-  );
-
-  const total = dateScoped.length;
-  const pending = dateScoped.filter(d => statusClass(d.status) === "pending").length;
-  const handedOver = dateScoped.filter(d => statusClass(d.status) === "handedover").length;
-  const inProg = dateScoped.filter(d => statusClass(d.status) === "inprogress").length;
-  const onHold = dateScoped.filter(d => statusClass(d.status) === "onhold").length;
-  const completed = dateScoped.filter(d => statusClass(d.status) === "completed").length;
 
   const handleStatClick = (statusValue) => setFilterStatus(statusValue);
 
@@ -1265,7 +1299,7 @@ export default function IssuPikFormt() {
       {activeCheckErrorDocs.length > 0 && (
         <div className="ip-error-banner">
           <div className="ip-error-banner-title">
-            🚨 {activeCheckErrorDocs.length} Picking Error{activeCheckErrorDocs.length > 1 ? "s" : ""} Reported by Check Portal — needs Emergency Pick
+            🚨 {activeCheckErrorDocs.length} Picking Error{activeCheckErrorDocs.length > 1 ? "s" : ""} on this page — needs Emergency Pick
           </div>
           <div className="ip-error-banner-chips">
             {activeCheckErrorDocs.map(d => (
@@ -1275,6 +1309,12 @@ export default function IssuPikFormt() {
               </span>
             ))}
           </div>
+        </div>
+      )}
+
+      {jumpMissId && (
+        <div className="ip-error-inline">
+          ⚠ That document isn't on the current page — clear filters / search by its ID to find it.
         </div>
       )}
 
@@ -1315,22 +1355,15 @@ export default function IssuPikFormt() {
             <input
               type="date"
               className="ip-filter-select"
-              value={fromDate}
-              onChange={e => setFromDate(e.target.value)}
+              value={customDate}
+              onChange={e => setCustomDate(e.target.value)}
             />
-            <span style={{ color: "#6c8bb3" }}>—</span>
-            <input
-              type="date"
-              className="ip-filter-select"
-              value={toDate}
-              onChange={e => setToDate(e.target.value)}
-            />
-            {(fromDate || toDate) && (
+            {customDate && (
               <button
                 type="button"
                 className="ip-btn ip-btn-outline"
                 style={{ flex: "unset", padding: "6px 14px" }}
-                onClick={() => { setFromDate(""); setToDate(""); }}
+                onClick={() => setCustomDate("")}
               >
                 ✕ Clear
               </button>
@@ -1341,24 +1374,24 @@ export default function IssuPikFormt() {
 
       <div className="ip-stats">
         <button type="button" className={`ip-stat-chip blue ip-stat-chip-clickable ${filterStatus === "ALL" ? "active" : ""}`} onClick={() => handleStatClick("ALL")}>
-          Total <strong>{total}</strong>
+          Total <strong>{stats.total}</strong>
         </button>
         <button type="button" className={`ip-stat-chip ip-stat-chip-clickable ${filterStatus === "pending" ? "active" : ""}`} onClick={() => handleStatClick("pending")}>
-          <strong style={{ color: "#f59e0b" }}>{pending}</strong> Pending
+          <strong style={{ color: "#f59e0b" }}>{stats.pending}</strong> Pending
         </button>
         <button type="button" className={`ip-stat-chip ip-stat-chip-clickable ${filterStatus === "handedover" ? "active" : ""}`} onClick={() => handleStatClick("handedover")}>
-          <strong style={{ color: "#3b82f6" }}>{handedOver}</strong> Handovered
+          <strong style={{ color: "#3b82f6" }}>{stats.handedOver}</strong> Handovered
         </button>
         <button type="button" className={`ip-stat-chip ip-stat-chip-clickable ${filterStatus === "inprogress" ? "active" : ""}`} onClick={() => handleStatClick("inprogress")}>
-          <strong style={{ color: "#1d4ed8" }}>{inProg}</strong> In Progress
+          <strong style={{ color: "#1d4ed8" }}>{stats.inProgress}</strong> In Progress
         </button>
         <button type="button" className={`ip-stat-chip ip-stat-chip-clickable ${filterStatus === "onhold" ? "active" : ""}`} onClick={() => handleStatClick("onhold")}>
-          <strong style={{ color: "#c2410c" }}>{onHold}</strong> On Hold
+          <strong style={{ color: "#c2410c" }}>{stats.onHold}</strong> On Hold
         </button>
         <button type="button" className={`ip-stat-chip green ip-stat-chip-clickable ${filterStatus === "completed" ? "active" : ""}`} onClick={() => handleStatClick("completed")}>
-          Done <strong>{completed}</strong>
+          Done <strong>{stats.completed}</strong>
         </button>
-        <div className="ip-stat-chip">Showing <strong style={{ color: "#a78bfa" }}>{visible.length}</strong> of {total}</div>
+        <div className="ip-stat-chip">Showing <strong style={{ color: "#a78bfa" }}>{documents.length}</strong> of {totalElements}</div>
       </div>
 
       {error && (
@@ -1370,10 +1403,10 @@ export default function IssuPikFormt() {
       <div className="ip-grid">
         {loading ? (
           Array.from({ length: 6 }).map((_, i) => <SkeletonCard key={i} />)
-        ) : visible.length === 0 ? (
+        ) : documents.length === 0 ? (
           <div className="ip-empty">No documents found{search ? ` for "${search}"` : ""}.</div>
         ) : (
-          visible.map(doc => (
+          documents.map(doc => (
             <DocumentCard
               key={doc.id}
               doc={doc}
@@ -1404,6 +1437,30 @@ export default function IssuPikFormt() {
           ))
         )}
       </div>
+
+      {totalPages > 1 && (
+        <div className="ip-toolbar" style={{ justifyContent: "center", gap: 10 }}>
+          <button
+            className="ip-btn ip-btn-outline"
+            style={{ flex: "unset", padding: "8px 18px" }}
+            disabled={page === 0}
+            onClick={() => setPage(p => Math.max(0, p - 1))}
+          >
+            ← Prev
+          </button>
+          <span style={{ alignSelf: "center", color: "#7c8db0" }}>
+            Page {page + 1} / {totalPages}
+          </span>
+          <button
+            className="ip-btn ip-btn-outline"
+            style={{ flex: "unset", padding: "8px 18px" }}
+            disabled={page + 1 >= totalPages}
+            onClick={() => setPage(p => p + 1)}
+          >
+            Next →
+          </button>
+        </div>
+      )}
     </div>
   );
 }
