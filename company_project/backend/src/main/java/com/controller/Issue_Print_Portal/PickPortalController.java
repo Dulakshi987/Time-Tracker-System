@@ -28,7 +28,7 @@ public class PickPortalController {
     @GetMapping("/paged")
     public ResponseEntity<Page<Issue>> getPaged(
             @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "27") int size,
+            @RequestParam(defaultValue = "25") int size,
             @RequestParam(required = false) String jobType,
             @RequestParam(required = false) String status,
             @RequestParam(required = false) String search,
@@ -68,7 +68,6 @@ public class PickPortalController {
         return ResponseEntity.ok(issuePickService.getByStatus(status));
     }
 
-    // Start / Resume — no body needed
     @PutMapping("/{id}/start")
     public ResponseEntity<Issue> start(@PathVariable Long id) {
         try {
@@ -78,38 +77,35 @@ public class PickPortalController {
         }
     }
 
-    // body: { holdReason, heldBy }
     @PutMapping("/{id}/hold")
     public ResponseEntity<Issue> hold(@PathVariable Long id, @RequestBody Map<String, String> body) {
         try {
             return ResponseEntity.ok(issuePickService.holdPrint(
-                    id,
-                    body.getOrDefault("holdReason", ""),
-                    body.getOrDefault("heldBy", "")
+                id,
+                body.getOrDefault("holdReason", ""),
+                body.getOrDefault("heldBy", "")
             ));
         } catch (RuntimeException e) {
             return ResponseEntity.notFound().build();
         }
     }
 
-    // body: { pickedBy }
     @PutMapping("/{id}/end")
     public ResponseEntity<Issue> end(@PathVariable Long id, @RequestBody Map<String, String> body) {
         try {
             return ResponseEntity.ok(issuePickService.endPrint(
-                    id, body.getOrDefault("pickedBy", "")
+                id, body.getOrDefault("pickedBy", "")
             ));
         } catch (RuntimeException e) {
             return ResponseEntity.notFound().build();
         }
     }
 
-    // body: { resolvedBy } — resolves a wrong-material flag raised by Check
     @PutMapping("/{id}/emergency-resolve")
     public ResponseEntity<Issue> emergencyResolve(@PathVariable Long id, @RequestBody Map<String, String> body) {
         try {
             return ResponseEntity.ok(issuePickService.emergencyResolve(
-                    id, body.getOrDefault("resolvedBy", "")
+                id, body.getOrDefault("resolvedBy", "")
             ));
         } catch (RuntimeException e) {
             return ResponseEntity.notFound().build();
@@ -122,12 +118,11 @@ public class PickPortalController {
         return ResponseEntity.noContent().build();
     }
 
-    // body: { handedOverBy }
     @PutMapping("/{id}/handover")
     public ResponseEntity<Issue> handover(@PathVariable Long id, @RequestBody Map<String, String> body) {
         try {
             return ResponseEntity.ok(issuePickService.handoverPrint(
-                    id, body.getOrDefault("handedOverBy", "")
+                id, body.getOrDefault("handedOverBy", "")
             ));
         } catch (RuntimeException e) {
             return ResponseEntity.notFound().build();

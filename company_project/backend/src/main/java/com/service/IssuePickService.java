@@ -11,10 +11,8 @@ import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
 
 import java.time.Duration;
-import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.Arrays;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -24,8 +22,7 @@ public class IssuePickService {
     @Autowired
     private IssueRepository issueRepository;
 
-    // ── Legacy (existing) methods — unchanged, other callers depend on these ──
-
+    // ── Existing (unpaginated) reads — kept for backward compatibility ──
     public List<Issue> getAllDocuments() {
         return issueRepository.findAll();
     }
@@ -43,6 +40,113 @@ public class IssuePickService {
         return issueRepository.findByStatus(status);
     }
 
+    // ── Paginated + filtered read — this is what the Pick Portal frontend
+    // grid should call. Same pattern as IssuePrintService.getDocumentsPaged. ──
+    public Page<Issue> getDocumentsPaged(int page, int size, String jobType, String status,
+                                          String search, String date, List<String> divisionNos) {
+        Pageable pageable = PageRequest.of(Math.max(page, 0), Math.max(size, 1), Sort.by(Sort.Direction.DESC, "id"));
+        Specification<Issue> spec = buildSpec(jobType, status, search, date, divisionNos);
+        return issueRepository.findAll(spec, pageable);
+    }
+
+    // ── Stats — counts computed in the database, not by loading rows ───
+    public Map<String, Long> getStats(String date, List<String> divisionNos) {
+        Specification<Issue> base = buildSpec(null, null, null, date, divisionNos);
+
+        long total = issueRepository.count(base);
+        long handedOver = issueRepository.count(withStatus(base, "HANDED_OVER"));
+        long inProgress = issueRepository.count(withStatus(base, "IN_PROGRESS"));
+        long onHold = issueRepository.count(withStatus(base, "ON_HOLD"));
+        long completed = issueRepository.count(withStatus(base, "COMPLETED"));
+        // "Pending" is never actually stored as a literal status — a fresh
+        // document just has status = null/blank until Handover happens.
+        // So pending = whatever's left over, same trick used in Print.
+        long pending = Math.max(total - handedOver - inProgress - onHold - completed, 0);
+
+        return Map.of(
+                "total", total,
+                "pending", pending,
+                "handedOver", handedOver,
+                "inProgress", inProgress,
+                "onHold", onHold,
+                "completed", completed
+        );
+    }
+
+    private Specification<Issue> withStatus(Specification<Issue> base, String status) {
+        return base.and((root, q, cb) -> cb.equal(root.get("status"), status));
+    }
+
+    private Specification<Issue> buildSpec(String jobType, String status, String search,
+                                            String date, List<String> divisionNos) {
+        Specification<Issue> spec = Specification.where(null);
+
+        if (jobType != null && !jobType.isBlank() && !"ALL".equalsIgnoreCase(jobType)) {
+            spec = spec.and((root, q, cb) -> cb.equal(root.get("jobType"), jobType));
+        }
+
+        if (status != null && !status.isBlank() && !"ALL".equalsIgnoreCase(status)) {
+            if ("PENDING".equalsIgnoreCase(status)) {
+                // Pending documents have no status set yet — match null/blank
+                // instead of a literal "PENDING" string that's never written.
+                spec = spec.and((root, q, cb) -> cb.or(
+                        cb.isNull(root.get("status")),
+                        cb.equal(root.get("status"), "")
+                ));
+            } else {
+                spec = spec.and((root, q, cb) -> cb.equal(root.get("status"), status));
+            }
+        }
+
+        if (search != null && !search.isBlank()) {
+            String like = "%" + search.toLowerCase() + "%";
+            spec = spec.and((root, q, cb) -> cb.or(
+                    cb.like(cb.lower(root.get("jobwbs")), like),
+                    cb.like(cb.lower(root.get("reservationNo")), like),
+                    cb.like(cb.lower(root.get("enteredBy")), like),
+                    cb.like(cb.lower(root.get("jobType")), like)
+            ));
+        }
+
+        // requestDate is a plain String column (e.g. "2026-08-12") — compare
+        // as String, same as Print, to avoid a Hibernate type-mismatch 500.
+        if (date != null && !date.isBlank()) {
+            String trimmed = date.trim();
+            spec = spec.and((root, q, cb) -> cb.equal(root.get("requestDate"), trimmed));
+        }
+
+        if (divisionNos != null && !divisionNos.isEmpty()) {
+            spec = spec.and((root, q, cb) -> root.get("divisionNo").in(divisionNos));
+        }
+
+        // Pick Portal only ever shows documents that already came through
+        // Print — this replaces the old client-side
+        // `data.filter(d => d.printDocumentNo && ...)` from IssuePick.js.
+        spec = spec.and((root, q, cb) -> cb.and(
+                cb.isNotNull(root.get("printDocumentNo")),
+                cb.notEqual(root.get("printDocumentNo"), "")
+        ));
+
+        return spec;
+    }
+
+    // Convenience overloads for a comma-separated divisions string coming
+    // straight off a query param.
+    public Page<Issue> getDocumentsPaged(int page, int size, String jobType, String status,
+                                          String search, String date, String divisionsCsv) {
+        return getDocumentsPaged(page, size, jobType, status, search, date, toList(divisionsCsv));
+    }
+
+    public Map<String, Long> getStats(String date, String divisionsCsv) {
+        return getStats(date, toList(divisionsCsv));
+    }
+
+    private List<String> toList(String csv) {
+        if (csv == null || csv.isBlank()) return null;
+        return Arrays.asList(csv.split(","));
+    }
+
+    // ── Existing action methods — unchanged ──────────────────────────────
     public Issue startPrint(Long id) {
         Issue doc = getById(id);
 
@@ -93,7 +197,6 @@ public class IssuePickService {
         return issueRepository.save(doc);
     }
 
-    // ── Emergency Pick Done (resolves a wrong-material flag raised by Check) ──
     public Issue emergencyResolve(Long id, String resolvedBy) {
         Issue doc = getById(id);
 
@@ -116,97 +219,5 @@ public class IssuePickService {
         // doc.setHandoverTime(LocalDateTime.now());
 
         return issueRepository.save(doc);
-    }
-
-    // ── New: paginated + filtered fetch, same pattern as IssuePrintController ──
-
-    public Page<Issue> getDocumentsPaged(
-            int page, int size, String jobType, String status, String search,
-            String date, String divisions) {
-
-        Specification<Issue> spec = baseSpec(date, divisions)
-                .and(jobTypeSpec(jobType))
-                .and(statusSpec(status))
-                .and(searchSpec(search));
-
-        Pageable pageable = PageRequest.of(Math.max(page, 0), size <= 0 ? 25 : size,
-                Sort.by(Sort.Direction.DESC, "id"));
-
-        return issueRepository.findAll(spec, pageable);
-    }
-
-    // ── Stat chip counts — computed in the DB, independent of page size ──
-
-    public Map<String, Long> getStats(String date, String divisions) {
-        Specification<Issue> base = baseSpec(date, divisions);
-
-        Map<String, Long> stats = new LinkedHashMap<>();
-        stats.put("total", issueRepository.count(base));
-        stats.put("pending", issueRepository.count(base.and(statusSpec("pending"))));
-        stats.put("handedOver", issueRepository.count(base.and(statusSpec("handedover"))));
-        stats.put("inProgress", issueRepository.count(base.and(statusSpec("inprogress"))));
-        stats.put("onHold", issueRepository.count(base.and(statusSpec("onhold"))));
-        stats.put("completed", issueRepository.count(base.and(statusSpec("completed"))));
-        return stats;
-    }
-
-    // ── Specification builders (private, kept inside this class — no extra files) ──
-
-    // Documents that have reached Pick (printDocumentNo set) + optional date/division scope.
-    // Always applied as the base filter, same role as Print portal's "always visible" scope.
-    private Specification<Issue> baseSpec(String date, String divisions) {
-        Specification<Issue> spec = (root, query, cb) -> cb.and(
-                cb.isNotNull(root.get("printDocumentNo")),
-                cb.notEqual(cb.trim(root.get("printDocumentNo")), "")
-        );
-
-        if (date != null && !date.isBlank()) {
-            LocalDate d = LocalDate.parse(date);
-            spec = spec.and((root, query, cb) -> cb.equal(root.get("requestDate"), d));
-        }
-
-        if (divisions != null && !divisions.isBlank()) {
-            List<String> divList = Arrays.stream(divisions.split(","))
-                    .map(String::trim)
-                    .filter(s -> !s.isEmpty())
-                    .toList();
-            if (!divList.isEmpty()) {
-                spec = spec.and((root, query, cb) -> root.get("divisionNo").in(divList));
-            }
-        }
-
-        return spec;
-    }
-
-    private Specification<Issue> jobTypeSpec(String jobType) {
-        if (jobType == null || jobType.isBlank() || jobType.equalsIgnoreCase("ALL")) return null;
-        return (root, query, cb) -> cb.equal(root.get("jobType"), jobType);
-    }
-
-    private Specification<Issue> searchSpec(String search) {
-        if (search == null || search.isBlank()) return null;
-        String like = "%" + search.toLowerCase() + "%";
-        return (root, query, cb) -> cb.or(
-                cb.like(cb.lower(root.get("jobwbs")), like),
-                cb.like(cb.lower(root.get("reservationNo")), like),
-                cb.like(cb.lower(root.get("enteredBy")), like),
-                cb.like(cb.lower(root.get("jobType")), like),
-                cb.like(root.get("id").as(String.class), like)
-        );
-    }
-
-    // statusClass = "pending" | "handedover" | "inprogress" | "onhold" | "completed"
-    private Specification<Issue> statusSpec(String statusClass) {
-        if (statusClass == null || statusClass.isBlank() || statusClass.equalsIgnoreCase("ALL")) return null;
-        String raw = switch (statusClass.toLowerCase()) {
-            case "pending" -> "PENDING";
-            case "handedover" -> "HANDED_OVER";
-            case "inprogress" -> "IN_PROGRESS";
-            case "onhold" -> "ON_HOLD";
-            case "completed" -> "COMPLETED";
-            default -> null;
-        };
-        if (raw == null) return null;
-        return (root, query, cb) -> cb.equal(root.get("status"), raw);
     }
 }
