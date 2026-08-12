@@ -19,8 +19,8 @@ import {
 
 const API_BASE = "https://time-tracker-system-production.up.railway.app/api/delivery-portal";
 const SETUP_API = "https://time-tracker-system-production.up.railway.app/api/admin-setup";
-// const AUTO_REFRESH = 10000;
-// const OPERATOR_REFRESH = 15000;
+const AUTO_REFRESH = 10000;
+const OPERATOR_REFRESH = 15000;
 
 const HOLD_REASONS = [
   "Vehicle not available",
@@ -241,11 +241,11 @@ function useDeliveryOperators() {
       .catch(() => { /* keep last known list on transient errors */ });
   }, []);
 
-  // useEffect(() => {
-  //   load();
-  //   const id = setInterval(load, OPERATOR_REFRESH);
-  //   return () => clearInterval(id);
-  // }, [load]);
+  useEffect(() => {
+    load();
+    const id = setInterval(load, OPERATOR_REFRESH);
+    return () => clearInterval(id);
+  }, [load]);
 
   return operators;
 }
@@ -1081,10 +1081,10 @@ export default function IssueDeliveryForm() {
     fetchDivisions();
   }, [fetchDocuments, fetchDivisions]);
 
-  // useEffect(() => {
-  //   const id = setInterval(() => fetchDocuments(true), AUTO_REFRESH);
-  //   return () => clearInterval(id);
-  // }, [fetchDocuments]);
+  useEffect(() => {
+    const id = setInterval(() => fetchDocuments(true), AUTO_REFRESH);
+    return () => clearInterval(id);
+  }, [fetchDocuments]);
 
   // ── Access-scoped documents ──
   // Admin / System Administrator (or any role with allDivisions: true) see
