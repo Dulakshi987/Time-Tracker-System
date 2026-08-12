@@ -4,11 +4,9 @@ import com.entity.Issue;
 import com.service.IssuePrintService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Page;
-import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
-import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
 
@@ -20,35 +18,35 @@ public class IssuePrintController {
     @Autowired
     private IssuePrintService issuePrintService;
 
-    // Paginated + filtered list — this is what the portal grid uses now
+    // Kept for anything still relying on the full unpaginated list
     @GetMapping
-    public ResponseEntity<Page<Issue>> getAll(
+    public ResponseEntity<List<Issue>> getAll() {
+        return ResponseEntity.ok(issuePrintService.getAllDocuments());
+    }
+
+    // ── Paginated + filtered list — this is what the frontend grid should call ──
+    @GetMapping("/paged")
+    public ResponseEntity<Page<Issue>> getPaged(
             @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "20") int size,
-            @RequestParam(required = false) String status,
+            @RequestParam(defaultValue = "25") int size,
             @RequestParam(required = false) String jobType,
+            @RequestParam(required = false) String status,
             @RequestParam(required = false) String search,
-            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate fromDate,
-            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate toDate
+            @RequestParam(required = false) String date,
+            @RequestParam(required = false) String divisions // comma-separated divisionNo list, omit for "all"
     ) {
         return ResponseEntity.ok(
-                issuePrintService.getPaginated(page, size, status, jobType, search, fromDate, toDate)
+                issuePrintService.getDocumentsPaged(page, size, jobType, status, search, date, divisions)
         );
     }
 
-    // Stat chip counts — cheap DB counts, independent of pagination
+    // ── Stat chip counts — computed in the DB, independent of page size ──
     @GetMapping("/stats")
     public ResponseEntity<Map<String, Long>> getStats(
-            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate fromDate,
-            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate toDate
+            @RequestParam(required = false) String date,
+            @RequestParam(required = false) String divisions
     ) {
-        return ResponseEntity.ok(issuePrintService.getStats(fromDate, toDate));
-    }
-
-    // Kept for anything that still needs the unpaginated full list (e.g. exports)
-    @GetMapping("/all")
-    public ResponseEntity<List<Issue>> getAllUnpaged() {
-        return ResponseEntity.ok(issuePrintService.getAllDocuments());
+        return ResponseEntity.ok(issuePrintService.getStats(date, divisions));
     }
 
     @GetMapping("/{id}")
@@ -74,7 +72,7 @@ public class IssuePrintController {
             @RequestBody Map<String, String> body) {
         try {
             return ResponseEntity.ok(issuePrintService.handoverPrint(
-                    id, body.getOrDefault("handedOverBy", "")
+                id, body.getOrDefault("handedOverBy", "")
             ));
         } catch (RuntimeException e) { return ResponseEntity.notFound().build(); }
     }
@@ -92,9 +90,9 @@ public class IssuePrintController {
             @RequestBody Map<String, String> body) {
         try {
             return ResponseEntity.ok(issuePrintService.holdPrint(
-                    id,
-                    body.getOrDefault("holdReason", ""),
-                    body.getOrDefault("heldBy", "")
+                id,
+                body.getOrDefault("holdReason", ""),
+                body.getOrDefault("heldBy", "")
             ));
         } catch (RuntimeException e) { return ResponseEntity.notFound().build(); }
     }
@@ -105,9 +103,9 @@ public class IssuePrintController {
             @RequestBody Map<String, String> body) {
         try {
             return ResponseEntity.ok(issuePrintService.endPrint(
-                    id,
-                    body.getOrDefault("printDocumentNo", ""),
-                    body.getOrDefault("printedBy", "")
+                id,
+                body.getOrDefault("printDocumentNo", ""),
+                body.getOrDefault("printedBy", "")
             ));
         } catch (RuntimeException e) { return ResponseEntity.notFound().build(); }
     }

@@ -17,4 +17,5 @@ public interface IssueRepository extends JpaRepository<Issue, Long>, JpaSpecific
     List<Issue> findByDeliveryStatus(String deliveryStatus);
 
     List<Issue> findByCheckStatusOrderByIdAsc(String checkStatus);
+
 }
