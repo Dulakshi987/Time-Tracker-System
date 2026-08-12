@@ -11,7 +11,6 @@ import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
 
 import java.time.Duration;
-import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.Arrays;
 import java.util.List;
@@ -94,9 +93,14 @@ public class IssuePrintService {
             ));
         }
 
+        // requestDate is stored as a plain String (e.g. "2026-08-12"), not a
+        // LocalDate column — compare it as a String, matching how the
+        // frontend already builds its date keys. Parsing this into a
+        // LocalDate and comparing against a String column is exactly what
+        // was causing the 500 (Hibernate parameter type mismatch).
         if (date != null && !date.isBlank()) {
-            LocalDate parsed = LocalDate.parse(date);
-            spec = spec.and((root, q, cb) -> cb.equal(root.get("requestDate"), parsed));
+            String trimmed = date.trim();
+            spec = spec.and((root, q, cb) -> cb.equal(root.get("requestDate"), trimmed));
         }
 
         if (divisionNos != null && !divisionNos.isEmpty()) {
