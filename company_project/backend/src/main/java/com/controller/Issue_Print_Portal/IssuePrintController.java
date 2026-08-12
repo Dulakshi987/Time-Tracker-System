@@ -1,7 +1,7 @@
-package com.controller.Issue_Print_Portal;
+package com.controller.Issue_Check_Portal;
 
 import com.entity.Issue;
-import com.service.IssuePrintService;
+import com.service.CheckPortalService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Page;
 import org.springframework.http.ResponseEntity;
@@ -11,17 +11,17 @@ import java.util.List;
 import java.util.Map;
 
 @RestController
-@RequestMapping("/api/print-portal")
+@RequestMapping("/api/check-portal")
 @CrossOrigin(origins = "http://localhost:5173")
-public class IssuePrintController {
+public class CheckPortalController {
 
     @Autowired
-    private IssuePrintService issuePrintService;
+    private CheckPortalService checkPortalService;
 
     // Kept for anything still relying on the full unpaginated list
     @GetMapping
     public ResponseEntity<List<Issue>> getAll() {
-        return ResponseEntity.ok(issuePrintService.getAllDocuments());
+        return ResponseEntity.ok(checkPortalService.getAllDocuments());
     }
 
     // ── Paginated + filtered list — this is what the frontend grid should call ──
@@ -36,7 +36,7 @@ public class IssuePrintController {
             @RequestParam(required = false) String divisions // comma-separated divisionNo list, omit for "all"
     ) {
         return ResponseEntity.ok(
-                issuePrintService.getDocumentsPaged(page, size, jobType, status, search, date, divisions)
+                checkPortalService.getDocumentsPaged(page, size, jobType, status, search, date, divisions)
         );
     }
 
@@ -46,73 +46,85 @@ public class IssuePrintController {
             @RequestParam(required = false) String date,
             @RequestParam(required = false) String divisions
     ) {
-        return ResponseEntity.ok(issuePrintService.getStats(date, divisions));
+        return ResponseEntity.ok(checkPortalService.getStats(date, divisions));
     }
 
     @GetMapping("/{id}")
     public ResponseEntity<Issue> getById(@PathVariable Long id) {
-        try { return ResponseEntity.ok(issuePrintService.getById(id)); }
-        catch (RuntimeException e) { return ResponseEntity.notFound().build(); }
+        try {
+            return ResponseEntity.ok(checkPortalService.getById(id));
+        } catch (RuntimeException e) {
+            return ResponseEntity.notFound().build();
+        }
     }
 
     @GetMapping("/type/{jobType}")
     public ResponseEntity<List<Issue>> getByJobType(@PathVariable String jobType) {
-        return ResponseEntity.ok(issuePrintService.getByJobType(jobType));
+        return ResponseEntity.ok(checkPortalService.getByJobType(jobType));
     }
 
     @GetMapping("/status/{status}")
-    public ResponseEntity<List<Issue>> getByPrintStatus(@PathVariable String status) {
-        return ResponseEntity.ok(issuePrintService.getByPrintStatus(status));
+    public ResponseEntity<List<Issue>> getByCheckStatus(@PathVariable String status) {
+        return ResponseEntity.ok(checkPortalService.getByCheckStatus(status));
     }
 
-    // Step 1: Handover — records who handed the document over
-    @PutMapping("/{id}/handover")
-    public ResponseEntity<Issue> handover(
-            @PathVariable Long id,
-            @RequestBody Map<String, String> body) {
-        try {
-            return ResponseEntity.ok(issuePrintService.handoverPrint(
-                id, body.getOrDefault("handedOverBy", "")
-            ));
-        } catch (RuntimeException e) { return ResponseEntity.notFound().build(); }
-    }
-
-    // Step 2: Start / Resume — no body needed, name was captured at Handover
     @PutMapping("/{id}/start")
     public ResponseEntity<Issue> start(@PathVariable Long id) {
-        try { return ResponseEntity.ok(issuePrintService.startPrint(id)); }
-        catch (RuntimeException e) { return ResponseEntity.notFound().build(); }
+        try {
+            return ResponseEntity.ok(checkPortalService.startCheck(id));
+        } catch (RuntimeException e) {
+            return ResponseEntity.notFound().build();
+        }
     }
 
+    // body: { holdReason, heldBy, hasWrongMaterial: "YES"/"NO", wrongMaterialSku, wrongMaterialQty }
     @PutMapping("/{id}/hold")
     public ResponseEntity<Issue> hold(
             @PathVariable Long id,
             @RequestBody Map<String, String> body) {
+
+        String holdReason       = body.getOrDefault("holdReason", "");
+        String heldBy           = body.getOrDefault("heldBy", "");
+        String hasWrongMaterial = body.get("hasWrongMaterial");
+        String wrongMaterialSku = body.getOrDefault("wrongMaterialSku", "");
+        String wrongMaterialQty = body.getOrDefault("wrongMaterialQty", "");
+
         try {
-            return ResponseEntity.ok(issuePrintService.holdPrint(
-                id,
-                body.getOrDefault("holdReason", ""),
-                body.getOrDefault("heldBy", "")
-            ));
-        } catch (RuntimeException e) { return ResponseEntity.notFound().build(); }
+            return ResponseEntity.ok(
+                checkPortalService.holdCheck(id, holdReason, heldBy, hasWrongMaterial, wrongMaterialSku, wrongMaterialQty)
+            );
+        } catch (RuntimeException e) {
+            return ResponseEntity.notFound().build();
+        }
     }
 
+    // body: { checkedBy }
     @PutMapping("/{id}/end")
     public ResponseEntity<Issue> end(
             @PathVariable Long id,
             @RequestBody Map<String, String> body) {
+
+        String checkedBy = body.getOrDefault("checkedBy", "");
+
         try {
-            return ResponseEntity.ok(issuePrintService.endPrint(
-                id,
-                body.getOrDefault("printDocumentNo", ""),
-                body.getOrDefault("printedBy", "")
-            ));
-        } catch (RuntimeException e) { return ResponseEntity.notFound().build(); }
+            return ResponseEntity.ok(checkPortalService.endCheck(id, checkedBy));
+        } catch (RuntimeException e) {
+            return ResponseEntity.notFound().build();
+        }
+    }
+
+    @PutMapping("/{id}/edit")
+    public ResponseEntity<Issue> editCheck(@PathVariable Long id, @RequestBody Map<String, String> body) {
+        try {
+            return ResponseEntity.ok(checkPortalService.editCheck(id, body.get("heldBy"), body.get("checkedBy")));
+        } catch (RuntimeException e) {
+            return ResponseEntity.notFound().build();
+        }
     }
 
     @DeleteMapping("/{id}")
-    public ResponseEntity<Void> delete(@PathVariable Long id) {
-        issuePrintService.delete(id);
+    public ResponseEntity<Void> deleteCheck(@PathVariable Long id) {
+        checkPortalService.delete(id);
         return ResponseEntity.noContent().build();
     }
 }

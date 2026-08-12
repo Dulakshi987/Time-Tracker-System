@@ -1,45 +1,30 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useNavigate } from "react-router-dom";
-// import DateRangeFilter from "./DateRangeFilter";
 import "./IssueCheck.css";
 import { formatSriLankaTime } from "../../utils/dateUtils";
-import { getCurrentUser, canUseButton, logoutUser, hasAllDivisionAccess, canSeeDivision } from "../../config/permissions";
-// const API_BASE = "http://localhost:8080/api/check-portal";
-// const SETUP_API = "http://localhost:8080/api/admin-setup";
+import { getCurrentUser, canUseButton, logoutUser, hasAllDivisionAccess } from "../../config/permissions";
 
 const API_BASE = "https://time-tracker-system-production.up.railway.app/api/check-portal";
 const SETUP_API = "https://time-tracker-system-production.up.railway.app/api/admin-setup";
-// const AUTO_REFRESH = 10000;
 
-// Reasons a Picking Error can be logged under.
-// "Material Shortage" and "Collected Different Material" now create a
-// picking error (SKU/Qty capture + Emergency Pick workflow). "Material
-// Excess" is logged for record-keeping only — it does NOT create a picking
-// error / does not require SKU+Qty.
+const PAGE_SIZE = 25;
+
 const PICKING_ERROR_REASONS = [
   { key: "SHORTAGE", label: "Material Shortage", createsError: true },
   { key: "DIFFERENT", label: "Collected Different Material", createsError: true },
   { key: "EXCESS", label: "Material Excess", createsError: false },
 ];
 
-// Maximum length allowed for a SKU / Description entry on a picking-error
-// material row.
 const SKU_MAX_LENGTH = 80;
 
-// Status filters — normalized classes, shared between the dropdown and the
-// clickable stat chips so both always stay in sync. The "Wrong Material"
-// stat chip has been merged into "Pending" — an unresolved picking error is
-// treated as part of Pending, not a separate bucket.
 const STATUS_FILTERS = [
   { value: "ALL", label: "All Status" },
-  { value: "pending", label: "Pending" },
-  { value: "inprogress", label: "In Progress" },
-  { value: "onhold", label: "On Hold" },
-  { value: "completed", label: "Check Done" },
+  { value: "PENDING", label: "Pending" },
+  { value: "IN_PROGRESS", label: "In Progress" },
+  { value: "ON_HOLD", label: "On Hold" },
+  { value: "COMPLETED", label: "Check Done" },
 ];
 
-// ── Date filter options — Today (Sri Lanka time, default) / All / Custom
-// range. Same pattern as Print Portal / Pick Portal.
 const DATE_FILTER_OPTIONS = [
   { value: "TODAY", label: "Today" },
   { value: "ALL", label: "All" },
@@ -51,14 +36,6 @@ const DATE_FILTER_OPTIONS = [
 function formatDate(d) { return d || "—"; }
 function formatTime(t) { return t ? String(t).substring(0, 5) : "—"; }
 
-function formatDateTime(dt) {
-  if (!dt) return "—";
-  const d = new Date(dt);
-  return d.toLocaleString("en-GB", {
-    day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit",
-  });
-}
-
 function formatDuration(seconds) {
   if (seconds === null || seconds === undefined) return "—";
   const h = Math.floor(seconds / 3600);
@@ -69,20 +46,17 @@ function formatDuration(seconds) {
 
 function jobTypeColor(jt) {
   const map = {
-    balance:      "#a78bfa",
-    domestic:     "#34d399",
-    cost_center:  "#f59e0b",
-    commercial:   "#3b82f6",
-    sales_order:  "#f472b6",
+    balance: "#a78bfa", domestic: "#34d399", cost_center: "#f59e0b",
+    commercial: "#3b82f6", sales_order: "#f472b6",
   };
   return map[(jt || "").toLowerCase().replace(/\s+/g, "_")] || "#7c8db0";
 }
 
-// Groups documents by their request date and numbers each group starting
-// from 1 — same scheme as Pick Portal / Print Portal.
+// NOTE: same as Print/Pick — numbering restarts each page since the server
+// now sends one page at a time.
 function computeRequestIds(documents) {
   const dateKeyOf = (doc) => {
-    if (doc.requestDate)     return String(doc.requestDate).substring(0, 10);
+    if (doc.requestDate) return String(doc.requestDate).substring(0, 10);
     if (doc.createdDatetime) return String(doc.createdDatetime).substring(0, 10);
     return null;
   };
@@ -115,7 +89,7 @@ function computeRequestIds(documents) {
 
 function statusClass(s) {
   const v = (s || "").toLowerCase();
-  if (v.includes("hold"))     return "onhold";
+  if (v.includes("hold")) return "onhold";
   if (v.includes("progress")) return "inprogress";
   if (v.includes("complete") || v.includes("done")) return "completed";
   return "pending";
@@ -126,11 +100,6 @@ function statusLabel(s) {
   return { pending: "Pending", inprogress: "In Progress", onhold: "On Hold", completed: "Check Done" }[c];
 }
 
-// Parses the reason-wise SKU/Qty groups saved by the Hold popup.
-// New format: "Reason::sku1,sku2||Reason2::sku3"  (self-labelled groups,
-// one group per picking-error reason, each with its own SKU/Qty list).
-// Falls back to the old flat format (single reason, single SKU/Qty list)
-// for records saved before this change.
 function parsePickingErrorGroups(doc) {
   const sku = doc.wrongMaterialSku || "";
   const qty = doc.wrongMaterialQty || "";
@@ -162,12 +131,6 @@ function parsePickingErrorGroups(doc) {
   }));
 }
 
-// ── Date filter helpers ──────────────────────────────────────────────────
-// Returns today's date key (YYYY-MM-DD) in Sri Lanka time (UTC+5:30, no
-// DST), regardless of what timezone the browser/server/device is actually
-// running in. This is what "Today" always compares against, so the filter
-// is correct no matter where the page is opened from. Mirrors the Print
-// Portal / Pick Portal implementation exactly.
 function getSriLankaTodayKey() {
   const now = new Date();
   const utcMs = now.getTime() + now.getTimezoneOffset() * 60000;
@@ -177,36 +140,7 @@ function getSriLankaTodayKey() {
   return `${colombo.getFullYear()}-${pad(colombo.getMonth() + 1)}-${pad(colombo.getDate())}`;
 }
 
-// requestDate is stored as a plain date (no time/timezone component), so a
-// straight string comparison against YYYY-MM-DD keys is correct as-is.
-function docDateKey(doc) {
-  return doc.requestDate ? String(doc.requestDate).substring(0, 10) : null;
-}
-
-function matchesDateFilter(doc, mode, fromDate, toDate) {
-  if (mode === "ALL") return true;
-
-  const key = docDateKey(doc);
-
-  if (mode === "TODAY") {
-    return key === getSriLankaTodayKey();
-  }
-
-  if (mode === "CUSTOM") {
-    if (!fromDate && !toDate) return true;
-    if (!key) return false;
-    if (fromDate && key < fromDate) return false;
-    if (toDate && key > toDate) return false;
-    return true;
-  }
-
-  return true;
-}
-
-// ── Generic Person Picker — division scoped, mirrors Pick Portal exactly ───
-// Only names that exist in the Check Operators master table AND belong to
-// the current document's Division can be selected. No "Other" free text.
-
+// ── Person Picker ─────────────────────────────────────────────────────────
 function PersonPicker({ value, onChange, people, loading }) {
   return (
     <div className="ip-popup-options">
@@ -231,15 +165,7 @@ function PersonPicker({ value, onChange, people, loading }) {
   );
 }
 
-// ── Popup: Hold + Picking Error (Held By, division scoped) ──────────────────
-// Each error-creating reason (Shortage / Collected Different Material) keeps
-// its OWN set of SKU/Qty rows, since the materials involved can differ
-// between reasons. Rows are keyed by reason key in `materialsByReason` and
-// packed into self-labelled groups on confirm:
-//   "Material Shortage::SKU1,SKU2||Collected Different Material::SKU3"
-// so each reason's materials stay tied together after saving to the DB
-// (pickingErrorReason / wrongMaterialSku / wrongMaterialQty columns).
-
+// ── Popup: Hold + Picking Error ─────────────────────────────────────────────
 function HoldPopup({ people, peopleLoading, onConfirm, onCancel }) {
   const [heldBy, setHeldBy] = useState("");
   const [pickingErrorKeys, setPickingErrorKeys] = useState([]);
@@ -308,15 +234,10 @@ function HoldPopup({ people, peopleLoading, onConfirm, onCancel }) {
   const handleConfirm = () => {
     const hasWrongMaterial = needsDetails ? "YES" : "NO";
 
-    // Multiple selected reasons are combined into one string for the DB —
-    // same field, just a comma-joined list when more than one is picked.
     const reasonJoined = pickingErrorKeys.includes("NONE")
       ? ""
       : selectedReasons.map(r => r.label).join(", ");
 
-    // Self-labelled groups so each reason's SKU/Qty stays tied together —
-    // "Reason::sku1,sku2||Reason2::sku3" — parsed back out by
-    // parsePickingErrorGroups() wherever this is displayed.
     const skuJoined = needsDetails
       ? errorReasons
           .map(r => `${r.label}::${filledFor(r.key).map(m => m.sku.trim()).join(",")}`)
@@ -375,7 +296,7 @@ function HoldPopup({ people, peopleLoading, onConfirm, onCancel }) {
                       <input
                         className="ip-popup-text-input"
                         type="text"
-                        placeholder="SKU / Description (max 8 characters)"
+                        placeholder="SKU / Description"
                         value={m.sku}
                         maxLength={SKU_MAX_LENGTH}
                         onChange={e => updateMaterialRow(r.key, idx, "sku", e.target.value)}
@@ -438,8 +359,7 @@ function HoldPopup({ people, peopleLoading, onConfirm, onCancel }) {
   );
 }
 
-// ── Popup: Check Done (division scoped) ──────────────────────────────────────
-
+// ── Popup: Check Done ────────────────────────────────────────────────────────
 function CheckDonePopup({ people, peopleLoading, onConfirm, onCancel }) {
   const [checkedBy, setCheckedBy] = useState("");
   const canConfirm = !!checkedBy;
@@ -470,8 +390,7 @@ function CheckDonePopup({ people, peopleLoading, onConfirm, onCancel }) {
   );
 }
 
-// ── Popup: Edit (Held By / Checked By only) — mirrors Pick Portal's Edit ───
-
+// ── Popup: Edit ───────────────────────────────────────────────────────────
 function EditPopup({ doc, people, peopleLoading, onConfirm, onCancel }) {
   const [heldBy, setHeldBy] = useState(doc?.checkHeldBy || "");
   const [checkedBy, setCheckedBy] = useState(doc?.checkedBy || "");
@@ -507,8 +426,7 @@ function EditPopup({ doc, people, peopleLoading, onConfirm, onCancel }) {
   );
 }
 
-// ── Popup: View Full Details (Print + Pick) ──────────────────────────────────
-
+// ── Popup: View Full Details ─────────────────────────────────────────────────
 function ViewDetailsPopup({ doc, requestId, divisionLabel, onClose }) {
   if (!doc) return null;
 
@@ -569,8 +487,6 @@ function ViewDetailsPopup({ doc, requestId, divisionLabel, onClose }) {
           {row("Pick Duration", `⏱ ${formatDuration(doc.pickDurationSeconds ?? doc.durationSeconds)}`)}
         </div>
 
-        {/* Picking Note — logged for record-keeping only (e.g. "Material
-            Excess"), no SKU/Qty capture, so it stays a plain note. */}
         {doc.pickingErrorReason && !isFlagged && (
           <>
             <div style={{ marginBottom: 6, fontSize: "0.78rem", fontWeight: 700, color: "#7c8db0" }}>
@@ -582,9 +498,6 @@ function ViewDetailsPopup({ doc, requestId, divisionLabel, onClose }) {
           </>
         )}
 
-        {/* Picking Error — each reason (Shortage / Collected Different
-            Material) is shown as its own group with its own SKU + Quantity,
-            whether the error is still pending Emergency Pick or resolved. */}
         {isFlagged && (() => {
           const groups = parsePickingErrorGroups(doc);
           return (
@@ -628,8 +541,7 @@ function ViewDetailsPopup({ doc, requestId, divisionLabel, onClose }) {
   );
 }
 
-// ── Popup: New Emergency Pick Done Alert (auto-triggered from Pick Portal) ──
-
+// ── Popup: New Emergency Pick Done Alert ────────────────────────────────────
 function ResolvedPickAlertPopup({ docs, requestIdMap, onJump, onClose }) {
   return (
     <div className="ip-popup-overlay">
@@ -677,13 +589,10 @@ function ResolvedPickAlertPopup({ docs, requestIdMap, onJump, onClose }) {
 }
 
 // ── Single Document Card ─────────────────────────────────────────────────────
-
 function DocumentCard({
   doc, requestId, divisionLabel,
   onStart, onHold, onEnd, onView, onEdit, onDelete,
   cardRef, jumpHighlighted,
-  // Role-based permission flags (from permissions.js → canUseButton).
-  // Computed once in the parent and passed down.
   canStartBtn, canHoldBtn, canEndBtn, canEditBtn, canDeleteBtn,
 }) {
   const sc        = statusClass(doc.checkStatus);
@@ -697,12 +606,8 @@ function DocumentCard({
   const hasUnresolvedError = isFlagged && !doc.emergencyPickResolved && !isDone;
   const hasResolvedError = isFlagged && doc.emergencyPickResolved && !isDone;
 
-  // Button availability = correct workflow state AND the logged-in role is
-  // permitted to use that button (permissions.js).
   const canStart = (isPending || isOnHold) && canStartBtn;
   const canHold = isStarted && canHoldBtn;
-  // On Hold state: only Resume is enabled. End only becomes available
-  // after Resume has been clicked (i.e. status is back to In Progress).
   const canEnd = isStarted && canEndBtn;
 
   const cardClassName =
@@ -725,53 +630,30 @@ function DocumentCard({
     : undefined;
 
   const jumpStyle = jumpHighlighted
-    ? {
-        outline: "3px solid #facc15",
-        outlineOffset: 2,
-        transition: "outline-color 0.3s ease",
-      }
+    ? { outline: "3px solid #facc15", outlineOffset: 2, transition: "outline-color 0.3s ease" }
     : undefined;
 
   return (
     <div ref={cardRef} className={cardClassName} style={{ ...cardStyle, ...jumpStyle }}>
       {hasUnresolvedError && (
-        <div
-          style={{
-            background: "#ef4444",
-            color: "#fff",
-            fontWeight: 700,
-            fontSize: "0.78rem",
-            padding: "6px 12px",
-            borderRadius: 6,
-            marginBottom: 10,
-            display: "flex",
-            alignItems: "center",
-            gap: 6,
-          }}
-        >
+        <div style={{
+          background: "#ef4444", color: "#fff", fontWeight: 700, fontSize: "0.78rem",
+          padding: "6px 12px", borderRadius: 6, marginBottom: 10,
+          display: "flex", alignItems: "center", gap: 6,
+        }}>
           🚨 PICKING ERROR{doc.pickingErrorReason ? ` (${doc.pickingErrorReason})` : ""} — Emergency Pick Required
         </div>
       )}
       {hasResolvedError && (
-        <div
-          style={{
-            background: "#34d399",
-            color: "#06281c",
-            fontWeight: 700,
-            fontSize: "0.78rem",
-            padding: "6px 12px",
-            borderRadius: 6,
-            marginBottom: 10,
-            display: "flex",
-            alignItems: "center",
-            gap: 6,
-          }}
-        >
+        <div style={{
+          background: "#34d399", color: "#06281c", fontWeight: 700, fontSize: "0.78rem",
+          padding: "6px 12px", borderRadius: 6, marginBottom: 10,
+          display: "flex", alignItems: "center", gap: 6,
+        }}>
           ✅ EMERGENCY PICK DONE — Re-picked, ready to continue check
         </div>
       )}
 
-      {/* ── Head ── */}
       <div className="ip-card-head">
         <div>
           <div className="ip-doc-no">{requestId || "—"}</div>
@@ -787,9 +669,6 @@ function DocumentCard({
             </div>
           )}
         </div>
-        {/* Merged badge — a document that's both "pending"/whatever status AND
-            carrying an unresolved picking error only ever shows ONE badge:
-            the picking-error state takes priority over the plain status. */}
         <span className={`ip-badge ${hasUnresolvedError ? "onhold" : hasResolvedError ? "completed" : sc}`}>
           {hasUnresolvedError
             ? "🚨 Picking Error Pending"
@@ -799,7 +678,6 @@ function DocumentCard({
         </span>
       </div>
 
-      {/* ── Body ── */}
       <div className="ip-card-body">
         <div className="ip-detail-row">
           <span className="ip-detail-label">Requested By</span>
@@ -829,28 +707,25 @@ function DocumentCard({
           </div>
         </div>
 
-       {(isOnHold || doc.checkHeldBy) && (
-  <div className="ip-hold-box">
-    <div className="ip-hold-row">
-      <span>Held By</span>
-      <span>👤 {doc.checkHeldBy || "—"}</span>
-    </div>
-    <div className="ip-hold-row">
-      <span>Held At</span>
-      <span>{formatSriLankaTime(doc.checkHoldTime)}</span>
-    </div>
-    {doc.checkResumeTime && (
-      <div className="ip-hold-row">
-        <span>Resumed At</span>
-        <span>{formatSriLankaTime(doc.checkResumeTime)}</span>
-      </div>
-    )}
-  </div>
-)}
+        {(isOnHold || doc.checkHeldBy) && (
+          <div className="ip-hold-box">
+            <div className="ip-hold-row">
+              <span>Held By</span>
+              <span>👤 {doc.checkHeldBy || "—"}</span>
+            </div>
+            <div className="ip-hold-row">
+              <span>Held At</span>
+              <span>{formatSriLankaTime(doc.checkHoldTime)}</span>
+            </div>
+            {doc.checkResumeTime && (
+              <div className="ip-hold-row">
+                <span>Resumed At</span>
+                <span>{formatSriLankaTime(doc.checkResumeTime)}</span>
+              </div>
+            )}
+          </div>
+        )}
 
-        {/* Wrong-material box — each reason (Shortage / Collected Different
-            Material) shown as its own group, with its own SKU + Qty, font
-            kept small to match the rest of the card's stat text. */}
         {isFlagged && (
           <div className="ip-wrong-material-box">
             {parsePickingErrorGroups(doc).map((g, i) => (
@@ -892,36 +767,31 @@ function DocumentCard({
               <div className="ip-no-issue-box">✅ No material issues</div>
             )}
 
-     <div className="ip-print-done-box">
-  <div className="ip-print-done-row">
-    <span>Started At</span>
-    <span>{formatSriLankaTime(doc.checkStartTime)}</span>
-  </div>
-  <div className="ip-print-done-row">
-    <span>Ended At</span>
-    <span>{formatSriLankaTime(doc.checkEndTime)}</span>
-  </div>
-  <div className="ip-print-done-row">
-    <span>Checked By</span>
-    <span>👤 {doc.checkedBy || "—"}</span>
-  </div>
-  <div className="ip-print-done-row">
-    <span>Duration</span>
-    <span>⏱ {formatDuration(doc.checkDurationSeconds)}</span>
-  </div>
-</div>
+            <div className="ip-print-done-box">
+              <div className="ip-print-done-row">
+                <span>Started At</span>
+                <span>{formatSriLankaTime(doc.checkStartTime)}</span>
+              </div>
+              <div className="ip-print-done-row">
+                <span>Ended At</span>
+                <span>{formatSriLankaTime(doc.checkEndTime)}</span>
+              </div>
+              <div className="ip-print-done-row">
+                <span>Checked By</span>
+                <span>👤 {doc.checkedBy || "—"}</span>
+              </div>
+              <div className="ip-print-done-row">
+                <span>Duration</span>
+                <span>⏱ {formatDuration(doc.checkDurationSeconds)}</span>
+              </div>
+            </div>
           </>
         )}
       </div>
 
-      {/* ── Footer Buttons ── */}
       <div className="ip-card-foot">
         {isDone ? (
           <>
-            {/* Edit/Delete are hidden entirely (not just disabled) unless
-                the logged-in role has "edit"/"delete" in permissions.js.
-                Checker's button list does not include them, so a Checker
-                never sees these two on a completed card. */}
             {canEditBtn && (
               <button className="ip-btn ip-btn-edit" onClick={() => onEdit(doc)}>
                 ✎ Edit
@@ -938,31 +808,16 @@ function DocumentCard({
           </>
         ) : (
           <>
-            <button
-              className="ip-btn ip-btn-start"
-              disabled={!canStart}
-              onClick={() => onStart(doc.id)}
-            >
+            <button className="ip-btn ip-btn-start" disabled={!canStart} onClick={() => onStart(doc.id)}>
               {isOnHold ? "▶ Resume" : "▶ Start"}
             </button>
-            <button
-              className="ip-btn ip-btn-hold"
-              disabled={!canHold}
-              onClick={() => onHold(doc.id)}
-            >
+            <button className="ip-btn ip-btn-hold" disabled={!canHold} onClick={() => onHold(doc.id)}>
               ⏸ Hold
             </button>
-            <button
-              className="ip-btn ip-btn-end"
-              disabled={!canEnd}
-              onClick={() => onEnd(doc.id)}
-            >
+            <button className="ip-btn ip-btn-end" disabled={!canEnd} onClick={() => onEnd(doc.id)}>
               ■ End
             </button>
-            <button
-              className="ip-btn ip-btn-outline"
-              onClick={() => onView(doc.id)}
-            >
+            <button className="ip-btn ip-btn-outline" onClick={() => onView(doc.id)}>
               👁 View
             </button>
           </>
@@ -973,7 +828,6 @@ function DocumentCard({
 }
 
 // ── Skeleton Card ────────────────────────────────────────────────────────────
-
 function SkeletonCard() {
   return (
     <div className="ip-card status-pending">
@@ -997,7 +851,6 @@ function SkeletonCard() {
 }
 
 // ── Main Component ───────────────────────────────────────────────────────────
-
 export default function IssueCheckForm() {
   const navigate = useNavigate();
 
@@ -1010,17 +863,20 @@ export default function IssueCheckForm() {
   const [lastUpdated,  setLastUpdated]  = useState(null);
   const [refreshing,   setRefreshing]   = useState(false);
 
-  // ── Date filter — defaults to "Today" (Sri Lanka time). "All" clears
-  // it, "Custom" opens a From/To range. Recomputes on every render (and
-  // the auto-refresh timer keeps this component re-rendering), so at
-  // midnight Colombo time "Today" automatically rolls over to the new
-  // day without needing a page reload. Mirrors Print Portal / Pick Portal.
-  const [dateFilterMode, setDateFilterMode] = useState("TODAY"); // "TODAY" | "ALL" | "CUSTOM"
+  // ── Pagination — server returns PAGE_SIZE (25) rows at a time ─────────
+  const [page, setPage] = useState(0);
+  const [totalPages, setTotalPages] = useState(0);
+  const [totalElements, setTotalElements] = useState(0);
+
+  const [dateFilterMode, setDateFilterMode] = useState("TODAY");
   const [fromDate,     setFromDate]     = useState("");
   const [toDate,       setToDate]       = useState("");
 
-  // Logged-in user (from sessionStorage via permissions.js) — read once on
-  // mount. Used to compute which buttons this role is allowed to see/use.
+  // ── Stats (Total / Pending / In Progress / On Hold / Check Done / Wrong) ──
+  const [stats, setStats] = useState({
+    total: 0, pending: 0, inProgress: 0, onHold: 0, completed: 0, wrongMaterial: 0,
+  });
+
   const currentUser = useMemo(() => getCurrentUser(), []);
   const buttonPerms = useMemo(() => ({
     start: canUseButton(currentUser, "start"),
@@ -1030,9 +886,6 @@ export default function IssueCheckForm() {
     delete: canUseButton(currentUser, "delete"),
   }), [currentUser]);
 
-  // Same rule as Confirm Portal: Admin / System Administrator already have
-  // a Logout control elsewhere (their own dashboard/navbar), so it's hidden
-  // here for them — every other role (Checker included) sees it.
   const isAdminRole =
     currentUser?.staffName === "Admin" ||
     currentUser?.staffName === "System Administrator";
@@ -1042,16 +895,23 @@ export default function IssueCheckForm() {
     navigate("/login", { replace: true });
   };
 
-  // Divisions (Admin Master Data) — used to label each card and to scope
-  // which check-operators show up in the popups, exactly like Pick Portal.
+  // Divisions this user is scoped to — sent to the backend, same pattern
+  // as Print/Pick Portal.
+  const hasFullDivisionAccess = useMemo(() => hasAllDivisionAccess(currentUser), [currentUser]);
+  const divisionsParam = useMemo(() => {
+    if (hasFullDivisionAccess) return undefined;
+    if (Array.isArray(currentUser?.divisions) && currentUser.divisions.length > 0) {
+      return currentUser.divisions.join(",");
+    }
+    return undefined;
+  }, [hasFullDivisionAccess, currentUser]);
+
   const [divisions, setDivisions] = useState([]);
 
-  // Checker names shown in the currently open popup — scoped to that
-  // document's Division, fetched fresh each time a popup opens.
   const [popupOperators,        setPopupOperators]        = useState([]);
   const [popupOperatorsLoading, setPopupOperatorsLoading]  = useState(false);
 
-  const [activePopup,  setActivePopup]  = useState(null); // "hold" | "end" | "view" | "edit" | null
+  const [activePopup,  setActivePopup]  = useState(null);
   const [activeId,     setActiveId]     = useState(null);
 
   const [resolvedAlertDocs, setResolvedAlertDocs] = useState([]);
@@ -1068,64 +928,61 @@ export default function IssueCheckForm() {
     setTimeout(() => setJumpHighlightId(prev => (prev === id ? null : prev)), 2500);
   };
 
-  // ── Fetch documents ──
+  const activeDateParam =
+    dateFilterMode === "TODAY" ? getSriLankaTodayKey() :
+    dateFilterMode === "CUSTOM" && fromDate ? fromDate :
+    undefined;
+
   const fetchDocuments = useCallback(async (silent = false) => {
-  if (!silent) setLoading(true);
-  else setRefreshing(true);
-  setError(null);
-  try {
-    const res  = await fetch(API_BASE);
-    if (!res.ok) throw new Error(`Server error: ${res.status}`);
-    const data = await res.json();
-    const readyForCheck = data.filter(d => {
-      const pickDone = statusClass(d.status) === "completed";
-      const hasDocNo = d.printDocumentNo && String(d.printDocumentNo).trim() !== "";
-      return pickDone && hasDocNo;
-    });
+    if (!silent) setLoading(true);
+    else setRefreshing(true);
+    setError(null);
+    try {
+      const params = new URLSearchParams({ page: String(page), size: String(PAGE_SIZE) });
+      if (filterType !== "ALL") params.set("jobType", filterType);
+      if (filterStatus !== "ALL") params.set("status", filterStatus);
+      if (search) params.set("search", search);
+      if (activeDateParam) params.set("date", activeDateParam);
+      if (divisionsParam) params.set("divisions", divisionsParam);
 
-    // ── Division scoping ──────────────────────────────────────────────
-    // Admin / System Administrator (allDivisions: true) see everything.
-    // Every other role (Checker included) is hard-scoped to only the
-    // division(s) assigned to their User Account in Master Setup — same
-    // rule AdminDashboard already uses.
-    const divisionScoped = hasAllDivisionAccess(currentUser)
-      ? readyForCheck
-      : readyForCheck.filter(d => canSeeDivision(currentUser, d.divisionNo));
+      const res = await fetch(`${API_BASE}/paged?${params.toString()}`);
+      if (!res.ok) throw new Error(`Server error: ${res.status}`);
+      const data = await res.json();
+      setDocuments(data.content || []);
+      setTotalPages(data.totalPages || 0);
+      setTotalElements(data.totalElements || 0);
+      setLastUpdated(new Date());
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, [page, filterType, filterStatus, search, activeDateParam, divisionsParam]);
 
-    setDocuments(divisionScoped);
-    setLastUpdated(new Date());
-  } catch (err) {
-    setError(err.message);
-  } finally {
-    setLoading(false);
-    setRefreshing(false);
-  }
-}, [currentUser]);
-  // const fetchDocuments = useCallback(async (silent = false) => {
-  //   if (!silent) setLoading(true);
-  //   else setRefreshing(true);
-  //   setError(null);
-  //   try {
-  //     const res  = await fetch(API_BASE);
-  //     if (!res.ok) throw new Error(`Server error: ${res.status}`);
-  //     const data = await res.json();
-  //     const readyForCheck = data.filter(d => {
-  //       const pickDone = statusClass(d.status) === "completed";
-  //       const hasDocNo = d.printDocumentNo && String(d.printDocumentNo).trim() !== "";
-  //       return pickDone && hasDocNo;
-  //     });
+  const fetchStats = useCallback(async () => {
+    try {
+      const params = new URLSearchParams();
+      if (activeDateParam) params.set("date", activeDateParam);
+      if (divisionsParam) params.set("divisions", divisionsParam);
 
-  //     setDocuments(readyForCheck);
-  //     setLastUpdated(new Date());
-  //   } catch (err) {
-  //     setError(err.message);
-  //   } finally {
-  //     setLoading(false);
-  //     setRefreshing(false);
-  //   }
-  // }, []);
+      const res = await fetch(`${API_BASE}/stats?${params.toString()}`);
+      if (res.ok) {
+        const data = await res.json();
+        setStats({
+          total: data.total ?? 0,
+          pending: data.pending ?? 0,
+          inProgress: data.inProgress ?? 0,
+          onHold: data.onHold ?? 0,
+          completed: data.completed ?? 0,
+          wrongMaterial: data.wrongMaterial ?? 0,
+        });
+      }
+    } catch (e) {
+      console.warn("Failed to load stats", e);
+    }
+  }, [activeDateParam, divisionsParam]);
 
-  // ── Fetch divisions ──
   const fetchDivisions = useCallback(async () => {
     try {
       const res = await fetch(`${SETUP_API}/divisions`);
@@ -1144,9 +1001,6 @@ export default function IssueCheckForm() {
     return map;
   }, [divisions]);
 
-  // Division-wise checkers — Master Setup's /check-operators endpoint
-  // returns ALL checkers, so we fetch them all and filter client-side on
-  // divisionNo, exactly like Pick Portal does for /pickers.
   const fetchOperatorsForDivision = useCallback(async (divisionNo) => {
     if (!divisionNo) {
       setPopupOperators([]);
@@ -1177,24 +1031,35 @@ export default function IssueCheckForm() {
     }
   }, []);
 
+  // Reset to page 0 whenever a filter changes.
+  useEffect(() => {
+    setPage(0);
+  }, [filterType, filterStatus, search, dateFilterMode, fromDate, toDate]);
+
   useEffect(() => {
     fetchDocuments(false);
-    fetchDivisions();
-  }, [fetchDocuments, fetchDivisions]);
+  }, [fetchDocuments]);
 
-  // useEffect(() => {
-  //   const id = setInterval(() => fetchDocuments(true), AUTO_REFRESH);
-  //   return () => clearInterval(id);
-  // }, [fetchDocuments]);
+  useEffect(() => {
+    fetchStats();
+  }, [fetchStats]);
+
+  useEffect(() => {
+    fetchDivisions();
+  }, [fetchDivisions]);
 
   const getDocById = useCallback((id) => documents.find(d => d.id === id), [documents]);
 
-  // ── Start / Resume ──
+  const refreshAll = (silent) => {
+    fetchDocuments(silent);
+    fetchStats();
+  };
+
   const handleStart = async (id) => {
     if (!buttonPerms.start) return;
     try {
       await fetch(`${API_BASE}/${id}/start`, { method: "PUT" });
-      fetchDocuments(true);
+      refreshAll(true);
     } catch (err) {
       alert("Start failed: " + err.message);
     }
@@ -1218,8 +1083,6 @@ export default function IssueCheckForm() {
 
   const handleViewClick = (id) => { setActiveId(id); setActivePopup("view"); };
 
-  // Edit — reopens pre-filled with the completed document's Held By / Checked
-  // By. Blocked for any role without the "edit" permission (e.g. Checker).
   const handleEditClick = async (doc) => {
     if (!buttonPerms.edit) return;
     setActiveId(doc.id);
@@ -1250,7 +1113,7 @@ export default function IssueCheckForm() {
         body: JSON.stringify({ heldBy, hasWrongMaterial, wrongMaterialSku, wrongMaterialQty, pickingErrorReason }),
       });
       await assertOk(res, "Hold");
-      fetchDocuments(true);
+      refreshAll(true);
     } catch (err) {
       alert(err.message);
     }
@@ -1266,7 +1129,7 @@ export default function IssueCheckForm() {
         body: JSON.stringify({ checkedBy }),
       });
       await assertOk(res, "Check Done");
-      fetchDocuments(true);
+      refreshAll(true);
     } catch (err) {
       alert(err.message);
     }
@@ -1282,7 +1145,7 @@ export default function IssueCheckForm() {
         body: JSON.stringify({ heldBy, checkedBy }),
       });
       await assertOk(res, "Edit");
-      fetchDocuments(true);
+      refreshAll(true);
     } catch (err) {
       alert(err.message);
     }
@@ -1294,7 +1157,7 @@ export default function IssueCheckForm() {
     try {
       const res = await fetch(`${API_BASE}/${id}`, { method: "DELETE" });
       await assertOk(res, "Delete");
-      fetchDocuments(true);
+      refreshAll(true);
     } catch (err) {
       alert(err.message);
     }
@@ -1302,6 +1165,7 @@ export default function IssueCheckForm() {
 
   const requestIdMap = useMemo(() => computeRequestIds(documents), [documents]);
 
+  // NOTE: only scans the current page, same caveat as Print/Pick Portal.
   const activeErrorDocs = useMemo(
     () => documents.filter(d => {
       const isFlagged = (d.hasWrongMaterial || "").toUpperCase() === "YES";
@@ -1331,59 +1195,7 @@ export default function IssueCheckForm() {
     });
   }, [resolvedErrorDocs]);
 
-  // ── Filters ──
   const jobTypes = ["ALL", ...new Set(documents.map(d => d.jobType).filter(Boolean))];
-
-  const visible = documents.filter(doc => {
-    const q = search.toLowerCase();
-    const matchSearch = !q || [
-      String(doc.id), doc.requestedBy, doc.jobwbs,
-      doc.reservationNo, doc.enteredBy, doc.jobType,
-    ].some(v => (v || "").toLowerCase().includes(q));
-
-    const matchType = filterType === "ALL" || doc.jobType === filterType;
-
-    // "Pending" is merged with unresolved picking errors — a flagged
-    // document that hasn't been re-picked yet counts as Pending even if its
-    // raw checkStatus is something else (e.g. ON_HOLD).
-    const docSc = statusClass(doc.checkStatus);
-    const isWrongMaterial = (doc.hasWrongMaterial || "").toUpperCase() === "YES";
-    const hasUnresolvedError = isWrongMaterial && !doc.emergencyPickResolved && docSc !== "completed";
-    const matchStatus =
-      filterStatus === "ALL" ? true :
-      filterStatus === "pending" ? (docSc === "pending" || hasUnresolvedError) :
-      docSc === filterStatus;
-
-    const matchDate = matchesDateFilter(doc, dateFilterMode, fromDate, toDate);
-
-    return matchSearch && matchType && matchStatus && matchDate;
-  });
-
-  // Stats — scoped by the date filter too, so counts on screen always match
-  // what's actually shown in the grid below (e.g. "Today" only counts
-  // today's documents, not every document ever entered). Mirrors Print
-  // Portal / Pick Portal.
-  const dateScoped = useMemo(
-    () => documents.filter(doc => matchesDateFilter(doc, dateFilterMode, fromDate, toDate)),
-    [documents, dateFilterMode, fromDate, toDate]
-  );
-
-  const total     = dateScoped.length;
-  const inProg    = dateScoped.filter(d => statusClass(d.checkStatus) === "inprogress").length;
-  const onHold    = dateScoped.filter(d => statusClass(d.checkStatus) === "onhold").length;
-  const completed = dateScoped.filter(d => statusClass(d.checkStatus) === "completed").length;
-  const wrongCount = dateScoped.filter(d => (d.hasWrongMaterial || "").toUpperCase() === "YES").length;
-
-  // "Wrong Material" is merged into "Pending" — a document with an
-  // unresolved picking error is counted (and shown) under Pending rather
-  // than as a separate bucket.
-  const isPendingOrUnresolvedError = (d) => {
-    const sc = statusClass(d.checkStatus);
-    const isFlagged = (d.hasWrongMaterial || "").toUpperCase() === "YES";
-    const hasUnresolvedError = isFlagged && !d.emergencyPickResolved && sc !== "completed";
-    return sc === "pending" || hasUnresolvedError;
-  };
-  const pending = dateScoped.filter(isPendingOrUnresolvedError).length;
 
   const handleStatClick = (statusValue) => setFilterStatus(statusValue);
 
@@ -1437,8 +1249,7 @@ export default function IssueCheckForm() {
         />
       )}
 
-      {/* ── Header ── */}
-     <div className="ip-header">
+      <div className="ip-header">
         <div className="ip-header-left">
           <h1>LOGITRACK-WAREHOUSE TIME EFFICENCY TRACKER SYSTEM</h1>
           <h1>  Check Portal</h1>
@@ -1455,7 +1266,7 @@ export default function IssueCheckForm() {
           <button
             className="ip-btn ip-btn-outline"
             style={{ flex: "unset", padding: "8px 18px" }}
-            onClick={() => fetchDocuments(false)}
+            onClick={() => refreshAll(false)}
           >
             ↻ Refresh
           </button>
@@ -1471,20 +1282,11 @@ export default function IssueCheckForm() {
         </div>
       </div>
 
-      {/* ── Active Picking Error Notification Bar ── */}
       {activeErrorDocs.length > 0 && (
-        <div
-          style={{
-            background: "rgba(239,68,68,0.15)",
-            border: "1px solid #ef4444",
-            borderRadius: 8,
-            padding: "12px 16px",
-            marginBottom: 18,
-            display: "flex",
-            flexDirection: "column",
-            gap: 8,
-          }}
-        >
+        <div style={{
+          background: "rgba(239,68,68,0.15)", border: "1px solid #ef4444", borderRadius: 8,
+          padding: "12px 16px", marginBottom: 18, display: "flex", flexDirection: "column", gap: 8,
+        }}>
           <div style={{ color: "#ef4444", fontWeight: 700, fontSize: "0.9rem", display: "flex", alignItems: "center", gap: 8 }}>
             🚨 {activeErrorDocs.length} Picking Error{activeErrorDocs.length > 1 ? "s" : ""} Pending — waiting on Pick Portal
           </div>
@@ -1493,12 +1295,8 @@ export default function IssueCheckForm() {
               <span
                 key={d.id}
                 style={{
-                  background: "#ef4444",
-                  color: "#fff",
-                  fontWeight: 600,
-                  fontSize: "0.78rem",
-                  padding: "4px 10px",
-                  borderRadius: 6,
+                  background: "#ef4444", color: "#fff", fontWeight: 600, fontSize: "0.78rem",
+                  padding: "4px 10px", borderRadius: 6,
                 }}
               >
                 {requestIdMap[d.id] || "—"} · Doc No: {d.printDocumentNo || "—"}
@@ -1508,20 +1306,11 @@ export default function IssueCheckForm() {
         </div>
       )}
 
-      {/* ── Resolved Picking Error Notification Bar ── */}
       {resolvedErrorDocs.length > 0 && (
-        <div
-          style={{
-            background: "rgba(52,211,153,0.15)",
-            border: "1px solid #34d399",
-            borderRadius: 8,
-            padding: "12px 16px",
-            marginBottom: 18,
-            display: "flex",
-            flexDirection: "column",
-            gap: 8,
-          }}
-        >
+        <div style={{
+          background: "rgba(52,211,153,0.15)", border: "1px solid #34d399", borderRadius: 8,
+          padding: "12px 16px", marginBottom: 18, display: "flex", flexDirection: "column", gap: 8,
+        }}>
           <div style={{ color: "#34d399", fontWeight: 700, fontSize: "0.9rem", display: "flex", alignItems: "center", gap: 8 }}>
             ✅ {resolvedErrorDocs.length} Emergency Pick{resolvedErrorDocs.length > 1 ? "s" : ""} Done — re-picked, ready to continue check
           </div>
@@ -1531,14 +1320,8 @@ export default function IssueCheckForm() {
                 key={d.id}
                 onClick={() => handleJumpToCard(d.id)}
                 style={{
-                  background: "#34d399",
-                  color: "#06281c",
-                  fontWeight: 600,
-                  fontSize: "0.78rem",
-                  padding: "4px 10px",
-                  borderRadius: 6,
-                  border: "none",
-                  cursor: "pointer",
+                  background: "#34d399", color: "#06281c", fontWeight: 600, fontSize: "0.78rem",
+                  padding: "4px 10px", borderRadius: 6, border: "none", cursor: "pointer",
                 }}
               >
                 {requestIdMap[d.id] || "—"} · Doc No: {d.printDocumentNo || "—"} · Emergency Pick Done
@@ -1548,14 +1331,13 @@ export default function IssueCheckForm() {
         </div>
       )}
 
-      {/* ── Toolbar ── */}
       <div className="ip-toolbar">
         <div className="ip-search-wrap">
           <span className="ip-search-icon">🔍</span>
           <input
             className="ip-search"
             type="text"
-            placeholder="Search by ID, Requested By, WBS, Reservation..."
+            placeholder="Search by Requested By, WBS, Reservation..."
             value={search}
             onChange={e => setSearch(e.target.value)}
           />
@@ -1568,8 +1350,6 @@ export default function IssueCheckForm() {
         </select>
       </div>
 
-      {/* ── Date filter — Today (Sri Lanka time, default) / All / Custom
-          range. Same toolbar pattern as Print Portal / Pick Portal. ── */}
       <div className="ip-toolbar" style={{ marginTop: -6 }}>
         {DATE_FILTER_OPTIONS.map(opt => (
           <button
@@ -1612,52 +1392,49 @@ export default function IssueCheckForm() {
         )}
       </div>
 
-      {/* ── Stats — all clickable, filter the grid below ── */}
       <div className="ip-stats">
         <button
           type="button"
           className={`ip-stat-chip blue ip-stat-chip-clickable ${filterStatus === "ALL" ? "active" : ""}`}
           onClick={() => handleStatClick("ALL")}
         >
-          Total <strong>{total}</strong>
+          Total <strong>{stats.total}</strong>
         </button>
         <button
           type="button"
-          className={`ip-stat-chip ip-stat-chip-clickable ${filterStatus === "pending" ? "active" : ""}`}
-          onClick={() => handleStatClick("pending")}
+          className={`ip-stat-chip ip-stat-chip-clickable ${filterStatus === "PENDING" ? "active" : ""}`}
+          onClick={() => handleStatClick("PENDING")}
         >
-          <strong style={{color:"#f59e0b"}}>{pending}</strong> Pending
-          {wrongCount > 0 && (
+          <strong style={{color:"#f59e0b"}}>{stats.pending}</strong> Pending
+          {stats.wrongMaterial > 0 && (
             <span style={{ marginLeft: 6, color: "#ef4444", fontWeight: 700, fontSize: "0.75rem" }}>
-              ⚠️ {wrongCount}
+              ⚠️ {stats.wrongMaterial}
             </span>
           )}
         </button>
         <button
           type="button"
-          className={`ip-stat-chip ip-stat-chip-clickable ${filterStatus === "inprogress" ? "active" : ""}`}
-          onClick={() => handleStatClick("inprogress")}
+          className={`ip-stat-chip ip-stat-chip-clickable ${filterStatus === "IN_PROGRESS" ? "active" : ""}`}
+          onClick={() => handleStatClick("IN_PROGRESS")}
         >
-          <strong style={{color:"#3b82f6"}}>{inProg}</strong> In Progress
+          <strong style={{color:"#3b82f6"}}>{stats.inProgress}</strong> In Progress
         </button>
         <button
           type="button"
-          className={`ip-stat-chip ip-stat-chip-clickable ${filterStatus === "onhold" ? "active" : ""}`}
-          onClick={() => handleStatClick("onhold")}
+          className={`ip-stat-chip ip-stat-chip-clickable ${filterStatus === "ON_HOLD" ? "active" : ""}`}
+          onClick={() => handleStatClick("ON_HOLD")}
         >
-          <strong style={{color:"#fb923c"}}>{onHold}</strong> On Hold
+          <strong style={{color:"#fb923c"}}>{stats.onHold}</strong> On Hold
         </button>
         <button
           type="button"
-          className={`ip-stat-chip green ip-stat-chip-clickable ${filterStatus === "completed" ? "active" : ""}`}
-          onClick={() => handleStatClick("completed")}
+          className={`ip-stat-chip green ip-stat-chip-clickable ${filterStatus === "COMPLETED" ? "active" : ""}`}
+          onClick={() => handleStatClick("COMPLETED")}
         >
-          Check Done <strong>{completed}</strong>
+          Check Done <strong>{stats.completed}</strong>
         </button>
-        <div className="ip-stat-chip">Showing <strong style={{color:"#a78bfa"}}>{visible.length}</strong> of {total}</div>
       </div>
 
-      {/* ── Error ── */}
       {error && (
         <div style={{
           background:"rgba(239,68,68,0.12)", border:"1px solid #ef4444",
@@ -1665,24 +1442,23 @@ export default function IssueCheckForm() {
           marginBottom:18, fontSize:"0.85rem",
         }}>
           ⚠ {error} —{" "}
-          <button onClick={() => fetchDocuments(false)}
+          <button onClick={() => refreshAll(false)}
             style={{background:"none",border:"none",color:"#60a5fa",cursor:"pointer",textDecoration:"underline"}}>
             retry
           </button>
         </div>
       )}
 
-      {/* ── Grid ── */}
       <div className="ip-grid">
         {loading ? (
           [1,2,3,4,5,6].map(i => <SkeletonCard key={i} />)
-        ) : visible.length === 0 ? (
+        ) : documents.length === 0 ? (
           <div className="ip-empty">
             <div className="ip-empty-icon">📭</div>
             <p>No documents found{search ? ` for "${search}"` : ""}.</p>
           </div>
         ) : (
-          visible.map(doc => (
+          documents.map(doc => (
             <DocumentCard
               key={doc.id}
               doc={doc}
@@ -1709,6 +1485,33 @@ export default function IssueCheckForm() {
           ))
         )}
       </div>
+
+      {/* Pagination — 25 documents per page, same as Print/Pick Portal */}
+      {!loading && documents.length > 0 && (
+        <div className="ip-toolbar" style={{ justifyContent: "center", marginTop: 12 }}>
+          <button
+            type="button"
+            className="ip-btn ip-btn-outline"
+            style={{ flex: "unset", padding: "8px 18px" }}
+            disabled={page === 0}
+            onClick={() => setPage(p => Math.max(p - 1, 0))}
+          >
+            ‹ Prev
+          </button>
+          <span style={{ padding: "0 14px", fontSize: "0.85rem", color: "#6c8bb3" }}>
+            Page {page + 1} of {Math.max(totalPages, 1)} · {totalElements} total
+          </span>
+          <button
+            type="button"
+            className="ip-btn ip-btn-outline"
+            style={{ flex: "unset", padding: "8px 18px" }}
+            disabled={page + 1 >= totalPages}
+            onClick={() => setPage(p => p + 1)}
+          >
+            Next ›
+          </button>
+        </div>
+      )}
     </div>
   );
 }
