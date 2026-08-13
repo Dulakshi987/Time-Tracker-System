@@ -994,7 +994,13 @@ export default function IssueDeliveryForm() {
       const res = await fetch(`${SETUP_API}/divisions`);
       if (res.ok) {
         const data = await res.json();
-        setDivisions(data || []);
+        // The forEach below only accepts a real array. If the backend ever
+        // returns something else on this route (an error payload, a
+        // wrapped/paginated object, etc.) `data || []` used to let it
+        // through unchanged since a non-empty object is truthy, and
+        // divisionNoToName's `divisions.forEach(...)` would then blow up
+        // ("e.forEach is not a function") on every render.
+        setDivisions(Array.isArray(data) ? data : []);
       }
     } catch (e) {
       console.warn("Failed to load divisions", e);
