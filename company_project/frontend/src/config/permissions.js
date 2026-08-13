@@ -20,6 +20,11 @@ export const ROLES = {
 export const ROLE_ACCESS = {
   [ROLES.ADMIN]: {
     defaultRoute: "/admin",
+    // NOTE: allowedRoutes/buttons still use the "*" wildcard, which means
+    // Admin can still reach /confirm even though it's commented out below
+    // for every other role. Commenting a specific string out of a wildcard
+    // config has no effect — if Admin should also lose Confirm access,
+    // this needs to switch to an explicit route list instead of "*".
     allowedRoutes: ["*"],
     buttons: ["*"],
     allDivisions: true,
@@ -27,6 +32,7 @@ export const ROLE_ACCESS = {
   },
   [ROLES.SYSTEM_ADMIN]: {
     defaultRoute: "/admin",
+    // Same wildcard caveat as ADMIN above — "*" still grants /confirm.
     allowedRoutes: ["*"],
     buttons: ["*"],
     allDivisions: true,
@@ -46,7 +52,7 @@ export const ROLE_ACCESS = {
   },
   [ROLES.PRINT_WITH_DOCUMENT_ENTER]: {
     defaultRoute: "/admin",
-    allowedRoutes: ["/admin", "/print", "/documents", "/confirm"],
+    allowedRoutes: ["/admin", "/print", "/documents", /* "/confirm" */],
     buttons: ["start", "hold", "end"],
     navKeys: ["docentry", "print", "document"],
     hiddenColumns: {
@@ -74,17 +80,25 @@ export const ROLE_ACCESS = {
     navKeys: ["delivery"],
   },
   [ROLES.FILED_ADDER]: {
+    // ⚠️ WARNING: /confirm was this role's ONLY allowed route AND its
+    // defaultRoute (where login redirects it to). Commenting out /confirm
+    // below leaves allowedRoutes empty, so a Filed Adder login now has
+    // nowhere it's allowed to go — canAccessRoute() will return false for
+    // "/confirm" itself, which will likely cause a redirect loop or dead
+    // end wherever your login flow sends them to defaultRoute. This role
+    // is effectively disabled until it's given a different defaultRoute
+    // or /confirm is restored.
     defaultRoute: "/confirm",
-    allowedRoutes: ["/confirm"],
-    buttons: ["add_to_file"],
+    allowedRoutes: [/* "/confirm" */],
+    buttons: [/* "add_to_file" */],
     navKeys: ["document"],
   },
   [ROLES.ALL]: {
     defaultRoute: "/admin",
-    allowedRoutes: ["/admin", "/documents", "/print", "/pick", "/check", "/delivery", "/confirm"],
+    allowedRoutes: ["/admin", "/documents", "/print", "/pick", "/check", "/delivery", /* "/confirm" */],
     buttons: [
       "start", "hold", "end", "handover", "emergency_done",
-      "deliver", "cancel", "add_to_file",
+      "deliver", "cancel", /* "add_to_file" */
     ],
     // Added "dashboard" so an "All" role account sees the Admin Dashboard
     // KPI/overview page in the sidebar too, alongside the existing portals.
