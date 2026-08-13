@@ -81,7 +81,7 @@ export const ROLE_ACCESS = {
   },
   [ROLES.ALL]: {
     defaultRoute: "/admin",
-    allowedRoutes: ["/admin", "/documents", "/print", "/pick", "/check", "/delivery"],
+    allowedRoutes: ["/admin", "/documents", "/print", "/pick", "/check", "/delivery","/confirm"],
     buttons: [
       "start", "hold", "end", "handover", "emergency_done",
       "deliver", "cancel", "add_to_file",
@@ -94,7 +94,7 @@ export const ROLE_ACCESS = {
       print: ["actions"],
       pick: ["actions"],
       check: ["actions"],
-      // document: ["actions"],
+      document: ["actions"],
       delivery: ["actions", "manage", "handover"],
     },
   },
