@@ -3,13 +3,16 @@ package com.controller.Issue_Print_Portal;
 import com.entity.Issue;
 import com.service.IssuePickService;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.data.domain.Page;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 import java.util.Map;
 
+// ⚠ This controller did not exist before — /api/pick-portal was 404ing,
+// which is why documents could never move past Print (Pick Portal page
+// couldn't even load), and every downstream stat (Pick/Check/Delivery)
+// stayed empty.
 @RestController
 @RequestMapping("/api/pick-portal")
 @CrossOrigin(origins = "http://localhost:5173")
@@ -18,35 +21,11 @@ public class PickPortalController {
     @Autowired
     private IssuePickService issuePickService;
 
-    // Kept for anything still relying on the full unpaginated list
+    // Frontend filters client-side for printDocumentNo != null, so we
+    // return everything here — same pattern as Print/Check controllers.
     @GetMapping
     public ResponseEntity<List<Issue>> getAll() {
         return ResponseEntity.ok(issuePickService.getAllDocuments());
-    }
-
-    // ── Paginated + filtered list — this is what the frontend grid should call ──
-    @GetMapping("/paged")
-    public ResponseEntity<Page<Issue>> getPaged(
-            @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "25") int size,
-            @RequestParam(required = false) String jobType,
-            @RequestParam(required = false) String status,
-            @RequestParam(required = false) String search,
-            @RequestParam(required = false) String date,
-            @RequestParam(required = false) String divisions // comma-separated divisionNo list, omit for "all"
-    ) {
-        return ResponseEntity.ok(
-                issuePickService.getDocumentsPaged(page, size, jobType, status, search, date, divisions)
-        );
-    }
-
-    // ── Stat chip counts — computed in the DB, independent of page size ──
-    @GetMapping("/stats")
-    public ResponseEntity<Map<String, Long>> getStats(
-            @RequestParam(required = false) String date,
-            @RequestParam(required = false) String divisions
-    ) {
-        return ResponseEntity.ok(issuePickService.getStats(date, divisions));
     }
 
     @GetMapping("/{id}")
@@ -68,6 +47,7 @@ public class PickPortalController {
         return ResponseEntity.ok(issuePickService.getByStatus(status));
     }
 
+    // Start / Resume — no body needed
     @PutMapping("/{id}/start")
     public ResponseEntity<Issue> start(@PathVariable Long id) {
         try {
@@ -77,6 +57,7 @@ public class PickPortalController {
         }
     }
 
+    // body: { holdReason, heldBy }
     @PutMapping("/{id}/hold")
     public ResponseEntity<Issue> hold(@PathVariable Long id, @RequestBody Map<String, String> body) {
         try {
@@ -90,6 +71,7 @@ public class PickPortalController {
         }
     }
 
+    // body: { pickedBy }
     @PutMapping("/{id}/end")
     public ResponseEntity<Issue> end(@PathVariable Long id, @RequestBody Map<String, String> body) {
         try {
@@ -101,6 +83,7 @@ public class PickPortalController {
         }
     }
 
+    // body: { resolvedBy } — resolves a wrong-material flag raised by Check
     @PutMapping("/{id}/emergency-resolve")
     public ResponseEntity<Issue> emergencyResolve(@PathVariable Long id, @RequestBody Map<String, String> body) {
         try {
@@ -118,14 +101,15 @@ public class PickPortalController {
         return ResponseEntity.noContent().build();
     }
 
-    @PutMapping("/{id}/handover")
-    public ResponseEntity<Issue> handover(@PathVariable Long id, @RequestBody Map<String, String> body) {
-        try {
-            return ResponseEntity.ok(issuePickService.handoverPrint(
-                id, body.getOrDefault("handedOverBy", "")
-            ));
-        } catch (RuntimeException e) {
-            return ResponseEntity.notFound().build();
-        }
+    // body: { handedOverBy }
+@PutMapping("/{id}/handover")
+public ResponseEntity<Issue> handover(@PathVariable Long id, @RequestBody Map<String, String> body) {
+    try {
+        return ResponseEntity.ok(issuePickService.handoverPrint(
+            id, body.getOrDefault("handedOverBy", "")
+        ));
+    } catch (RuntimeException e) {
+        return ResponseEntity.notFound().build();
     }
+}
 }
