@@ -20,7 +20,7 @@ import {
 const API_BASE = "https://time-tracker-system-production.up.railway.app/api/delivery-portal";
 const SETUP_API = "https://time-tracker-system-production.up.railway.app/api/admin-setup";
 // const AUTO_REFRESH = 10000;
-// const OPERATOR_REFRESH = 15000;
+const OPERATOR_REFRESH = 15000;
 
 const HOLD_REASONS = [
   "Vehicle not available",
@@ -46,6 +46,9 @@ const DATE_FILTER_OPTIONS = [
   { value: "CUSTOM", label: "Custom" },
 ];
 
+// PAGINATION — rows shown per page in the table
+const PAGE_SIZE = 10;
+
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
 function formatDate(d) { return d || "—"; }
@@ -53,16 +56,9 @@ function formatTime(t) { return t ? String(t).substring(0, 5) : "—"; }
 
 function formatDateTime(dt) {
   if (!dt) return "—";
-  // now delegates to the shared Sri-Lanka-aware formatter — every call
-  // site below (Print/Pick/Check/Delivery/Handover/Hold/Cancel sections
-  // in ViewDrawer) picks up the fix automatically, no other lines change.
   return formatSriLankaTime(dt);
 }
 
-// Days are now always measured against the *request* date/time — this is
-// when the customer originally raised the request, not when it was printed.
-// The per-row "days pending" number always shows; only the ⚠ overdue
-// highlight + banner kick in once it passes this threshold.
 const OVERDUE_DAYS = 30;
 
 function getRequestDateTime(doc) {
@@ -89,12 +85,6 @@ function daysPending(doc) {
   return Math.max(0, Math.floor(diffMs / (1000 * 60 * 60 * 24)));
 }
 
-// ── Date filter helpers ──────────────────────────────────────────────────
-// Returns today's date key (YYYY-MM-DD) in Sri Lanka time (UTC+5:30, no
-// DST), regardless of what timezone the browser/server/device is actually
-// running in. This is what "Today" always compares against, so the filter
-// is correct no matter where the page is opened from. Mirrors the Print
-// Portal / Pick Portal / Check Portal implementation exactly.
 function getSriLankaTodayKey() {
   const now = new Date();
   const utcMs = now.getTime() + now.getTimezoneOffset() * 60000;
@@ -104,8 +94,6 @@ function getSriLankaTodayKey() {
   return `${colombo.getFullYear()}-${pad(colombo.getMonth() + 1)}-${pad(colombo.getDate())}`;
 }
 
-// requestDate is stored as a plain date (no time/timezone component), so a
-// straight string comparison against YYYY-MM-DD keys is correct as-is.
 function docDateKey(doc) {
   return doc.requestDate ? String(doc.requestDate).substring(0, 10) : null;
 }
@@ -161,27 +149,24 @@ function statusLabel(s) {
   }[c];
 }
 
-// Color palette for status badges + action buttons. bg/text used for solid
-// badges & active buttons, border used for outlined/inactive buttons.
 const STATUS_COLORS = {
-  pending:    { bg: "#f59e0b", text: "#1a1206", border: "#f59e0b" }, // amber
-  inprogress: { bg: "#3b82f6", text: "#eaf2ff", border: "#3b82f6" }, // blue
-  onhold:     { bg: "#fb923c", text: "#1a1206", border: "#fb923c" }, // orange
-  completed:  { bg: "#22c55e", text: "#06210f", border: "#22c55e" }, // green
-  cancelled:  { bg: "#ef4444", text: "#2a0a0a", border: "#ef4444" }, // red
+  pending:    { bg: "#f59e0b", text: "#1a1206", border: "#f59e0b" },
+  inprogress: { bg: "#3b82f6", text: "#eaf2ff", border: "#3b82f6" },
+  onhold:     { bg: "#fb923c", text: "#1a1206", border: "#fb923c" },
+  completed:  { bg: "#22c55e", text: "#06210f", border: "#22c55e" },
+  cancelled:  { bg: "#ef4444", text: "#2a0a0a", border: "#ef4444" },
 };
 
 function statusColor(s) {
   return STATUS_COLORS[statusClass(s)] || STATUS_COLORS.pending;
 }
 
-// Action button colors — Delivered / Hold / Cancel / Handover / Reactivate.
 const ACTION_COLORS = {
-  delivered:  { bg: "#22c55e", text: "#06210f" }, // green
-  hold:       { bg: "#fb923c", text: "#1a1206" }, // orange
-  cancel:     { bg: "#ef4444", text: "#2a0a0a" }, // red
-  handover:   { bg: "#3b82f6", text: "#eaf2ff" }, // blue
-  reactivate: { bg: "#a855f7", text: "#f4ecff" }, // purple
+  delivered:  { bg: "#22c55e", text: "#06210f" },
+  hold:       { bg: "#fb923c", text: "#1a1206" },
+  cancel:     { bg: "#ef4444", text: "#2a0a0a" },
+  handover:   { bg: "#3b82f6", text: "#eaf2ff" },
+  reactivate: { bg: "#a855f7", text: "#f4ecff" },
 };
 
 function yn(v) {
@@ -190,9 +175,6 @@ function yn(v) {
   return v || "—";
 }
 
-// Same numbering scheme as the other portals — groups by request date,
-// numbers within the day, e.g. 20260816/0001. Resets automatically when
-// the date changes.
 function computeRequestIds(documents) {
   const dateKeyOf = (doc) => {
     if (doc.requestDate) return String(doc.requestDate).substring(0, 10);
@@ -223,11 +205,6 @@ function computeRequestIds(documents) {
   return idMap;
 }
 
-// ── Delivery operators — live from Master Setup (DB), division-aware ───────
-// Returns the raw operator records (name + divisionNo) so callers can filter
-// by whichever Division the current document belongs to — same pattern as
-// the Pick Portal's division-scoped picker list.
-
 function useDeliveryOperators() {
   const [operators, setOperators] = useState([]);
 
@@ -241,16 +218,15 @@ function useDeliveryOperators() {
       .catch(() => { /* keep last known list on transient errors */ });
   }, []);
 
-  // useEffect(() => {
-  //   load();
-  //   const id = setInterval(load, OPERATOR_REFRESH);
-  //   return () => clearInterval(id);
-  // }, [load]);
+  useEffect(() => {
+    load();
+    const id = setInterval(load, OPERATOR_REFRESH);
+    return () => clearInterval(id);
+  }, [load]);
 
   return operators;
 }
 
-// ── Generic Person Picker ──────────────────────────────────────────────────
 function PersonPicker({ value, onChange, options }) {
   if (!options || options.length === 0) {
     return (
@@ -276,8 +252,6 @@ function PersonPicker({ value, onChange, options }) {
     </div>
   );
 }
-
-// ── Popup: Hold Reason + Held By ────────────────────────────────────────────
 
 function HoldPopup({ operatorNames, onConfirm, onCancel }) {
   const [reason, setReason]   = useState("");
@@ -338,8 +312,6 @@ function HoldPopup({ operatorNames, onConfirm, onCancel }) {
   );
 }
 
-// ── Popup: Cancel Reason + Cancelled By ─────────────────────────────────────
-
 function CancelPopup({ operatorNames, onConfirm, onCancel }) {
   const [reason, setReason]   = useState("");
   const [otherReason, setOtherReason] = useState("");
@@ -399,8 +371,6 @@ function CancelPopup({ operatorNames, onConfirm, onCancel }) {
   );
 }
 
-// ── Popup: Delivery Done (Delivered By) ──────────────────────────────────────
-
 function DeliveryDonePopup({ operatorNames, onConfirm, onCancel }) {
   const [deliveredBy, setDeliveredBy] = useState("");
   const [vehicleNo, setVehicleNo]     = useState("");
@@ -447,11 +417,6 @@ function DeliveryDonePopup({ operatorNames, onConfirm, onCancel }) {
   );
 }
 
-// ── Popup: Handover (Handed Over By) ────────────────────────────────────────
-// A document can be handed over only while it is On Hold or Cancelled.
-// Once confirmed, Delivered / Hold / Cancel and the Delete button all lock
-// for that row (see DocumentRow's isLocked).
-
 function HandoverPopup({ operatorNames, onConfirm, onCancel }) {
   const [handoverBy, setHandoverBy] = useState("");
   const canConfirm = !!handoverBy;
@@ -483,7 +448,6 @@ function HandoverPopup({ operatorNames, onConfirm, onCancel }) {
   );
 }
 
-// ── Popup: Change (Request) Vehicle No ──────────────────────────────────────
 function ChangeVehiclePopup({ doc, mode, onConfirm, onCancel }) {
   const isDelivery = mode === "delivery";
   const initialValue = isDelivery ? (doc.deliveryVehicleNo || "") : (doc.vehicleNo || "");
@@ -530,7 +494,6 @@ function ChangeVehiclePopup({ doc, mode, onConfirm, onCancel }) {
   );
 }
 
-// ── Popup: Edit (Held By / Cancelled By / Delivered By) ─────────────────────
 function EditPopup({ doc, operatorNames, onConfirm, onCancel }) {
   const [heldBy, setHeldBy]           = useState(doc?.deliveryHeldBy || "");
   const [cancelledBy, setCancelledBy] = useState(doc?.deliveryCancelledBy || "");
@@ -568,8 +531,6 @@ function EditPopup({ doc, operatorNames, onConfirm, onCancel }) {
   );
 }
 
-// ── View Drawer helpers ──────────────────────────────────────────────────
-
 function DetailRow({ label, value }) {
   return (
     <div className="ip-detail-row">
@@ -587,8 +548,6 @@ function Section({ icon, title, children, accent }) {
     </div>
   );
 }
-
-// ── Side Drawer: full document trail ─────────────────────────────────────
 
 function ViewDrawer({ doc, divisionLabel, onClose, onChangeVehicle }) {
   const sc = statusClass(doc.deliveryStatus);
@@ -608,7 +567,6 @@ function ViewDrawer({ doc, divisionLabel, onClose, onChangeVehicle }) {
 
         <div className="ip-drawer-body">
 
-          {/* Request info */}
           <Section icon="" title="Request Details">
             <DetailRow label="Customer" value={doc.customerName} />
             <DetailRow label="Division" value={divisionLabel} />
@@ -637,7 +595,6 @@ function ViewDrawer({ doc, divisionLabel, onClose, onChangeVehicle }) {
             <DetailRow label="Entered Date/Time" value={formatDateTime(doc.createdDatetime)} />
           </Section>
 
-          {/* Print trail */}
           <Section icon="🖨️" title="Print Details" accent="print">
             <DetailRow label="Print Status" value={doc.printStatus} />
             <DetailRow label="Print Document No" value={doc.printDocumentNo} />
@@ -656,7 +613,6 @@ function ViewDrawer({ doc, divisionLabel, onClose, onChangeVehicle }) {
             )}
           </Section>
 
-          {/* Picking trail */}
           <Section icon="📦" title="Picking Details" accent="pick">
             <DetailRow label="Picked By" value={doc.pickedBy} />
             <DetailRow label="Pick Start Time" value={formatDateTime(doc.startTime)} />
@@ -678,7 +634,6 @@ function ViewDrawer({ doc, divisionLabel, onClose, onChangeVehicle }) {
             )}
           </Section>
 
-          {/* Check trail (incl. picking error) */}
           <Section icon="✅" title="Check Details" accent="check">
             <DetailRow label="Checked By" value={doc.checkedBy} />
             <DetailRow label="Check Start Time" value={formatDateTime(doc.checkStartTime)} />
@@ -701,7 +656,6 @@ function ViewDrawer({ doc, divisionLabel, onClose, onChangeVehicle }) {
             )}
           </Section>
 
-          {/* Delivery trail */}
           <Section icon="🚚" title="Delivery Details" accent="delivery">
             <DetailRow label="Delivery Status" value={statusLabel(doc.deliveryStatus)} />
             <DetailRow label="Delivery Start Time" value={formatDateTime(doc.deliveryStartTime)} />
@@ -718,7 +672,6 @@ function ViewDrawer({ doc, divisionLabel, onClose, onChangeVehicle }) {
             <DetailRow label="Delivery Confirm Time" value={formatDateTime(doc.deliveryConfirmTime)} />
           </Section>
 
-          {/* Handover info */}
           {(doc.handoverBy || doc.handoverTime) && (
             <Section icon="🤝" title="Handover" accent="delivery">
               <DetailRow label="Handed Over By" value={doc.handoverBy} />
@@ -726,7 +679,6 @@ function ViewDrawer({ doc, divisionLabel, onClose, onChangeVehicle }) {
             </Section>
           )}
 
-          {/* Hold info */}
           {(sc === "onhold" || doc.deliveryHoldReason) && (
             <Section icon="⏸" title="Delivery Hold" accent="hold">
               <DetailRow label="Hold Reason" value={doc.deliveryHoldReason} />
@@ -736,7 +688,6 @@ function ViewDrawer({ doc, divisionLabel, onClose, onChangeVehicle }) {
             </Section>
           )}
 
-          {/* Cancel info */}
           {doc.deliveryCancelReason && (
             <Section icon="✕" title="Delivery Cancelled" accent="cancel">
               <DetailRow label="Cancel Reason" value={doc.deliveryCancelReason} />
@@ -758,29 +709,12 @@ function ViewDrawer({ doc, divisionLabel, onClose, onChangeVehicle }) {
   );
 }
 
-// ── Table Row ─────────────────────────────────────────────────────────────
-// Locking rule: once a document is Delivered, put On Hold, Cancelled, or
-// Handed Over, the Delivered / Hold / Cancel action buttons AND the Delete
-// button all lock (become non-clickable) for that row.
-//
-// Handover rule: Handover is only clickable while the row's status is
-// On Hold or Cancelled — and only if it hasn't already been handed over.
-// For every other status (Pending, In Progress, Delivered) the Handover
-// button stays disabled, while Hold / Cancel / Delivered remain normally
-// clickable.
-//
-// Reactivate rule (NEW): once Handover is confirmed, the same button
-// automatically switches into a "Reactivate" button (still clickable, in
-// purple). Clicking Reactivate clears the handover + unlocks the row again,
-// so Delivered / Hold / Cancel / Delete all become clickable once more.
-
 function DocumentRow({ doc, requestId, divisionLabel, canManage, canHandover: canHandoverAccess, onView, onDelivered, onHold, onCancelled, onHandover, onReactivate, onEdit, onDelete }) {
   const sc = statusClass(doc.deliveryStatus);
   const isHandedOver = !!doc.handoverBy;
 
   const isLocked = sc === "completed" || sc === "onhold" || sc === "cancelled" || isHandedOver;
 
-  // Handover enabled ONLY when On Hold or Cancelled (and not already handed over).
   const canHandover = (sc === "onhold" || sc === "cancelled") && !isHandedOver;
   const lockedTitle = "Locked — Hold / Cancelled / Delivered / Handed Over";
 
@@ -929,8 +863,6 @@ function DocumentRow({ doc, requestId, divisionLabel, canManage, canHandover: ca
   );
 }
 
-// ── Skeleton Row ─────────────────────────────────────────────────────────────
-
 const COLUMN_COUNT = 14;
 
 function SkeletonRow({ columnCount }) {
@@ -950,9 +882,6 @@ function SkeletonRow({ columnCount }) {
 export default function IssueDeliveryForm() {
   const navigate = useNavigate();
 
-  // ── Auth / role guard ──
-  // Redirects to /login if there's no logged-in user, or the logged-in
-  // user's role isn't allowed on the /delivery route (see permissions.js).
   const currentUser = getCurrentUser();
 
   useEffect(() => {
@@ -961,8 +890,6 @@ export default function IssueDeliveryForm() {
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Admin / System Administrator already have logout available elsewhere
-  // (their own dashboard/navbar) — hide the in-portal Logout button for them.
   const isAdminRole =
     currentUser?.staffName === "Admin" ||
     currentUser?.staffName === "System Administrator";
@@ -972,17 +899,9 @@ export default function IssueDeliveryForm() {
     navigate("/login", { replace: true });
   };
 
-  // ── Division access ──
-  // Admin / System Administrator (allDivisions: true in permissions.js) see
-  // every division. Every other login only sees documents whose divisionNo
-  // matches the division(s) assigned to their account in Master Setup
-  // (User Accounts → divisionNo, comma-separated for multi-division staff).
   const hasAllDiv = hasAllDivisionAccess(currentUser);
   const userDivisions = useMemo(() => getUserDivisions(currentUser), [currentUser]);
 
-  // Manage (Edit/Delete) + Handover columns — Admin / System Administrator only.
-  // Every other login never sees these two columns, regardless of their
-  // ROLE_ACCESS.buttons list.
   const canManageDocs = isAdminRole;
   const canHandoverAccess = isAdminRole;
   const visibleColumnCount = COLUMN_COUNT - (canManageDocs ? 0 : 1) - (canHandoverAccess ? 0 : 1);
@@ -993,36 +912,28 @@ export default function IssueDeliveryForm() {
   const [search,       setSearch]       = useState("");
   const [filterType,   setFilterType]   = useState("ALL");
   const [filterStatus, setFilterStatus] = useState("ALL");
-  const [filterDivision, setFilterDivision] = useState("ALL"); // Division filter — mirrors Job Type dropdown
-  const [statFilter,   setStatFilter]   = useState("ALL"); // ALL | pending | onhold | completed | cancelled — driven by the stat chips
+  const [filterDivision, setFilterDivision] = useState("ALL");
+  const [statFilter,   setStatFilter]   = useState("ALL");
   const [lastUpdated,  setLastUpdated]  = useState(null);
   const [refreshing,   setRefreshing]   = useState(false);
 
-  // ── Date filter — defaults to "Today" (Sri Lanka time). "All" clears
-  // it, "Custom" opens a From/To range. Recomputes on every render (and
-  // the auto-refresh timer keeps this component re-rendering), so at
-  // midnight Colombo time "Today" automatically rolls over to the new
-  // day without needing a page reload. Mirrors Print Portal / Pick Portal
-  // / Check Portal.
-  const [dateFilterMode, setDateFilterMode] = useState("TODAY"); // "TODAY" | "ALL" | "CUSTOM"
+  const [dateFilterMode, setDateFilterMode] = useState("TODAY");
   const [fromDate,     setFromDate]     = useState("");
   const [toDate,       setToDate]       = useState("");
 
-  // Divisions (Admin Master Data) — used to label each row/card and to
-  // scope which delivery operators show up in the popups below.
+  // PAGINATION — current page for the table (10 rows per page)
+  const [currentPage,  setCurrentPage]  = useState(1);
+
   const [divisions, setDivisions] = useState([]);
 
-  // Delivery operator names — live from Admin Dashboard → Master Setup →
-  // Delivery (DB), kept as raw records so they can be filtered by division.
   const deliveryOperators = useDeliveryOperators();
 
-  const [activePopup,  setActivePopup]  = useState(null); // "hold" | "delivered" | "cancel" | "handover" | "vehicle" | "edit" | null
+  const [activePopup,  setActivePopup]  = useState(null);
   const [activeId,     setActiveId]     = useState(null);
   const [vehicleDoc,   setVehicleDoc]   = useState(null);
-  const [vehicleMode,  setVehicleMode]  = useState("request"); // "request" | "delivery"
+  const [vehicleMode,  setVehicleMode]  = useState("request");
   const [viewDoc,      setViewDoc]      = useState(null);
 
-  // ── Fetch — only Check Done documents come back from this endpoint ──
   const fetchDocuments = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
     else setRefreshing(true);
@@ -1063,8 +974,6 @@ export default function IssueDeliveryForm() {
     doc?.divisionNo ? `${doc.divisionNo} — ${divisionNoToName[doc.divisionNo] || ""}` : null
   ), [divisionNoToName]);
 
-  // Division-scoped operator names — only the names added under that
-  // specific Division in Admin Master Setup → Delivery.
   const getOperatorNamesForDivision = useCallback((divisionNo) => {
     if (!divisionNo) return [];
     return deliveryOperators
@@ -1086,12 +995,6 @@ export default function IssueDeliveryForm() {
   //   return () => clearInterval(id);
   // }, [fetchDocuments]);
 
-  // ── Access-scoped documents ──
-  // Admin / System Administrator (or any role with allDivisions: true) see
-  // every document. Every other login only ever sees documents belonging to
-  // the division(s) assigned to their account — this feeds the table,
-  // stats, dropdowns, and request-ID numbering below, so nothing in the UI
-  // ever shows another division's data to a non-admin login.
   const accessScopedDocuments = useMemo(() => {
     if (hasAllDiv) return documents;
     return documents.filter((doc) => canSeeDivision(currentUser, doc.divisionNo));
@@ -1107,7 +1010,6 @@ export default function IssueDeliveryForm() {
   const handleEditClick      = (doc) => { setActiveId(doc.id); setActivePopup("edit"); };
   const closePopup = () => { setActivePopup(null); setActiveId(null); setVehicleDoc(null); setVehicleMode("request"); };
 
-  // keep the view drawer's data in sync after a refresh
   useEffect(() => {
     if (!viewDoc) return;
     const fresh = documents.find(d => d.id === viewDoc.id);
@@ -1156,10 +1058,6 @@ export default function IssueDeliveryForm() {
     }
   };
 
-  // Handover — locks Delivered/Hold/Cancel + Delete for this row once saved.
-  // NOTE: this calls PUT {API_BASE}/{id}/handover with { handoverBy }.
-  // Add this endpoint on the backend (mirroring /hold, /cancel, /end) so it
-  // persists doc.handoverBy / doc.handoverTime.
   const handleHandoverConfirm = async (handoverBy) => {
     closePopup();
     try {
@@ -1174,19 +1072,9 @@ export default function IssueDeliveryForm() {
     }
   };
 
-  // Reactivate — reverses a Handover. Clears doc.handoverBy/handoverTime and
-  // unlocks Delivered / Hold / Cancel / Delete for this row again.
-  // NOTE: this calls PUT {API_BASE}/{id}/reactivate with no body.
-  // BACKEND CONTRACT: this endpoint must clear handoverBy + handoverTime,
-  // AND reset deliveryStatus away from "On Hold"/"Cancelled" (e.g. back to
-  // "Pending") — otherwise the row will re-lock itself on the next refresh,
-  // since Hold/Cancelled status locks the row on its own.
-  // We also apply an OPTIMISTIC local update immediately on click so the
-  // buttons unlock instantly, without waiting for the next poll.
   const handleReactivateClick = async (id) => {
     if (!window.confirm("Reactivate this document? This will unlock Delivered / Hold / Cancel for this row again.")) return;
 
-    // Optimistic unlock — flip this row to Pending + clear handover locally.
     setDocuments(prev => prev.map(d =>
       d.id === id ? { ...d, deliveryStatus: "PENDING", handoverBy: null, handoverTime: null } : d
     ));
@@ -1197,7 +1085,7 @@ export default function IssueDeliveryForm() {
       fetchDocuments(true);
     } catch (err) {
       alert("Reactivate failed: " + err.message);
-      fetchDocuments(true); // roll back to server truth if the call failed
+      fetchDocuments(true);
     }
   };
 
@@ -1227,9 +1115,6 @@ export default function IssueDeliveryForm() {
     }
   };
 
-  // Updates either the *request* vehicle no (doc.vehicleNo) or the
-  // *delivery* vehicle no (doc.deliveryVehicleNo, entered at "Delivery Done")
-  // depending on which was chosen from the View drawer.
   const handleChangeVehicleConfirm = async (vehicleNo) => {
     const id = vehicleDoc?.id;
     const isDelivery = vehicleMode === "delivery";
@@ -1249,15 +1134,9 @@ export default function IssueDeliveryForm() {
     }
   };
 
-  // ── Filters ──
-  // Job Type / Status / Division dropdown option lists are all built off
-  // accessScopedDocuments, so a non-admin login never even sees another
-  // division's divisionNo as an option.
   const jobTypes = ["ALL", ...new Set(accessScopedDocuments.map(d => d.jobType).filter(Boolean))];
   const statuses = ["ALL", ...new Set(accessScopedDocuments.map(d => d.deliveryStatus).filter(Boolean))];
 
-  // Division dropdown — Admin/System Admin get every division that appears
-  // in the data; every other login only gets their own assigned division(s).
   const divisionOptions = useMemo(() => {
     const list = hasAllDiv
       ? [...new Set(accessScopedDocuments.map(d => d.divisionNo).filter(Boolean))]
@@ -1282,11 +1161,27 @@ export default function IssueDeliveryForm() {
     return matchSearch && matchType && matchStatus && matchDivision && matchStat && matchDate;
   });
 
-  // Stats — scoped by division access + the date filter too, so counts on
-  // screen always match what's actually shown in the table below (e.g.
-  // "Today" only counts today's documents, not every document ever
-  // entered, and a non-admin login only ever counts their own division).
-  // Mirrors Print Portal / Pick Portal / Check Portal.
+  // PAGINATION — slice `visible` into pages of PAGE_SIZE rows.
+  // Everything above (filters, dropdown options, stats) still runs against
+  // the FULL accessScopedDocuments list — only the table render is paged.
+  const totalPages = Math.max(1, Math.ceil(visible.length / PAGE_SIZE));
+  const paginatedVisible = useMemo(
+    () => visible.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE),
+    [visible, currentPage]
+  );
+
+  // PAGINATION — jump back to page 1 whenever a filter/search/date changes,
+  // so we never land on an empty "page 3" after narrowing the results.
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [search, filterType, filterStatus, filterDivision, statFilter, dateFilterMode, fromDate, toDate]);
+
+  // PAGINATION — also clamp back down if the current page no longer exists
+  // (e.g. documents got deleted / refreshed and the list shrank).
+  useEffect(() => {
+    if (currentPage > totalPages) setCurrentPage(totalPages);
+  }, [totalPages, currentPage]);
+
   const dateScoped = useMemo(
     () => accessScopedDocuments.filter(doc => matchesDateFilter(doc, dateFilterMode, fromDate, toDate)),
     [accessScopedDocuments, dateFilterMode, fromDate, toDate]
@@ -1312,7 +1207,6 @@ export default function IssueDeliveryForm() {
     [activeDoc, getOperatorNamesForDivision]
   );
 
-  // Don't flash the portal UI while the auth-guard redirect is in flight.
   if (!currentUser || !canAccessRoute(currentUser, "/delivery")) {
     return null;
   }
@@ -1415,9 +1309,6 @@ export default function IssueDeliveryForm() {
         <select className="ip-filter-select" value={filterStatus} onChange={e => setFilterStatus(e.target.value)}>
           {statuses.map(s => <option key={s} value={s}>{s === "ALL" ? "All Status" : s}</option>)}
         </select>
-        {/* Division filter — Admin/System Admin see every division that has
-            data; every other login only ever sees their own assigned
-            division(s) here, same as the rest of the portal. */}
         <select className="ip-filter-select" value={filterDivision} onChange={e => setFilterDivision(e.target.value)}>
           {divisionOptions.map(d => (
             <option key={d} value={d}>
@@ -1427,9 +1318,7 @@ export default function IssueDeliveryForm() {
         </select>
       </div>
 
-      {/* ── Date filter — Today (Sri Lanka time, default) / All / Custom
-          range. Same toolbar pattern as Print Portal / Pick Portal / Check
-          Portal. ── */}
+      {/* ── Date filter ── */}
       <div className="ip-toolbar" style={{ marginTop: -6 }}>
         {DATE_FILTER_OPTIONS.map(opt => (
           <button
@@ -1532,7 +1421,13 @@ export default function IssueDeliveryForm() {
         >
           <strong style={{ color: statFilter === "cancelled" ? STATUS_COLORS.cancelled.text : "#ef4444" }}>{cancelled}</strong> Cancelled
         </button>
-        <div className="ip-stat-chip">Showing <strong style={{color:"#a78bfa"}}>{visible.length}</strong> of {total}</div>
+        {/* PAGINATION — shows current page's row count + total filtered count + page indicator */}
+        <div className="ip-stat-chip">
+          Showing <strong style={{color:"#a78bfa"}}>{paginatedVisible.length}</strong> of {visible.length}
+          {totalPages > 1 && (
+            <span style={{ marginLeft: 6, color: "#6c8bb3" }}>(Page {currentPage}/{totalPages})</span>
+          )}
+        </div>
       </div>
 
       {/* ── Error ── */}
@@ -1567,7 +1462,7 @@ export default function IssueDeliveryForm() {
           <tbody>
             {loading ? (
               Array.from({ length: 6 }).map((_, i) => <SkeletonRow key={i} columnCount={visibleColumnCount} />)
-            ) : visible.length === 0 ? (
+            ) : paginatedVisible.length === 0 ? (
               <tr>
                 <td colSpan={visibleColumnCount}>
                   <div className="ip-empty">
@@ -1581,7 +1476,7 @@ export default function IssueDeliveryForm() {
                 </td>
               </tr>
             ) : (
-              visible.map(doc => (
+              paginatedVisible.map(doc => (
                 <DocumentRow
                   key={doc.id}
                   doc={doc}
@@ -1602,6 +1497,48 @@ export default function IssueDeliveryForm() {
             )}
           </tbody>
         </table>
+
+        {/* PAGINATION — page number controls under the table */}
+        {!loading && totalPages > 1 && (
+          <div className="ip-pagination" style={{ display: "flex", gap: 6, justifyContent: "center", alignItems: "center", padding: "14px 0", flexWrap: "wrap" }}>
+            <button
+              className="ip-btn ip-btn-outline"
+              style={{ flex: "unset", padding: "6px 12px" }}
+              disabled={currentPage === 1}
+              onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+            >
+              ‹ Prev
+            </button>
+
+            {Array.from({ length: totalPages }, (_, i) => i + 1).map(p => (
+              <button
+                key={p}
+                type="button"
+                className="ip-filter-select ip-stat-chip-clickable"
+                style={{
+                  cursor: "pointer",
+                  minWidth: 34,
+                  padding: "6px 10px",
+                  fontWeight: p === currentPage ? 700 : 400,
+                  border: p === currentPage ? "2px solid #3b82f6" : undefined,
+                  color: p === currentPage ? "#3b82f6" : undefined,
+                }}
+                onClick={() => setCurrentPage(p)}
+              >
+                {p}
+              </button>
+            ))}
+
+            <button
+              className="ip-btn ip-btn-outline"
+              style={{ flex: "unset", padding: "6px 12px" }}
+              disabled={currentPage === totalPages}
+              onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+            >
+              Next ›
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );

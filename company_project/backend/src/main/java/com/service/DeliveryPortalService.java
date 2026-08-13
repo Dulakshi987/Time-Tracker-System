@@ -9,6 +9,9 @@ import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.stream.Collectors;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.Pageable;
+
 
 @Service
 public class DeliveryPortalService {
@@ -16,13 +19,35 @@ public class DeliveryPortalService {
     @Autowired
     private IssueRepository issueRepository;
 
-    // Only Check-Done documents belong on the Delivery Portal.
-    public List<Issue> getAllDocuments() {
-        return issueRepository.findAll().stream()
-                .filter(doc -> "COMPLETED".equalsIgnoreCase(doc.getCheckStatus())
-                        || (doc.getCheckStatus() != null && doc.getCheckStatus().toLowerCase().contains("complete")))
-                .collect(Collectors.toList());
+    public Page<Issue> getAllDocuments(String jobType, String status, Pageable pageable) {
+
+    List<Issue> completedDocs = issueRepository.findAll().stream()
+            .filter(doc -> "COMPLETED".equalsIgnoreCase(doc.getCheckStatus())
+                    || (doc.getCheckStatus() != null && doc.getCheckStatus().toLowerCase().contains("complete")))
+            .filter(doc -> isAllOrBlank(jobType) || jobType.equalsIgnoreCase(doc.getJobType()))
+            .filter(doc -> isAllOrBlank(status) || status.equalsIgnoreCase(doc.getDeliveryStatus()))
+            .collect(Collectors.toList());
+
+    int start = (int) pageable.getOffset();
+    if (start >= completedDocs.size()) {
+        return new PageImpl<>(List.of(), pageable, completedDocs.size());
     }
+    int end = Math.min(start + pageable.getPageSize(), completedDocs.size());
+
+    return new PageImpl<>(completedDocs.subList(start, end), pageable, completedDocs.size());
+}
+
+private boolean isAllOrBlank(String value) {
+    return value == null || value.isBlank() || value.equalsIgnoreCase("ALL");
+}
+
+    // Only Check-Done documents belong on the Delivery Portal.
+    // public List<Issue> getAllDocuments() {
+    //     return issueRepository.findAll().stream()
+    //             .filter(doc -> "COMPLETED".equalsIgnoreCase(doc.getCheckStatus())
+    //                     || (doc.getCheckStatus() != null && doc.getCheckStatus().toLowerCase().contains("complete")))
+    //             .collect(Collectors.toList());
+    // }
 
     public Issue getById(Long id) {
         return issueRepository.findById(id)
