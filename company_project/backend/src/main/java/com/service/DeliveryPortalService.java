@@ -192,10 +192,7 @@ public class DeliveryPortalService {
 
         List<Issue> docs = issueRepository.findAll(spec);
 
-        Map<String, List<Issue>> byDate = docs.stream().collect(Collectors.groupingBy(d ->
-                d.getRequestDate() != null ? d.getRequestDate().toString().substring(0, 10)
-                        : (d.getCreatedDatetime() != null ? d.getCreatedDatetime().toString().substring(0, 10) : "unknown")
-        ));
+        Map<String, List<Issue>> byDate = docs.stream().collect(Collectors.groupingBy(this::dateKeyFor));
 
         Map<Long, String> idMap = new HashMap<>();
         byDate.forEach((dateKey, group) -> {
@@ -208,6 +205,25 @@ public class DeliveryPortalService {
             }
         });
         return idMap;
+    }
+
+    // Safe date-key extraction for numbering. Never throws — a blank,
+    // short, or otherwise malformed requestDate on ANY single document
+    // used to blow up the *entire* /numbering endpoint with a
+    // StringIndexOutOfBoundsException (requestDate.substring(0, 10) on a
+    // string shorter than 10 chars), which silently zeroed out the Req ID
+    // column for every row on the Delivery Portal (the frontend swallows
+    // fetch errors for this call). This falls back gracefully instead.
+    private String dateKeyFor(Issue d) {
+        String rd = d.getRequestDate();
+        if (rd != null && !rd.isBlank()) {
+            return rd.length() >= 10 ? rd.substring(0, 10) : rd;
+        }
+        if (d.getCreatedDatetime() != null) {
+            String cd = d.getCreatedDatetime().toString();
+            return cd.length() >= 10 ? cd.substring(0, 10) : cd;
+        }
+        return "unknown";
     }
 
     public Issue getById(Long id) {

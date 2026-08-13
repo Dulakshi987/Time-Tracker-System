@@ -18,9 +18,9 @@ import {
 
 const API_BASE = "https://time-tracker-system-production.up.railway.app/api/delivery-portal";
 const SETUP_API = "https://time-tracker-system-production.up.railway.app/api/admin-setup";
-const AUTO_REFRESH = 10000;
-const OPERATOR_REFRESH = 15000;
-const SEARCH_DEBOUNCE = 400;
+// const AUTO_REFRESH = 10000;
+// const OPERATOR_REFRESH = 15000;
+// const SEARCH_DEBOUNCE = 400;
 const PAGE_SIZE_OPTIONS = [25, 50, 100];
 
 const HOLD_REASONS = [
@@ -165,11 +165,11 @@ function useDeliveryOperators() {
       .catch(() => { /* keep last known list on transient errors */ });
   }, []);
 
-  useEffect(() => {
-    load();
-    const id = setInterval(load, OPERATOR_REFRESH);
-    return () => clearInterval(id);
-  }, [load]);
+  // useEffect(() => {
+  //   load();
+  //   const id = setInterval(load, OPERATOR_REFRESH);
+  //   return () => clearInterval(id);
+  // }, [load]);
 
   return operators;
 }
@@ -911,10 +911,10 @@ export default function IssueDeliveryForm() {
   const [viewDoc,      setViewDoc]      = useState(null);
 
   // Debounce the search box so every keystroke doesn't fire a request.
-  useEffect(() => {
-    const t = setTimeout(() => setSearch(searchInput), SEARCH_DEBOUNCE);
-    return () => clearTimeout(t);
-  }, [searchInput]);
+  // useEffect(() => {
+  //   const t = setTimeout(() => setSearch(searchInput), SEARCH_DEBOUNCE);
+  //   return () => clearTimeout(t);
+  // }, [searchInput]);
 
   // Any filter change should snap back to page 1.
   useEffect(() => {
@@ -1026,13 +1026,13 @@ export default function IssueDeliveryForm() {
   useEffect(() => { fetchDocuments(false); }, [fetchDocuments]);
   useEffect(() => { fetchStats(); fetchNumbering(); }, [fetchStats, fetchNumbering]);
 
-  useEffect(() => {
-    const id = setInterval(() => {
-      fetchDocuments(true);
-      fetchStats();
-    }, AUTO_REFRESH);
-    return () => clearInterval(id);
-  }, [fetchDocuments, fetchStats]);
+  // useEffect(() => {
+  //   const id = setInterval(() => {
+  //     fetchDocuments(true);
+  //     fetchStats();
+  //   }, AUTO_REFRESH);
+  //   return () => clearInterval(id);
+  // }, [fetchDocuments, fetchStats]);
 
   const getDocById = useCallback((id) => documents.find(d => d.id === id), [documents]);
 
