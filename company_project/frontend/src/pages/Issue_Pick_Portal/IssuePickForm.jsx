@@ -2,12 +2,12 @@ import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import "./IssuePick.css";
 import { formatSriLankaTime } from "../../utils/dateUtils";
-import { getCurrentUser, canUseButton, logoutUser, hasAllDivisionAccess } from "../../config/permissions";
-
+import { getCurrentUser, canUseButton, logoutUser, hasAllDivisionAccess, canSeeDivision } from "../../config/permissions";
+// const API_BASE = "http://localhost:8080/api/pick-portal";
+// const SETUP_API = "http://localhost:8080/api/admin-setup";
 const API_BASE = "https://time-tracker-system-production.up.railway.app/api/pick-portal";
 const SETUP_API = "https://time-tracker-system-production.up.railway.app/api/admin-setup";
-
-const PAGE_SIZE = 25;
+// const AUTO_REFRESH = 10000;
 
 const HOLD_REASONS = [
   "Printer not available",
@@ -38,9 +38,8 @@ function formatDuration(seconds) {
   return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
 }
 
-// NOTE: like Print Portal, the server now only sends one page at a time,
-// so this numbering (0001, 0002...) restarts on each page. If you need a
-// stable gap-free sequence across pages, move the numbering server-side.
+// Same scheme as Print Portal — groups by request date, numbers within the
+// day, e.g. 20260816/0001. Resets automatically when the date changes.
 function computeRequestIds(documents) {
   const dateKeyOf = (doc) => {
     if (doc.requestDate) return String(doc.requestDate).substring(0, 10);
@@ -80,6 +79,12 @@ function jobTypeColor(jt) {
 }
 
 // ── Status helpers ───────────────────────────────────────────────────────────
+// PENDING → [Handover] → HANDED_OVER → [Start] → IN_PROGRESS
+// IN_PROGRESS → [Hold] → ON_HOLD → [Start = Resume] → IN_PROGRESS
+// IN_PROGRESS → [End] → COMPLETED   (End is ONLY available while In Progress —
+// after a Hold, the user must click Resume first before End becomes
+// available again.)
+
 function statusClass(s) {
   const v = (s || "").toLowerCase();
   if (v.includes("hold")) return "onhold";
@@ -100,6 +105,11 @@ function statusLabel(s) {
   }[c];
 }
 
+// Parses the reason-wise SKU/Qty groups saved by the Check Portal's Hold
+// popup. New format: "Reason::sku1,sku2||Reason2::sku3" (self-labelled
+// groups, one per picking-error reason, each with its own SKU/Qty list).
+// Falls back to the old flat format (single reason, single SKU/Qty list)
+// for records saved before this change.
 function parsePickingErrorGroups(doc) {
   const sku = doc.wrongMaterialSku || "";
   const qty = doc.wrongMaterialQty || "";
@@ -131,7 +141,7 @@ function parsePickingErrorGroups(doc) {
   }));
 }
 
-// ── Date filter helper (Sri Lanka "Today" key) ──────────────────────────────
+// ── Date filter helpers ──────────────────────────────────────────────────
 function getSriLankaTodayKey() {
   const now = new Date();
   const utcMs = now.getTime() + now.getTimezoneOffset() * 60000;
@@ -139,6 +149,30 @@ function getSriLankaTodayKey() {
   const colombo = new Date(colomboMs);
   const pad = (n) => String(n).padStart(2, "0");
   return `${colombo.getFullYear()}-${pad(colombo.getMonth() + 1)}-${pad(colombo.getDate())}`;
+}
+
+function docDateKey(doc) {
+  return doc.requestDate ? String(doc.requestDate).substring(0, 10) : null;
+}
+
+function matchesDateFilter(doc, mode, fromDate, toDate) {
+  if (mode === "ALL") return true;
+
+  const key = docDateKey(doc);
+
+  if (mode === "TODAY") {
+    return key === getSriLankaTodayKey();
+  }
+
+  if (mode === "CUSTOM") {
+    if (!fromDate && !toDate) return true;
+    if (!key) return false;
+    if (fromDate && key < fromDate) return false;
+    if (toDate && key > toDate) return false;
+    return true;
+  }
+
+  return true;
 }
 
 // ── Person Picker ─────────────────────────────────────────────────────────
@@ -567,6 +601,15 @@ function DocumentCard({
   const isOnHold = sc === "onhold";
   const isDone = sc === "completed";
 
+  // Button availability = correct workflow state AND the logged-in role is
+  // permitted to use that button (permissions.js).
+  //
+  // Hold -> Resume -> End flow:
+  //   While a document is On Hold, ONLY "Resume" (the Start button, which
+  //   relabels itself to "Resume") is available. "End" must NOT be
+  //   accessible until the user has clicked Resume and the document is
+  //   back "In Progress". So `canEnd` only checks isStarted — it no
+  //   longer includes isOnHold.
   const canHandover = isPending && canHandoverBtn;
   const canStart = (isHandedOver || isOnHold) && canStartBtn;
   const canHold = isStarted && canHoldBtn;
@@ -652,6 +695,7 @@ function DocumentCard({
                   )}
                 </div>
         )}
+
 
         {isDone && (
   <div className="ip-duration-box">
@@ -807,21 +851,9 @@ export default function IssuPikFormt() {
   const [lastUpdated, setLastUpdated] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
 
-  // ── Pagination — server returns PAGE_SIZE (25) rows at a time ─────────
-  const [page, setPage] = useState(0);
-  const [totalPages, setTotalPages] = useState(0);
-  const [totalElements, setTotalElements] = useState(0);
-
   const [dateFilterMode, setDateFilterMode] = useState("TODAY"); // "TODAY" | "ALL" | "CUSTOM"
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
-
-  // ── Stats (Total / Pending / Handovered / In Progress / On Hold / Done) ──
-  // Computed in the database, independent of which page is loaded — same
-  // pattern as Print Portal's /stats endpoint.
-  const [stats, setStats] = useState({
-    total: 0, pending: 0, handedOver: 0, inProgress: 0, onHold: 0, completed: 0,
-  });
 
   const buttonPerms = useMemo(() => ({
     handover: canUseButton(currentUser, "handover"),
@@ -832,17 +864,6 @@ export default function IssuPikFormt() {
     edit: canUseButton(currentUser, "edit"),
     delete: canUseButton(currentUser, "delete"),
   }), [currentUser]);
-
-  // Divisions this user is scoped to — sent to the backend so filtering
-  // happens at the DB level instead of over-fetching and cutting client-side.
-  const hasFullDivisionAccess = useMemo(() => hasAllDivisionAccess(currentUser), [currentUser]);
-  const divisionsParam = useMemo(() => {
-    if (hasFullDivisionAccess) return undefined;
-    if (Array.isArray(currentUser?.divisions) && currentUser.divisions.length > 0) {
-      return currentUser.divisions.join(",");
-    }
-    return undefined;
-  }, [hasFullDivisionAccess, currentUser]);
 
   const [divisions, setDivisions] = useState([]);
 
@@ -866,60 +887,32 @@ export default function IssuPikFormt() {
     setTimeout(() => setJumpHighlightId(prev => (prev === id ? null : prev)), 2500);
   };
 
-  const activeDateParam =
-    dateFilterMode === "TODAY" ? getSriLankaTodayKey() :
-    dateFilterMode === "CUSTOM" && fromDate ? fromDate :
-    undefined;
-
   const fetchDocuments = useCallback(async (silent = false) => {
-    if (!silent) setLoading(true);
-    else setRefreshing(true);
-    setError(null);
-    try {
-      const params = new URLSearchParams({ page: String(page), size: String(PAGE_SIZE) });
-      if (filterType !== "ALL") params.set("jobType", filterType);
-      if (filterStatus !== "ALL") params.set("status", filterStatus);
-      if (search) params.set("search", search);
-      if (activeDateParam) params.set("date", activeDateParam);
-      if (divisionsParam) params.set("divisions", divisionsParam);
+  if (!silent) setLoading(true);
+  else setRefreshing(true);
+  setError(null);
+  try {
+    const res = await fetch(API_BASE);
+    if (!res.ok) throw new Error(`Server error: ${res.status}`);
+    const data = await res.json();
 
-      const res = await fetch(`${API_BASE}/paged?${params.toString()}`);
-      if (!res.ok) throw new Error(`Server error: ${res.status}`);
-      const data = await res.json();
-      setDocuments(data.content || []);
-      setTotalPages(data.totalPages || 0);
-      setTotalElements(data.totalElements || 0);
-      setLastUpdated(new Date());
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  }, [page, filterType, filterStatus, search, activeDateParam, divisionsParam]);
+    const withPrintDocNo = data.filter(
+      d => d.printDocumentNo && String(d.printDocumentNo).trim() !== ""
+    );
 
-  const fetchStats = useCallback(async () => {
-    try {
-      const params = new URLSearchParams();
-      if (activeDateParam) params.set("date", activeDateParam);
-      if (divisionsParam) params.set("divisions", divisionsParam);
+    const divisionScoped = hasAllDivisionAccess(currentUser)
+      ? withPrintDocNo
+      : withPrintDocNo.filter(d => canSeeDivision(currentUser, d.divisionNo));
 
-      const res = await fetch(`${API_BASE}/stats?${params.toString()}`);
-      if (res.ok) {
-        const data = await res.json();
-        setStats({
-          total: data.total ?? 0,
-          pending: data.pending ?? 0,
-          handedOver: data.handedOver ?? 0,
-          inProgress: data.inProgress ?? 0,
-          onHold: data.onHold ?? 0,
-          completed: data.completed ?? 0,
-        });
-      }
-    } catch (e) {
-      console.warn("Failed to load stats", e);
-    }
-  }, [activeDateParam, divisionsParam]);
+    setDocuments(divisionScoped);
+    setLastUpdated(new Date());
+  } catch (err) {
+    setError(err.message);
+  } finally {
+    setLoading(false);
+    setRefreshing(false);
+  }
+}, [currentUser]);
 
   const fetchDivisions = useCallback(async () => {
     try {
@@ -969,22 +962,15 @@ export default function IssuPikFormt() {
     }
   }, []);
 
-  // Reset to page 0 whenever a filter changes.
-  useEffect(() => {
-    setPage(0);
-  }, [filterType, filterStatus, search, dateFilterMode, fromDate, toDate]);
-
   useEffect(() => {
     fetchDocuments(false);
-  }, [fetchDocuments]);
-
-  useEffect(() => {
-    fetchStats();
-  }, [fetchStats]);
-
-  useEffect(() => {
     fetchDivisions();
-  }, [fetchDivisions]);
+  }, [fetchDocuments, fetchDivisions]);
+
+  // useEffect(() => {
+  //   const id = setInterval(() => fetchDocuments(true), AUTO_REFRESH);
+  //   return () => clearInterval(id);
+  // }, [fetchDocuments]);
 
   const getDocById = useCallback((id) => documents.find(d => d.id === id), [documents]);
 
@@ -992,11 +978,6 @@ export default function IssuPikFormt() {
     setActivePopup(null);
     setActiveId(null);
     setPopupPickers([]);
-  };
-
-  const refreshAll = (silent) => {
-    fetchDocuments(silent);
-    fetchStats();
   };
 
   const assertOk = async (res, action) => {
@@ -1056,7 +1037,7 @@ export default function IssuPikFormt() {
         body: JSON.stringify({ handedOverBy }),
       });
       await assertOk(res, "Handover");
-      refreshAll(true);
+      fetchDocuments(true);
     } catch (err) { alert(err.message); }
   };
 
@@ -1065,7 +1046,7 @@ export default function IssuPikFormt() {
     try {
       const res = await fetch(`${API_BASE}/${id}/start`, { method: "PUT" });
       await assertOk(res, "Start");
-      refreshAll(true);
+      fetchDocuments(true);
     } catch (err) { alert(err.message); }
   };
 
@@ -1078,7 +1059,7 @@ export default function IssuPikFormt() {
         body: JSON.stringify({ holdReason, heldBy }),
       });
       await assertOk(res, "Hold");
-      refreshAll(true);
+      fetchDocuments(true);
     } catch (err) { alert(err.message); }
   };
 
@@ -1091,7 +1072,7 @@ export default function IssuPikFormt() {
         body: JSON.stringify({ pickedBy }),
       });
       await assertOk(res, "End");
-      refreshAll(true);
+      fetchDocuments(true);
     } catch (err) { alert(err.message); }
   };
 
@@ -1104,7 +1085,7 @@ export default function IssuPikFormt() {
         body: JSON.stringify({ resolvedBy }),
       });
       await assertOk(res, "Emergency Pick Done");
-      refreshAll(true);
+      fetchDocuments(true);
     } catch (err) { alert(err.message); }
   };
 
@@ -1117,7 +1098,7 @@ export default function IssuPikFormt() {
         body: JSON.stringify({ heldBy, pickedBy }),
       });
       await assertOk(res, "Edit");
-      refreshAll(true);
+      fetchDocuments(true);
     } catch (err) { alert(err.message); }
   };
 
@@ -1127,16 +1108,12 @@ export default function IssuPikFormt() {
     try {
       const res = await fetch(`${API_BASE}/${id}`, { method: "DELETE" });
       await assertOk(res, "Delete");
-      refreshAll(true);
+      fetchDocuments(true);
     } catch (err) { alert(err.message); }
   };
 
   const requestIdMap = useMemo(() => computeRequestIds(documents), [documents]);
 
-  // NOTE: like request-ID numbering, this only scans the current page —
-  // a picking error on another page won't trigger the alert popup until
-  // that page is visited. Move to a dedicated endpoint if you need
-  // cross-page alerting.
   const activeCheckErrorDocs = useMemo(
     () => documents.filter(d =>
       (d.hasWrongMaterial || "").toUpperCase() === "YES" && !d.emergencyPickResolved
@@ -1161,11 +1138,11 @@ export default function IssuPikFormt() {
 
   const STATUS_FILTERS = [
     { value: "ALL", label: "All Status" },
-    { value: "PENDING", label: "Pending" },
-    { value: "HANDED_OVER", label: "Handovered" },
-    { value: "IN_PROGRESS", label: "In Progress" },
-    { value: "ON_HOLD", label: "On Hold" },
-    { value: "COMPLETED", label: "Pick Done" },
+    { value: "pending", label: "Pending" },
+    { value: "handedover", label: "Handovered" },
+    { value: "inprogress", label: "In Progress" },
+    { value: "onhold", label: "On Hold" },
+    { value: "completed", label: "Pick Done" },
   ];
 
   const DATE_FILTER_OPTIONS = [
@@ -1173,6 +1150,31 @@ export default function IssuPikFormt() {
     { value: "ALL", label: "All" },
     { value: "CUSTOM", label: "Custom" },
   ];
+
+  const visible = documents.filter(doc => {
+    const q = search.toLowerCase();
+    const matchSearch = !q || [
+      String(doc.id), doc.jobwbs, doc.reservationNo, doc.enteredBy, doc.jobType,
+    ].some(v => (v || "").toLowerCase().includes(q));
+
+    const matchType = filterType === "ALL" || doc.jobType === filterType;
+    const matchStatus = filterStatus === "ALL" || statusClass(doc.status) === filterStatus;
+    const matchDate = matchesDateFilter(doc, dateFilterMode, fromDate, toDate);
+
+    return matchSearch && matchType && matchStatus && matchDate;
+  });
+
+  const dateScoped = useMemo(
+    () => documents.filter(doc => matchesDateFilter(doc, dateFilterMode, fromDate, toDate)),
+    [documents, dateFilterMode, fromDate, toDate]
+  );
+
+  const total = dateScoped.length;
+  const pending = dateScoped.filter(d => statusClass(d.status) === "pending").length;
+  const handedOver = dateScoped.filter(d => statusClass(d.status) === "handedover").length;
+  const inProg = dateScoped.filter(d => statusClass(d.status) === "inprogress").length;
+  const onHold = dateScoped.filter(d => statusClass(d.status) === "onhold").length;
+  const completed = dateScoped.filter(d => statusClass(d.status) === "completed").length;
 
   const handleStatClick = (statusValue) => setFilterStatus(statusValue);
 
@@ -1244,7 +1246,7 @@ export default function IssuPikFormt() {
           <button
             className="ip-btn ip-btn-outline"
             style={{ flex: "unset", padding: "8px 18px" }}
-            onClick={() => refreshAll(false)}
+            onClick={() => fetchDocuments(false)}
           >
             ↻ Refresh
           </button>
@@ -1282,7 +1284,7 @@ export default function IssuPikFormt() {
           <input
             className="ip-search"
             type="text"
-            placeholder="Search by WBS, Reservation, Entered By..."
+            placeholder="Search by ID, WBS, Reservation, Entered By..."
             value={search}
             onChange={e => setSearch(e.target.value)}
           />
@@ -1339,38 +1341,39 @@ export default function IssuPikFormt() {
 
       <div className="ip-stats">
         <button type="button" className={`ip-stat-chip blue ip-stat-chip-clickable ${filterStatus === "ALL" ? "active" : ""}`} onClick={() => handleStatClick("ALL")}>
-          Total <strong>{stats.total}</strong>
+          Total <strong>{total}</strong>
         </button>
-        <button type="button" className={`ip-stat-chip ip-stat-chip-clickable ${filterStatus === "PENDING" ? "active" : ""}`} onClick={() => handleStatClick("PENDING")}>
-          <strong style={{ color: "#f59e0b" }}>{stats.pending}</strong> Pending
+        <button type="button" className={`ip-stat-chip ip-stat-chip-clickable ${filterStatus === "pending" ? "active" : ""}`} onClick={() => handleStatClick("pending")}>
+          <strong style={{ color: "#f59e0b" }}>{pending}</strong> Pending
         </button>
-        <button type="button" className={`ip-stat-chip ip-stat-chip-clickable ${filterStatus === "HANDED_OVER" ? "active" : ""}`} onClick={() => handleStatClick("HANDED_OVER")}>
-          <strong style={{ color: "#3b82f6" }}>{stats.handedOver}</strong> Handovered
+        <button type="button" className={`ip-stat-chip ip-stat-chip-clickable ${filterStatus === "handedover" ? "active" : ""}`} onClick={() => handleStatClick("handedover")}>
+          <strong style={{ color: "#3b82f6" }}>{handedOver}</strong> Handovered
         </button>
-        <button type="button" className={`ip-stat-chip ip-stat-chip-clickable ${filterStatus === "IN_PROGRESS" ? "active" : ""}`} onClick={() => handleStatClick("IN_PROGRESS")}>
-          <strong style={{ color: "#1d4ed8" }}>{stats.inProgress}</strong> In Progress
+        <button type="button" className={`ip-stat-chip ip-stat-chip-clickable ${filterStatus === "inprogress" ? "active" : ""}`} onClick={() => handleStatClick("inprogress")}>
+          <strong style={{ color: "#1d4ed8" }}>{inProg}</strong> In Progress
         </button>
-        <button type="button" className={`ip-stat-chip ip-stat-chip-clickable ${filterStatus === "ON_HOLD" ? "active" : ""}`} onClick={() => handleStatClick("ON_HOLD")}>
-          <strong style={{ color: "#c2410c" }}>{stats.onHold}</strong> On Hold
+        <button type="button" className={`ip-stat-chip ip-stat-chip-clickable ${filterStatus === "onhold" ? "active" : ""}`} onClick={() => handleStatClick("onhold")}>
+          <strong style={{ color: "#c2410c" }}>{onHold}</strong> On Hold
         </button>
-        <button type="button" className={`ip-stat-chip green ip-stat-chip-clickable ${filterStatus === "COMPLETED" ? "active" : ""}`} onClick={() => handleStatClick("COMPLETED")}>
-          Done <strong>{stats.completed}</strong>
+        <button type="button" className={`ip-stat-chip green ip-stat-chip-clickable ${filterStatus === "completed" ? "active" : ""}`} onClick={() => handleStatClick("completed")}>
+          Done <strong>{completed}</strong>
         </button>
+        <div className="ip-stat-chip">Showing <strong style={{ color: "#a78bfa" }}>{visible.length}</strong> of {total}</div>
       </div>
 
       {error && (
         <div className="ip-error-inline">
-          ⚠ {error} — <button onClick={() => refreshAll(false)}>retry</button>
+          ⚠ {error} — <button onClick={() => fetchDocuments(false)}>retry</button>
         </div>
       )}
 
       <div className="ip-grid">
         {loading ? (
           Array.from({ length: 6 }).map((_, i) => <SkeletonCard key={i} />)
-        ) : documents.length === 0 ? (
+        ) : visible.length === 0 ? (
           <div className="ip-empty">No documents found{search ? ` for "${search}"` : ""}.</div>
         ) : (
-          documents.map(doc => (
+          visible.map(doc => (
             <DocumentCard
               key={doc.id}
               doc={doc}
@@ -1401,33 +1404,6 @@ export default function IssuPikFormt() {
           ))
         )}
       </div>
-
-      {/* Pagination — 25 documents per page, same as Print Portal */}
-      {!loading && documents.length > 0 && (
-        <div className="ip-toolbar" style={{ justifyContent: "center", marginTop: 12 }}>
-          <button
-            type="button"
-            className="ip-btn ip-btn-outline"
-            style={{ flex: "unset", padding: "8px 18px" }}
-            disabled={page === 0}
-            onClick={() => setPage(p => Math.max(p - 1, 0))}
-          >
-            ‹ Prev
-          </button>
-          <span style={{ padding: "0 14px", fontSize: "0.85rem", color: "#6c8bb3" }}>
-            Page {page + 1} of {Math.max(totalPages, 1)} · {totalElements} total
-          </span>
-          <button
-            type="button"
-            className="ip-btn ip-btn-outline"
-            style={{ flex: "unset", padding: "8px 18px" }}
-            disabled={page + 1 >= totalPages}
-            onClick={() => setPage(p => p + 1)}
-          >
-            Next ›
-          </button>
-        </div>
-      )}
     </div>
   );
 }
