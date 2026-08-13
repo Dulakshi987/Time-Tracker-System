@@ -3,14 +3,15 @@ package com.controller.Issue_Delivery_Portal;
 import com.entity.Issue;
 import com.service.DeliveryPortalService;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.data.domain.Page;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
-import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 
+// ⚠ This controller + its service did not exist at all before.
+// /api/delivery-portal was 404ing — Delivery Portal page and Issue Confirm
+// Portal (which reads from the same endpoint) could never load real data.
 @RestController
 @RequestMapping("/api/delivery-portal")
 @CrossOrigin(origins = "http://localhost:5173")
@@ -19,52 +20,9 @@ public class DeliveryPortalController {
     @Autowired
     private DeliveryPortalService deliveryPortalService;
 
-    // Paginated + filtered list — this is what the Delivery Portal table calls now.
-    // GET /api/delivery-portal?page=0&size=25&search=&jobType=ALL&status=ALL
-    //     &statClass=ALL&divisionNo=ALL&divisions=D01,D02&dateMode=TODAY&fromDate=&toDate=
     @GetMapping
-    public ResponseEntity<Page<Issue>> getAll(
-            @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "25") int size,
-            @RequestParam(required = false) String search,
-            @RequestParam(required = false, defaultValue = "ALL") String jobType,
-            @RequestParam(required = false, defaultValue = "ALL") String status,
-            @RequestParam(required = false, defaultValue = "ALL") String statClass,
-            @RequestParam(required = false, defaultValue = "ALL") String divisionNo,
-            @RequestParam(required = false) String divisions, // comma-separated — non-admin division scope
-            @RequestParam(required = false, defaultValue = "TODAY") String dateMode,
-            @RequestParam(required = false) String fromDate,
-            @RequestParam(required = false) String toDate) {
-
-        List<String> allowed = splitOrNull(divisions);
-
-        return ResponseEntity.ok(deliveryPortalService.getDocuments(
-                page, size, search, jobType, status, statClass, divisionNo, allowed, dateMode, fromDate, toDate));
-    }
-
-    // Counts only — powers the stat chips + overdue banner without shipping full rows.
-    @GetMapping("/stats")
-    public ResponseEntity<Map<String, Object>> getStats(
-            @RequestParam(required = false, defaultValue = "ALL") String divisionNo,
-            @RequestParam(required = false) String divisions,
-            @RequestParam(required = false, defaultValue = "TODAY") String dateMode,
-            @RequestParam(required = false) String fromDate,
-            @RequestParam(required = false) String toDate) {
-
-        List<String> allowed = splitOrNull(divisions);
-
-        return ResponseEntity.ok(deliveryPortalService.getStats(divisionNo, allowed, dateMode, fromDate, toDate));
-    }
-
-    // Req ID numbering map (id -> "20260816/0001") — small payload.
-    @GetMapping("/numbering")
-    public ResponseEntity<Map<Long, String>> getNumbering(
-            @RequestParam(required = false, defaultValue = "ALL") String divisionNo,
-            @RequestParam(required = false) String divisions) {
-
-        List<String> allowed = splitOrNull(divisions);
-
-        return ResponseEntity.ok(deliveryPortalService.getRequestIdNumbering(divisionNo, allowed));
+    public ResponseEntity<List<Issue>> getAll() {
+        return ResponseEntity.ok(deliveryPortalService.getAllDocuments());
     }
 
     @GetMapping("/{id}")
@@ -120,6 +78,8 @@ public class DeliveryPortalController {
     }
 
     // body: { handoverBy }
+    // Only meaningful while the row is On Hold or Cancelled — the frontend
+    // enforces this by disabling the button otherwise.
     @PutMapping("/{id}/handover")
     public ResponseEntity<Issue> handover(@PathVariable Long id, @RequestBody Map<String, String> body) {
         try {
@@ -130,6 +90,8 @@ public class DeliveryPortalController {
         }
     }
 
+    // No body required — clears the handover stamp and resets deliveryStatus
+    // back to PENDING so Delivered / Hold / Cancel unlock again on the UI.
     @PutMapping("/{id}/reactivate")
     public ResponseEntity<Issue> reactivate(@PathVariable Long id) {
         try {
@@ -176,9 +138,5 @@ public class DeliveryPortalController {
     public ResponseEntity<Void> delete(@PathVariable Long id) {
         deliveryPortalService.delete(id);
         return ResponseEntity.noContent().build();
-    }
-
-    private List<String> splitOrNull(String csv) {
-        return (csv == null || csv.isBlank()) ? null : Arrays.asList(csv.split(","));
     }
 }
