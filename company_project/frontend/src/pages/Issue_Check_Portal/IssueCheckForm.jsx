@@ -9,7 +9,12 @@ import { getCurrentUser, canUseButton, logoutUser, hasAllDivisionAccess, canSeeD
 
 const API_BASE = "https://time-tracker-system-production.up.railway.app/api/check-portal";
 const SETUP_API = "https://time-tracker-system-production.up.railway.app/api/admin-setup";
-// const AUTO_REFRESH = 10000;
+const AUTO_REFRESH = 10000;
+
+// Cards shown per page in the grid — pagination is client-side (the grid
+// is built from the already-fetched + already-filtered `documents` list),
+// so this stays in sync with search/type/status/date filters automatically.
+const ITEMS_PER_PAGE = 10;
 
 // Reasons a Picking Error can be logged under.
 // "Material Shortage" and "Collected Different Material" now create a
@@ -996,6 +1001,101 @@ function SkeletonCard() {
   );
 }
 
+// ── Pagination Bar ────────────────────────────────────────────────────────
+// Simple Prev / numbered / Next control. Kept generic so it just needs a
+// current page, total pages, and a setter — no knowledge of the filters.
+
+function PaginationBar({ currentPage, totalPages, onPageChange }) {
+  if (totalPages <= 1) return null;
+
+  // Show a compact window of page numbers around the current page instead
+  // of every page (matters once there are a lot of pages).
+  const pageNumbers = [];
+  const windowSize = 2;
+  const start = Math.max(1, currentPage - windowSize);
+  const end = Math.min(totalPages, currentPage + windowSize);
+  for (let p = start; p <= end; p++) pageNumbers.push(p);
+
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        gap: 8,
+        marginTop: 22,
+        flexWrap: "wrap",
+      }}
+    >
+      <button
+        type="button"
+        className="ip-btn ip-btn-outline"
+        style={{ flex: "unset", padding: "6px 14px" }}
+        disabled={currentPage === 1}
+        onClick={() => onPageChange(currentPage - 1)}
+      >
+        ‹ Prev
+      </button>
+
+      {start > 1 && (
+        <>
+          <button
+            type="button"
+            className="ip-btn ip-btn-outline"
+            style={{ flex: "unset", padding: "6px 12px" }}
+            onClick={() => onPageChange(1)}
+          >
+            1
+          </button>
+          {start > 2 && <span style={{ color: "#6c8bb3" }}>…</span>}
+        </>
+      )}
+
+      {pageNumbers.map(p => (
+        <button
+          key={p}
+          type="button"
+          className="ip-btn ip-btn-outline"
+          style={{
+            flex: "unset",
+            padding: "6px 12px",
+            borderColor: p === currentPage ? "#3b82f6" : undefined,
+            color: p === currentPage ? "#3b82f6" : undefined,
+            fontWeight: p === currentPage ? 700 : 500,
+          }}
+          onClick={() => onPageChange(p)}
+        >
+          {p}
+        </button>
+      ))}
+
+      {end < totalPages && (
+        <>
+          {end < totalPages - 1 && <span style={{ color: "#6c8bb3" }}>…</span>}
+          <button
+            type="button"
+            className="ip-btn ip-btn-outline"
+            style={{ flex: "unset", padding: "6px 12px" }}
+            onClick={() => onPageChange(totalPages)}
+          >
+            {totalPages}
+          </button>
+        </>
+      )}
+
+      <button
+        type="button"
+        className="ip-btn ip-btn-outline"
+        style={{ flex: "unset", padding: "6px 14px" }}
+        disabled={currentPage === totalPages}
+        onClick={() => onPageChange(currentPage + 1)}
+      >
+        Next ›
+      </button>
+    </div>
+  );
+}
+
 // ── Main Component ───────────────────────────────────────────────────────────
 
 export default function IssueCheckForm() {
@@ -1010,11 +1110,19 @@ export default function IssueCheckForm() {
   const [lastUpdated,  setLastUpdated]  = useState(null);
   const [refreshing,   setRefreshing]   = useState(false);
 
+  // ── Grid pagination — 10 cards per page. Purely client-side since the
+  // grid is built from `documents` after search/type/status/date filters
+  // are already applied below. Reset back to page 1 whenever any filter
+  // changes so the user never lands on a now-empty page.
+  const [currentPage, setCurrentPage] = useState(1);
+
   // ── Date filter — defaults to "Today" (Sri Lanka time). "All" clears
-  // it, "Custom" opens a From/To range. Recomputes on every render (and
-  // the auto-refresh timer keeps this component re-rendering), so at
+  // it, "Custom" opens a From/To range. Recomputes on every render so at
   // midnight Colombo time "Today" automatically rolls over to the new
   // day without needing a page reload. Mirrors Print Portal / Pick Portal.
+  // NOTE: auto-refresh (setInterval) is intentionally OFF — the grid only
+  // updates when the user presses the ↻ Refresh button, or after an
+  // action (Start/Hold/End/Edit/Delete) triggers a silent re-fetch.
   const [dateFilterMode, setDateFilterMode] = useState("TODAY"); // "TODAY" | "ALL" | "CUSTOM"
   const [fromDate,     setFromDate]     = useState("");
   const [toDate,       setToDate]       = useState("");
@@ -1101,29 +1209,6 @@ export default function IssueCheckForm() {
     setRefreshing(false);
   }
 }, [currentUser]);
-  // const fetchDocuments = useCallback(async (silent = false) => {
-  //   if (!silent) setLoading(true);
-  //   else setRefreshing(true);
-  //   setError(null);
-  //   try {
-  //     const res  = await fetch(API_BASE);
-  //     if (!res.ok) throw new Error(`Server error: ${res.status}`);
-  //     const data = await res.json();
-  //     const readyForCheck = data.filter(d => {
-  //       const pickDone = statusClass(d.status) === "completed";
-  //       const hasDocNo = d.printDocumentNo && String(d.printDocumentNo).trim() !== "";
-  //       return pickDone && hasDocNo;
-  //     });
-
-  //     setDocuments(readyForCheck);
-  //     setLastUpdated(new Date());
-  //   } catch (err) {
-  //     setError(err.message);
-  //   } finally {
-  //     setLoading(false);
-  //     setRefreshing(false);
-  //   }
-  // }, []);
 
   // ── Fetch divisions ──
   const fetchDivisions = useCallback(async () => {
@@ -1174,6 +1259,7 @@ export default function IssueCheckForm() {
       setPopupOperators([]);
     } finally {
       setPopupOperatorsLoading(false);
+      
     }
   }, []);
 
@@ -1182,6 +1268,8 @@ export default function IssueCheckForm() {
     fetchDivisions();
   }, [fetchDocuments, fetchDivisions]);
 
+  // Auto-refresh is intentionally disabled — data only updates via the
+  // ↻ Refresh button (or a silent re-fetch right after an action).
   // useEffect(() => {
   //   const id = setInterval(() => fetchDocuments(true), AUTO_REFRESH);
   //   return () => clearInterval(id);
@@ -1358,6 +1446,26 @@ export default function IssueCheckForm() {
 
     return matchSearch && matchType && matchStatus && matchDate;
   });
+
+  // ── Pagination — slice the filtered `visible` list into pages of 10.
+  const totalPages = Math.max(1, Math.ceil(visible.length / ITEMS_PER_PAGE));
+
+  // Reset to page 1 whenever a filter changes, so the user never lands on
+  // a page that's now out of range / empty.
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [search, filterType, filterStatus, dateFilterMode, fromDate, toDate]);
+
+  // Safety clamp — e.g. if a background refresh shrinks the result set
+  // while the user is sitting on a later page.
+  useEffect(() => {
+    if (currentPage > totalPages) setCurrentPage(totalPages);
+  }, [currentPage, totalPages]);
+
+  const paginatedVisible = useMemo(
+    () => visible.slice((currentPage - 1) * ITEMS_PER_PAGE, currentPage * ITEMS_PER_PAGE),
+    [visible, currentPage]
+  );
 
   // Stats — scoped by the date filter too, so counts on screen always match
   // what's actually shown in the grid below (e.g. "Today" only counts
@@ -1654,7 +1762,14 @@ export default function IssueCheckForm() {
         >
           Check Done <strong>{completed}</strong>
         </button>
-        <div className="ip-stat-chip">Showing <strong style={{color:"#a78bfa"}}>{visible.length}</strong> of {total}</div>
+        <div className="ip-stat-chip">
+          Showing <strong style={{color:"#a78bfa"}}>{paginatedVisible.length}</strong> of {visible.length}
+          {totalPages > 1 && (
+            <span style={{ marginLeft: 6, color: "#7c8db0" }}>
+              (Page {currentPage}/{totalPages})
+            </span>
+          )}
+        </div>
       </div>
 
       {/* ── Error ── */}
@@ -1672,7 +1787,7 @@ export default function IssueCheckForm() {
         </div>
       )}
 
-      {/* ── Grid ── */}
+      {/* ── Grid — only the current page's 10 cards are rendered ── */}
       <div className="ip-grid">
         {loading ? (
           [1,2,3,4,5,6].map(i => <SkeletonCard key={i} />)
@@ -1682,7 +1797,7 @@ export default function IssueCheckForm() {
             <p>No documents found{search ? ` for "${search}"` : ""}.</p>
           </div>
         ) : (
-          visible.map(doc => (
+          paginatedVisible.map(doc => (
             <DocumentCard
               key={doc.id}
               doc={doc}
@@ -1709,6 +1824,15 @@ export default function IssueCheckForm() {
           ))
         )}
       </div>
+
+      {/* ── Pagination controls — hidden when only 1 page ── */}
+      {!loading && visible.length > 0 && (
+        <PaginationBar
+          currentPage={currentPage}
+          totalPages={totalPages}
+          onPageChange={setCurrentPage}
+        />
+      )}
     </div>
   );
 }

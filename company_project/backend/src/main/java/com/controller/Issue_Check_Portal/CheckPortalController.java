@@ -3,6 +3,7 @@ package com.controller.Issue_Check_Portal;
 import com.entity.Issue;
 import com.service.CheckPortalService;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.domain.Page;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -20,6 +21,20 @@ public class CheckPortalController {
     @GetMapping
     public ResponseEntity<List<Issue>> getAll() {
         return ResponseEntity.ok(checkPortalService.getAllDocuments());
+    }
+
+    // ── Optional paginated endpoint ──────────────────────────────────
+    // GET /api/check-portal/paged?page=0&size=10
+    // Not wired into the Check Portal UI right now (the grid there filters
+    // client-side on the full list from GET /api/check-portal above, so
+    // paging there is also done client-side — see IssueCheckForm.jsx).
+    // This is here in case a true server-side paginated view is needed
+    // later (e.g. a "load more" list without the search/filter toolbar).
+    @GetMapping("/paged")
+    public ResponseEntity<Page<Issue>> getAllPaged(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "10") int size) {
+        return ResponseEntity.ok(checkPortalService.getDocumentsPaged(page, size));
     }
 
     @GetMapping("/{id}")
@@ -86,12 +101,6 @@ public class CheckPortalController {
         }
     }
 
-    // @DeleteMapping("/{id}")
-    // public ResponseEntity<Void> delete(@PathVariable Long id) {
-    //     checkPortalService.delete(id);
-    //     return ResponseEntity.noContent().build();
-    // }
-
     @PutMapping("/{id}/edit")
     public Issue editCheck(@PathVariable Long id, @RequestBody Map<String, String> body) {
         return checkPortalService.editCheck(id, body.get("heldBy"), body.get("checkedBy"));
@@ -100,5 +109,5 @@ public class CheckPortalController {
     @DeleteMapping("/{id}")
     public void deleteCheck(@PathVariable Long id) {
         checkPortalService.delete(id);
-}
+    }
 }
