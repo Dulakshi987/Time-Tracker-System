@@ -1157,11 +1157,7 @@ export default function IssuPikFormt() {
     });
   }, [activeCheckErrorDocs]);
 
-// Old:
-// const jobTypes = ["ALL", ...new Set(documents.map(d => d.jobType).filter(Boolean))];
-
-// New:
-const jobTypes = ["ALL", ...JOB_TYPE_OPTIONS];
+  const jobTypes = ["ALL", ...new Set(documents.map(d => d.jobType).filter(Boolean))];
 
   const STATUS_FILTERS = [
     { value: "ALL", label: "All Status" },
