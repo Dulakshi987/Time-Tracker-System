@@ -35,13 +35,7 @@ public class IssuePickService {
     public List<Issue> getByJobType(String jobType) {
         return issueRepository.findByJobType(jobType);
     }
-    public List<String> getAllJobTypes(List<String> divisionNos) {
-    if (divisionNos != null && !divisionNos.isEmpty()) {
-        return issueRepository.findDistinctJobTypesByDivisions(divisionNos);
-    }
 
-    return issueRepository.findDistinctJobTypes();
-}
     public List<Issue> getByStatus(String status) {
         return issueRepository.findByStatus(status);
     }
