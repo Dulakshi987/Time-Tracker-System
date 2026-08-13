@@ -7,7 +7,7 @@ import { getCurrentUser, canUseButton, logoutUser, hasAllDivisionAccess, canSeeD
 // const SETUP_API = "http://localhost:8080/api/admin-setup";
 const API_BASE = "https://time-tracker-system-production.up.railway.app/api/pick-portal";
 const SETUP_API = "https://time-tracker-system-production.up.railway.app/api/admin-setup";
-const AUTO_REFRESH = 10000;
+// const AUTO_REFRESH = 10000;
 
 const HOLD_REASONS = [
   "Printer not available",
@@ -967,10 +967,10 @@ export default function IssuPikFormt() {
     fetchDivisions();
   }, [fetchDocuments, fetchDivisions]);
 
-  useEffect(() => {
-    const id = setInterval(() => fetchDocuments(true), AUTO_REFRESH);
-    return () => clearInterval(id);
-  }, [fetchDocuments]);
+  // useEffect(() => {
+  //   const id = setInterval(() => fetchDocuments(true), AUTO_REFRESH);
+  //   return () => clearInterval(id);
+  // }, [fetchDocuments]);
 
   const getDocById = useCallback((id) => documents.find(d => d.id === id), [documents]);
 
