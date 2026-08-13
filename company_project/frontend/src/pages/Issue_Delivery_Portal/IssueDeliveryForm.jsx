@@ -923,6 +923,10 @@ export default function IssueDeliveryForm() {
 
   // PAGINATION — current page for the table (10 rows per page)
   const [currentPage,  setCurrentPage]  = useState(1);
+  const [totalElements, setTotalElements] = useState(0);
+  const [totalPages, setTotalPages] = useState(1);
+  const [stats, setStats] = useState({ total: 0, pending: 0, onHold: 0, completed: 0, cancelled: 0, overdue: 0 });
+  const [filterOptions, setFilterOptions] = useState({ jobTypes: [], statuses: [], divisions: [] });
 
   const [divisions, setDivisions] = useState([]);
 
@@ -938,17 +942,79 @@ export default function IssueDeliveryForm() {
     if (!silent) setLoading(true);
     else setRefreshing(true);
     setError(null);
+
     try {
-      const res  = await fetch(API_BASE);
+      const params = new URLSearchParams();
+      params.set("page", String(currentPage - 1));
+      params.set("size", String(PAGE_SIZE));
+
+      if (filterType !== "ALL") params.set("jobType", filterType);
+      if (filterStatus !== "ALL") params.set("status", filterStatus);
+      if (filterDivision !== "ALL") params.set("division", filterDivision);
+      if (search.trim()) params.set("search", search.trim());
+      params.set("dateMode", dateFilterMode);
+      if (dateFilterMode === "CUSTOM") {
+        if (fromDate) params.set("fromDate", fromDate);
+        if (toDate) params.set("toDate", toDate);
+      }
+      if (statFilter !== "ALL") params.set("statFilter", statFilter);
+
+      const res = await fetch(`${API_BASE}?${params.toString()}`);
       if (!res.ok) throw new Error(`Server error: ${res.status}`);
       const data = await res.json();
-      setDocuments(data);
+
+      setDocuments(Array.isArray(data.content) ? data.content : []);
+      setTotalElements(Number(data.totalElements || 0));
+      setTotalPages(Math.max(1, Number(data.totalPages || 1)));
       setLastUpdated(new Date());
     } catch (err) {
       setError(err.message);
     } finally {
       setLoading(false);
       setRefreshing(false);
+    }
+  }, [
+    currentPage, filterType, filterStatus, filterDivision, search,
+    dateFilterMode, fromDate, toDate, statFilter
+  ]);
+
+  const fetchStats = useCallback(async () => {
+    try {
+      const params = new URLSearchParams();
+      params.set("dateMode", dateFilterMode);
+      if (dateFilterMode === "CUSTOM") {
+        if (fromDate) params.set("fromDate", fromDate);
+        if (toDate) params.set("toDate", toDate);
+      }
+
+      const res = await fetch(`${API_BASE}/stats?${params.toString()}`);
+      if (!res.ok) throw new Error(`Stats server error: ${res.status}`);
+      const data = await res.json();
+      setStats({
+        total: Number(data.total || 0),
+        pending: Number(data.pending || 0),
+        onHold: Number(data.onHold || 0),
+        completed: Number(data.completed || 0),
+        cancelled: Number(data.cancelled || 0),
+        overdue: Number(data.overdue || 0),
+      });
+    } catch (err) {
+      console.warn("Failed to load delivery stats", err);
+    }
+  }, [dateFilterMode, fromDate, toDate]);
+
+  const fetchFilterOptions = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_BASE}/filter-options`);
+      if (!res.ok) throw new Error(`Filter options server error: ${res.status}`);
+      const data = await res.json();
+      setFilterOptions({
+        jobTypes: Array.isArray(data.jobTypes) ? data.jobTypes : [],
+        statuses: Array.isArray(data.statuses) ? data.statuses : [],
+        divisions: Array.isArray(data.divisions) ? data.divisions : [],
+      });
+    } catch (err) {
+      console.warn("Failed to load delivery filter options", err);
     }
   }, []);
 
@@ -987,8 +1053,16 @@ export default function IssueDeliveryForm() {
 
   useEffect(() => {
     fetchDocuments(false);
+  }, [fetchDocuments]);
+
+  useEffect(() => {
+    fetchStats();
+  }, [fetchStats]);
+
+  useEffect(() => {
     fetchDivisions();
-  }, [fetchDocuments, fetchDivisions]);
+    fetchFilterOptions();
+  }, [fetchDivisions, fetchFilterOptions]);
 
   // useEffect(() => {
   //   const id = setInterval(() => fetchDocuments(true), AUTO_REFRESH);
@@ -1025,6 +1099,7 @@ export default function IssueDeliveryForm() {
         body: JSON.stringify({ holdReason, heldBy }),
       });
       fetchDocuments(true);
+      fetchStats();
     } catch (err) {
       alert("Hold failed: " + err.message);
     }
@@ -1039,6 +1114,7 @@ export default function IssueDeliveryForm() {
         body: JSON.stringify({ deliveredBy, vehicleNo }),
       });
       fetchDocuments(true);
+      fetchStats();
     } catch (err) {
       alert("Delivery Done failed: " + err.message);
     }
@@ -1053,6 +1129,7 @@ export default function IssueDeliveryForm() {
         body: JSON.stringify({ cancelReason, cancelledBy }),
       });
       fetchDocuments(true);
+      fetchStats();
     } catch (err) {
       alert("Cancel failed: " + err.message);
     }
@@ -1067,6 +1144,7 @@ export default function IssueDeliveryForm() {
         body: JSON.stringify({ handoverBy }),
       });
       fetchDocuments(true);
+      fetchStats();
     } catch (err) {
       alert("Handover failed: " + err.message);
     }
@@ -1083,6 +1161,7 @@ export default function IssueDeliveryForm() {
       const res = await fetch(`${API_BASE}/${id}/reactivate`, { method: "PUT" });
       if (!res.ok) throw new Error(`Server error: ${res.status}`);
       fetchDocuments(true);
+      fetchStats();
     } catch (err) {
       alert("Reactivate failed: " + err.message);
       fetchDocuments(true);
@@ -1099,6 +1178,7 @@ export default function IssueDeliveryForm() {
       });
       if (!res.ok) throw new Error(`Server error: ${res.status}`);
       fetchDocuments(true);
+      fetchStats();
     } catch (err) {
       alert("Edit failed: " + err.message);
     }
@@ -1110,6 +1190,7 @@ export default function IssueDeliveryForm() {
       const res = await fetch(`${API_BASE}/${id}`, { method: "DELETE" });
       if (!res.ok) throw new Error(`Server error: ${res.status}`);
       fetchDocuments(true);
+      fetchStats();
     } catch (err) {
       alert("Delete failed: " + err.message);
     }
@@ -1129,75 +1210,41 @@ export default function IssueDeliveryForm() {
         body: JSON.stringify(payload),
       });
       fetchDocuments(true);
+      fetchStats();
     } catch (err) {
       alert("Change Vehicle failed: " + err.message);
     }
   };
 
-  const jobTypes = ["ALL", ...new Set(accessScopedDocuments.map(d => d.jobType).filter(Boolean))];
-  const statuses = ["ALL", ...new Set(accessScopedDocuments.map(d => d.deliveryStatus).filter(Boolean))];
+  const jobTypes = ["ALL", ...filterOptions.jobTypes];
+  const statuses = ["ALL", ...filterOptions.statuses];
 
   const divisionOptions = useMemo(() => {
     const list = hasAllDiv
-      ? [...new Set(accessScopedDocuments.map(d => d.divisionNo).filter(Boolean))]
+      ? filterOptions.divisions
       : userDivisions;
-    return ["ALL", ...list];
-  }, [hasAllDiv, userDivisions, accessScopedDocuments]);
+    return ["ALL", ...list.filter(Boolean)];
+  }, [hasAllDiv, userDivisions, filterOptions.divisions]);
 
-  const visible = accessScopedDocuments.filter(doc => {
-    const q = search.toLowerCase();
-    const matchSearch = !q || [
-      String(doc.id), doc.customerName, doc.jobwbs,
-      doc.reservationNo, doc.enteredBy, doc.jobType, doc.printDocumentNo,
-      doc.requestedBy, doc.vehicleNo, doc.deliveryVehicleNo,
-    ].some(v => (v || "").toLowerCase().includes(q));
+  // Backend performs search, filters, date filtering and pagination.
+  // Keep the existing UI behaviour by rendering only the current backend page.
+  const visible = accessScopedDocuments;
+  const paginatedVisible = visible;
 
-    const matchType     = filterType     === "ALL" || doc.jobType === filterType;
-    const matchStatus   = filterStatus   === "ALL" || doc.deliveryStatus === filterStatus;
-    const matchDivision = filterDivision === "ALL" || doc.divisionNo === filterDivision;
-    const matchStat     = statFilter     === "ALL" || statusClass(doc.deliveryStatus) === statFilter;
-    const matchDate     = matchesDateFilter(doc, dateFilterMode, fromDate, toDate);
-
-    return matchSearch && matchType && matchStatus && matchDivision && matchStat && matchDate;
-  });
-
-  // PAGINATION — slice `visible` into pages of PAGE_SIZE rows.
-  // Everything above (filters, dropdown options, stats) still runs against
-  // the FULL accessScopedDocuments list — only the table render is paged.
-  const totalPages = Math.max(1, Math.ceil(visible.length / PAGE_SIZE));
-  const paginatedVisible = useMemo(
-    () => visible.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE),
-    [visible, currentPage]
-  );
-
-  // PAGINATION — jump back to page 1 whenever a filter/search/date changes,
-  // so we never land on an empty "page 3" after narrowing the results.
   useEffect(() => {
     setCurrentPage(1);
   }, [search, filterType, filterStatus, filterDivision, statFilter, dateFilterMode, fromDate, toDate]);
 
-  // PAGINATION — also clamp back down if the current page no longer exists
-  // (e.g. documents got deleted / refreshed and the list shrank).
   useEffect(() => {
     if (currentPage > totalPages) setCurrentPage(totalPages);
   }, [totalPages, currentPage]);
 
-  const dateScoped = useMemo(
-    () => accessScopedDocuments.filter(doc => matchesDateFilter(doc, dateFilterMode, fromDate, toDate)),
-    [accessScopedDocuments, dateFilterMode, fromDate, toDate]
-  );
-
-  const total     = dateScoped.length;
-  const pending   = dateScoped.filter(d => statusClass(d.deliveryStatus) === "pending").length;
-  const onHold    = dateScoped.filter(d => statusClass(d.deliveryStatus) === "onhold").length;
-  const completed = dateScoped.filter(d => statusClass(d.deliveryStatus) === "completed").length;
-  const cancelled = dateScoped.filter(d => statusClass(d.deliveryStatus) === "cancelled").length;
-
-  const overdueDocs  = dateScoped.filter(d => {
-    const p = daysPending(d);
-    return p !== null && p > OVERDUE_DAYS && statusClass(d.deliveryStatus) !== "completed";
-  });
-  const overdueCount = overdueDocs.length;
+  const total     = stats.total;
+  const pending   = stats.pending;
+  const onHold    = stats.onHold;
+  const completed = stats.completed;
+  const cancelled = stats.cancelled;
+  const overdueCount = stats.overdue;
 
   const requestIdMap = useMemo(() => computeRequestIds(accessScopedDocuments), [accessScopedDocuments]);
 
@@ -1423,7 +1470,7 @@ export default function IssueDeliveryForm() {
         </button>
         {/* PAGINATION — shows current page's row count + total filtered count + page indicator */}
         <div className="ip-stat-chip">
-          Showing <strong style={{color:"#a78bfa"}}>{paginatedVisible.length}</strong> of {visible.length}
+          Showing <strong style={{color:"#a78bfa"}}>{paginatedVisible.length}</strong> of {totalElements}
           {totalPages > 1 && (
             <span style={{ marginLeft: 6, color: "#6c8bb3" }}>(Page {currentPage}/{totalPages})</span>
           )}

@@ -24,15 +24,35 @@ public class DeliveryPortalController {
     @Autowired
     private DeliveryPortalService deliveryPortalService;
 
-    @GetMapping
-    public ResponseEntity<Page<Issue>> getAll(
+   @GetMapping
+public ResponseEntity<Page<Issue>> getAll(
         @RequestParam(defaultValue = "0") int page,
         @RequestParam(defaultValue = "10") int size,
         @RequestParam(required = false) String jobType,
-        @RequestParam(required = false) String status) {
+        @RequestParam(required = false) String status,
+        @RequestParam(required = false) String division,
+        @RequestParam(required = false) String search,
+        @RequestParam(defaultValue = "TODAY") String dateMode,
+        @RequestParam(required = false) String fromDate,
+        @RequestParam(required = false) String toDate,
+        @RequestParam(required = false) String statFilter) {
 
     Pageable pageable = PageRequest.of(page, size);
-    return ResponseEntity.ok(deliveryPortalService.getAllDocuments(jobType, status, pageable));
+    return ResponseEntity.ok(deliveryPortalService.getAllDocuments(
+            jobType, status, division, search, dateMode, fromDate, toDate, statFilter, pageable));
+}
+
+@GetMapping("/stats")
+public ResponseEntity<Map<String, Object>> getStats(
+        @RequestParam(defaultValue = "TODAY") String dateMode,
+        @RequestParam(required = false) String fromDate,
+        @RequestParam(required = false) String toDate) {
+    return ResponseEntity.ok(deliveryPortalService.getStats(dateMode, fromDate, toDate));
+}
+
+@GetMapping("/filter-options")
+public ResponseEntity<Map<String, Object>> getFilterOptions() {
+    return ResponseEntity.ok(deliveryPortalService.getFilterOptions());
 }
     // public ResponseEntity<List<Issue>> getAll() {
     //     return ResponseEntity.ok(deliveryPortalService.getAllDocuments());
