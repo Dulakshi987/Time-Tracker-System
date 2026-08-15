@@ -28,6 +28,11 @@ public class IssuePrintController {
         return ResponseEntity.ok(issuePrintService.getByDateRange(from, to));
     }
 
+    @GetMapping("/job-types")
+    public ResponseEntity<List<String>> jobTypes() {
+        return ResponseEntity.ok(issuePrintService.getDistinctJobTypes());
+    }
+
     @GetMapping("/paged")
     public ResponseEntity<Page<Issue>> getAllPaged(
             @RequestParam(defaultValue = "0") int page,

@@ -434,6 +434,11 @@ export default function IssuPrinFormt() {
   // Divisions (Admin Master Data) — used to label each card with its Division
   const [divisions, setDivisions] = useState([]);
 
+  // Full list of distinct Job Types across ALL documents (not just the
+  // current page) — used to populate the "All Job Types" filter dropdown
+  // so options don't disappear/appear depending on which page is loaded.
+  const [allJobTypes, setAllJobTypes] = useState([]);
+
   // Operators shown in the currently open popup — scoped to that
   // document's Division (Admin Master Data, division-wise)
   const [popupOperators, setPopupOperators] = useState([]);
@@ -509,6 +514,20 @@ export default function IssuPrinFormt() {
     }
   }, []);
 
+  // Distinct Job Types across the whole dataset, used for the filter
+  // dropdown — independent of pagination/filters so it never loses options.
+  const fetchJobTypes = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_BASE}/job-types`);
+      if (res.ok) {
+        const data = await res.json();
+        setAllJobTypes(data || []);
+      }
+    } catch (e) {
+      console.warn("Failed to load job types", e);
+    }
+  }, []);
+
   const divisionNoToName = useMemo(() => {
     const map = {};
     divisions.forEach(d => { map[d.divisionNo] = d.divisionName; });
@@ -579,7 +598,8 @@ export default function IssuPrinFormt() {
 
   useEffect(() => {
     fetchDivisions();
-  }, [fetchDivisions]);
+    fetchJobTypes();
+  }, [fetchDivisions, fetchJobTypes]);
 
   // Any filter/search/date change should reset back to page 0 — otherwise
   // you could land on a page that no longer exists for the new filter.
@@ -700,7 +720,10 @@ export default function IssuPrinFormt() {
   // with requestId attached from the server — nothing left to compute here.
   const visible = documents;
 
-  const jobTypes = ["ALL", ...new Set(documents.map(d => d.jobType).filter(Boolean))];
+  // Full distinct Job Types (server-provided) — independent of the
+  // current page, so options like "Residential" don't vanish just
+  // because they aren't on the page you happen to be viewing.
+  const jobTypes = ["ALL", ...allJobTypes];
 
   const STATUS_FILTERS = [
     { value: "ALL", label: "All Status" },

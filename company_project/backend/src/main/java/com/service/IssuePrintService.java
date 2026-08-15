@@ -13,6 +13,7 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.*;
 import java.util.stream.Collectors;
+import java.util.Objects;
 
 @Service
 public class IssuePrintService {
@@ -33,6 +34,15 @@ public class IssuePrintService {
         String f = from != null ? from : "2000-01-01";
         String t = to != null ? to : LocalDate.now().toString();
         return issueRepository.findByRequestDateBetween(f, t);
+    }
+    public List<String> getDistinctJobTypes() {
+    return issueRepository.findAll().stream()
+            .map(Issue::getJobType)
+            .filter(Objects::nonNull)
+            .filter(s -> !s.isBlank())
+            .distinct()
+            .sorted()
+            .collect(Collectors.toList());
     }
 
     // Pagination — plain service method, NOT a REST endpoint.
