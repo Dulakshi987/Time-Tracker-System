@@ -8,7 +8,6 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 
 import java.time.Duration;
-import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
 
@@ -24,12 +23,15 @@ public class IssuePrintService {
 
     // Date-range filter — pushes filtering to the DB instead of returning
     // every row and letting the frontend filter it.
-    public List<Issue> getByDateRange(LocalDate from, LocalDate to) {
+    // Date-range filter — pushes filtering to the DB instead of returning
+// every row and letting the frontend filter it. requestDate is stored
+// as a String (YYYY-MM-DD), so we compare as strings, not LocalDate.
+    public List<Issue> getByDateRange(String from, String to) {
         if (from == null && to == null) {
             return issueRepository.findAll();
         }
-        LocalDate f = from != null ? from : LocalDate.of(2000, 1, 1);
-        LocalDate t = to != null ? to : LocalDate.now();
+        String f = from != null ? from : "2000-01-01";
+        String t = to != null ? to : java.time.LocalDate.now().toString();
         return issueRepository.findByRequestDateBetween(f, t);
     }
 

@@ -6,8 +6,6 @@ import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.stereotype.Repository;
 
 import java.util.List;
-import java.time.LocalDate;
-
 
 @Repository
 public interface IssueRepository extends JpaRepository<Issue, Long>, JpaSpecificationExecutor<Issue> {
@@ -19,8 +17,9 @@ public interface IssueRepository extends JpaRepository<Issue, Long>, JpaSpecific
     List<Issue> findByDeliveryStatus(String deliveryStatus);
 
     List<Issue> findByCheckStatusOrderByIdAsc(String checkStatus);
-    List<Issue> findByRequestDateBetween(LocalDate from, LocalDate to);
-    List<Issue> findByRequestDate(LocalDate date);
 
-
+    // requestDate is stored as a plain String (YYYY-MM-DD), not LocalDate —
+    // string comparison works correctly for ISO date format.
+    List<Issue> findByRequestDateBetween(String from, String to);
+    List<Issue> findByRequestDate(String date);
 }

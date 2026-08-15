@@ -10,7 +10,6 @@ import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
-import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
 
@@ -24,8 +23,8 @@ public class IssuePrintController {
 
     @GetMapping
     public ResponseEntity<List<Issue>> getAll(
-            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
-            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to) {
+            @RequestParam(required = false) String from,
+            @RequestParam(required = false) String to) {
         return ResponseEntity.ok(issuePrintService.getByDateRange(from, to));
     }
 
