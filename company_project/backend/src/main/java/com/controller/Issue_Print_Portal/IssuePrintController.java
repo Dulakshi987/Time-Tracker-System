@@ -3,9 +3,10 @@ package com.controller.Issue_Print_Portal;
 import com.entity.Issue;
 import com.service.IssuePrintService;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.data.domain.Page;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import java.time.LocalDate;
+import org.springframework.format.annotation.DateTimeFormat;
 
 import java.util.List;
 import java.util.Map;
@@ -18,36 +19,19 @@ public class IssuePrintController {
     @Autowired
     private IssuePrintService issuePrintService;
 
-    // Kept for anything still relying on the full unpaginated list
     @GetMapping
-    public ResponseEntity<List<Issue>> getAll() {
-        return ResponseEntity.ok(issuePrintService.getAllDocuments());
+    public ResponseEntity<List<Issue>> getAll(
+        @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
+        @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to) {
+    return ResponseEntity.ok(issuePrintService.getByDateRange(from, to));
     }
 
-    // ── Paginated + filtered list — this is what the frontend grid should call ──
     @GetMapping("/paged")
-    public ResponseEntity<Page<Issue>> getPaged(
-            @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "25") int size,
-            @RequestParam(required = false) String jobType,
-            @RequestParam(required = false) String status,
-            @RequestParam(required = false) String search,
-            @RequestParam(required = false) String date,
-            @RequestParam(required = false) String divisions // comma-separated divisionNo list, omit for "all"
-    ) {
-        return ResponseEntity.ok(
-                issuePrintService.getDocumentsPaged(page, size, jobType, status, search, date, divisions)
-        );
-    }
-
-    // ── Stat chip counts — computed in the DB, independent of page size ──
-    @GetMapping("/stats")
-    public ResponseEntity<Map<String, Long>> getStats(
-            @RequestParam(required = false) String date,
-            @RequestParam(required = false) String divisions
-    ) {
-        return ResponseEntity.ok(issuePrintService.getStats(date, divisions));
-    }
+        public ResponseEntity<Page<Issue>> getAllPaged(
+                @RequestParam(defaultValue = "0") int page,
+                @RequestParam(defaultValue = "50") int size) {
+            return ResponseEntity.ok(issueRepository.findAll(PageRequest.of(page, size)));
+        }
 
     @GetMapping("/{id}")
     public ResponseEntity<Issue> getById(@PathVariable Long id) {

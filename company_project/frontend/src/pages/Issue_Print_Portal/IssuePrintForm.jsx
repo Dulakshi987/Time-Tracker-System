@@ -15,7 +15,10 @@ import {
 const API_BASE = "https://time-tracker-system-production.up.railway.app/api/print-portal";
 const SETUP_API = "https://time-tracker-system-production.up.railway.app/api/admin-setup";
 
-const PAGE_SIZE = 25;
+// NOTE: AUTO_REFRESH is no longer used since the polling interval below
+// has been disabled to cut down on Railway data usage. Left here (unused)
+// in case auto-refresh is re-enabled later.
+// const AUTO_REFRESH = 10000;
 
 const HOLD_REASONS = [
   "Printer not available",
@@ -50,11 +53,6 @@ function formatDuration(seconds) {
   return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
 }
 
-// NOTE: request IDs are now numbered within the current page only (server
-// no longer sends the full list). If you need a stable, gap-free sequence
-// across pages, that numbering should move server-side (e.g. store/derive
-// it in the DB) — this client-side version is fine for display purposes
-// but the /0001, /0002 counters restart each page.
 function computeRequestIds(documents) {
   const dateKeyOf = (doc) => {
     if (doc.requestDate) return String(doc.requestDate).substring(0, 10);
@@ -118,6 +116,32 @@ function getSriLankaTodayKey() {
   const colombo = new Date(colomboMs);
   const pad = (n) => String(n).padStart(2, "0");
   return `${colombo.getFullYear()}-${pad(colombo.getMonth() + 1)}-${pad(colombo.getDate())}`;
+}
+
+// requestDate is stored as a plain date (no time/timezone component), so a
+// straight string comparison against YYYY-MM-DD keys is correct as-is.
+function docDateKey(doc) {
+  return doc.requestDate ? String(doc.requestDate).substring(0, 10) : null;
+}
+
+function matchesDateFilter(doc, mode, fromDate, toDate) {
+  if (mode === "ALL") return true;
+
+  const key = docDateKey(doc);
+
+  if (mode === "TODAY") {
+    return key === getSriLankaTodayKey();
+  }
+
+  if (mode === "CUSTOM") {
+    if (!fromDate && !toDate) return true;
+    if (!key) return false;
+    if (fromDate && key < fromDate) return false;
+    if (toDate && key > toDate) return false;
+    return true;
+  }
+
+  return true;
 }
 
 // ── Person Picker (Only Master Data - No "Other") ───────────────────────────
@@ -206,12 +230,6 @@ function HoldPopup({ onConfirm, onCancel, printOperators, operatorsLoading }) {
 // `existingDocumentNos` = document numbers already used by OTHER documents
 // (the current document's own number, when editing, is excluded by the
 // caller before this prop is passed in) — used to block duplicates.
-//
-// NOTE: since the frontend now only holds one page of documents at a time,
-// this duplicate check only sees document numbers on the CURRENT page. A
-// duplicate against a document sitting on a different page won't be caught
-// client-side — if this matters, add a uniqueness constraint / server-side
-// check on printDocumentNo in the /end endpoint.
 function PrintDonePopup({
   onConfirm,
   onCancel,
@@ -432,17 +450,6 @@ export default function IssuPrinFormt() {
     user?.staffName === "Admin" ||
     user?.staffName === "System Administrator";
 
-  // Divisions this user is scoped to — sent to the backend so pagination
-  // filters at the DB level instead of over-fetching and cutting client-side.
-  // Admins pass `undefined` (no divisions param => backend returns all).
-  const divisionsParam = useMemo(() => {
-    if (isAdminRole) return undefined;
-    if (Array.isArray(user?.divisions) && user.divisions.length > 0) {
-      return user.divisions.join(",");
-    }
-    return undefined;
-  }, [isAdminRole, user]);
-
   const handleLogout = () => {
     logoutUser();
     navigate("/", { replace: true });
@@ -457,13 +464,11 @@ export default function IssuPrinFormt() {
   const [lastUpdated, setLastUpdated] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
 
-  // ── Pagination — server returns PAGE_SIZE (25) rows at a time ─────────
-  const [page, setPage] = useState(0);
-  const [totalPages, setTotalPages] = useState(0);
-  const [totalElements, setTotalElements] = useState(0);
-
   // ── Date filter — defaults to "Today" (Sri Lanka time). "All" clears
-  // it, "Custom" opens a From/To range.
+  // it, "Custom" opens a From/To range. Recomputes on every render, so
+  // at midnight Colombo time "Today" automatically rolls over to the new
+  // day the next time this component re-renders (e.g. after a manual
+  // refresh) without needing a full page reload.
   const [dateFilterMode, setDateFilterMode] = useState("TODAY"); // "TODAY" | "ALL" | "CUSTOM"
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
@@ -480,38 +485,15 @@ export default function IssuPrinFormt() {
   const [activeId, setActiveId] = useState(null);
   const [editValues, setEditValues] = useState({ documentNo: "", printedBy: "" });
 
-  // ── Stats (Total / Pending / In Progress / On Hold / Completed) ───────
-  // Computed in the database via COUNT queries, independent of which page
-  // is currently loaded — so the chips always reflect the full filtered
-  // set, not just the 25 rows on screen.
-  const [stats, setStats] = useState({ total: 0, pending: 0, inProgress: 0, onHold: 0, completed: 0 });
-
-  // The backend only understands a single exact date for now (used for
-  // "Today" and the simple case of a Custom "from" date). If you need a
-  // real from/to range server-side, extend the /paged and /stats params.
-  const activeDateParam =
-    dateFilterMode === "TODAY" ? getSriLankaTodayKey() :
-    dateFilterMode === "CUSTOM" && fromDate ? fromDate :
-    undefined;
-
   const fetchDocuments = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
     else setRefreshing(true);
     setError(null);
     try {
-      const params = new URLSearchParams({ page: String(page), size: String(PAGE_SIZE) });
-      if (filterType !== "ALL") params.set("jobType", filterType);
-      if (filterStatus !== "ALL") params.set("status", filterStatus);
-      if (search) params.set("search", search);
-      if (activeDateParam) params.set("date", activeDateParam);
-      if (divisionsParam) params.set("divisions", divisionsParam);
-
-      const res = await fetch(`${API_BASE}/paged?${params.toString()}`);
+      const res = await fetch(API_BASE);
       if (!res.ok) throw new Error(`Server error: ${res.status}`);
       const data = await res.json();
-      setDocuments(data.content || []);
-      setTotalPages(data.totalPages || 0);
-      setTotalElements(data.totalElements || 0);
+      setDocuments(data);
       setLastUpdated(new Date());
     } catch (err) {
       setError(err.message);
@@ -519,29 +501,7 @@ export default function IssuPrinFormt() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [page, filterType, filterStatus, search, activeDateParam, divisionsParam]);
-
-  const fetchStats = useCallback(async () => {
-    try {
-      const params = new URLSearchParams();
-      if (activeDateParam) params.set("date", activeDateParam);
-      if (divisionsParam) params.set("divisions", divisionsParam);
-
-      const res = await fetch(`${API_BASE}/stats?${params.toString()}`);
-      if (res.ok) {
-        const data = await res.json();
-        setStats({
-          total: data.total ?? 0,
-          pending: data.pending ?? 0,
-          inProgress: data.inProgress ?? 0,
-          onHold: data.onHold ?? 0,
-          completed: data.completed ?? 0,
-        });
-      }
-    } catch (e) {
-      console.warn("Failed to load stats", e);
-    }
-  }, [activeDateParam, divisionsParam]);
+  }, []);
 
   const fetchDivisions = useCallback(async () => {
     try {
@@ -597,23 +557,24 @@ export default function IssuPrinFormt() {
     }
   }, []);
 
-  // Reset to page 0 whenever a filter changes — otherwise you can land on
-  // an out-of-range / empty page after narrowing the result set.
-  useEffect(() => {
-    setPage(0);
-  }, [filterType, filterStatus, search, dateFilterMode, fromDate, toDate]);
-
   useEffect(() => {
     fetchDocuments(false);
-  }, [fetchDocuments]);
-
-  useEffect(() => {
-    fetchStats();
-  }, [fetchStats]);
-
-  useEffect(() => {
     fetchDivisions();
-  }, [fetchDivisions]);
+  }, [fetchDocuments, fetchDivisions]);
+
+  // ── Auto-refresh DISABLED to reduce Railway data usage ─────────────────
+  // This used to poll the backend every AUTO_REFRESH (10s) on every open
+  // tab/device, which was driving up Railway's daily usage. Data now only
+  // loads on: initial page load (above), popup open (operators), and the
+  // manual "↻ Refresh" button in the header. Uncomment to re-enable
+  // polling if needed later.
+  //
+  // useEffect(() => {
+  //   const id = setInterval(() => {
+  //     fetchDocuments(true);
+  //   }, AUTO_REFRESH);
+  //   return () => clearInterval(id);
+  // }, [fetchDocuments]);
 
   const getDocById = useCallback(
     (id) => documents.find(d => d.id === id),
@@ -627,16 +588,11 @@ export default function IssuPrinFormt() {
     setPopupOperators([]);
   };
 
-  const refreshAll = (silent) => {
-    fetchDocuments(silent);
-    fetchStats();
-  };
-
   const handleStart = async (id) => {
     if (!perms.start) return;
     try {
       await fetch(`${API_BASE}/${id}/start`, { method: "PUT" });
-      refreshAll(true);
+      fetchDocuments(true);
     } catch (err) { alert("Start failed: " + err.message); }
   };
 
@@ -676,7 +632,7 @@ export default function IssuPrinFormt() {
     try {
       const res = await fetch(`${API_BASE}/${id}`, { method: "DELETE" });
       if (!res.ok) throw new Error(`Server error: ${res.status}`);
-      refreshAll(true);
+      fetchDocuments(true);
     } catch (err) {
       alert("Delete failed: " + err.message);
     }
@@ -691,7 +647,7 @@ export default function IssuPrinFormt() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ holdReason, heldBy }),
       });
-      refreshAll(true);
+      fetchDocuments(true);
     } catch (err) { alert("Hold failed: " + err.message); }
   };
 
@@ -704,15 +660,24 @@ export default function IssuPrinFormt() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ printDocumentNo, printedBy }),
       });
-      refreshAll(true);
+      fetchDocuments(true);
     } catch (err) { alert("Print Done failed: " + err.message); }
   };
 
   const requestIdMap = useMemo(() => computeRequestIds(documents), [documents]);
 
-  // Document Numbers already used by OTHER documents on the CURRENT page —
-  // passed into the Print Done / Edit popup to block duplicates. See the
-  // note on PrintDonePopup above: this only sees the current page.
+  // ── Division-wise scoping ────────────────────────────────────────────
+  // Admin / System Administrator see every division. Everyone else only
+  // sees documents whose divisionNo is in their own `user.divisions` list.
+  const divisionScoped = useMemo(
+    () => documents.filter(doc => canSeeDivision(user, doc.divisionNo)),
+    [documents, user]
+  );
+
+  // Document Numbers already used by OTHER documents — passed into the
+  // Print Done / Edit popup so it can block duplicates. When editing an
+  // existing document, that document's own current number is excluded
+  // (so saving the same value back doesn't trip the duplicate check).
   const existingDocumentNos = useMemo(
     () =>
       documents
@@ -722,7 +687,7 @@ export default function IssuPrinFormt() {
     [documents, activeId]
   );
 
-  const jobTypes = ["ALL", ...new Set(documents.map(d => d.jobType).filter(Boolean))];
+  const jobTypes = ["ALL", ...new Set(divisionScoped.map(d => d.jobType).filter(Boolean))];
 
   const STATUS_FILTERS = [
     { value: "ALL", label: "All Status" },
@@ -737,6 +702,34 @@ export default function IssuPrinFormt() {
     { value: "ALL", label: "All" },
     { value: "CUSTOM", label: "Custom" },
   ];
+
+  const visible = divisionScoped.filter(doc => {
+    const q = search.toLowerCase();
+    const matchSearch = !q || [
+      String(doc.id), doc.jobwbs, doc.reservationNo,
+      doc.enteredBy, doc.jobType, doc.requestedBy, doc.vehicleNo
+    ].some(v => (v || "").toLowerCase().includes(q));
+
+    const matchType = filterType === "ALL" || doc.jobType === filterType;
+    const matchStatus = filterStatus === "ALL" || statusClass(doc.printStatus) === filterStatus;
+    const matchDate = matchesDateFilter(doc, dateFilterMode, fromDate, toDate);
+
+    return matchSearch && matchType && matchStatus && matchDate;
+  });
+
+  // Stat chips reflect the date filter too, so the counts on screen always
+  // match what's actually shown in the grid below (e.g. "Today" only
+  // counts today's documents, not every document ever entered).
+  const dateScoped = useMemo(
+    () => divisionScoped.filter(doc => matchesDateFilter(doc, dateFilterMode, fromDate, toDate)),
+    [divisionScoped, dateFilterMode, fromDate, toDate]
+  );
+
+  const total = dateScoped.length;
+  const pending = dateScoped.filter(d => statusClass(d.printStatus) === "pending").length;
+  const inProg = dateScoped.filter(d => statusClass(d.printStatus) === "inprogress").length;
+  const onHold = dateScoped.filter(d => statusClass(d.printStatus) === "onhold").length;
+  const completed = dateScoped.filter(d => statusClass(d.printStatus) === "completed").length;
 
   // clicking a stat chip filters the grid by that status (Total clears the filter)
   const handleStatClick = (statusValue) => setFilterStatus(statusValue);
@@ -786,7 +779,7 @@ export default function IssuPrinFormt() {
           <button
             className="ip-btn ip-btn-outline"
             style={{ flex: "unset", padding: "8px 18px" }}
-            onClick={() => refreshAll(false)}
+            onClick={() => fetchDocuments(false)}
           >
             ↻ Refresh
           </button>
@@ -868,48 +861,48 @@ export default function IssuPrinFormt() {
         )}
       </div>
 
-      {/* Stats — DB-computed counts across the whole filtered set, not just this page */}
+      {/* Stats — now clickable, each filters the grid by that status */}
       <div className="ip-stats">
         <button
           type="button"
           className={`ip-stat-chip blue ip-stat-chip-clickable ${filterStatus === "ALL" ? "active" : ""}`}
           onClick={() => handleStatClick("ALL")}
         >
-          Total <strong>{stats.total}</strong>
+          Total <strong>{total}</strong>
         </button>
         <button
           type="button"
           className={`ip-stat-chip ip-stat-chip-clickable ${filterStatus === "pending" ? "active" : ""}`}
           onClick={() => handleStatClick("pending")}
         >
-          <strong style={{ color: "#b45309" }}>{stats.pending}</strong> Pending
+          <strong style={{ color: "#b45309" }}>{pending}</strong> Pending
         </button>
         <button
           type="button"
           className={`ip-stat-chip ip-stat-chip-clickable ${filterStatus === "inprogress" ? "active" : ""}`}
           onClick={() => handleStatClick("inprogress")}
         >
-          <strong style={{ color: "#1d4ed8" }}>{stats.inProgress}</strong> In Progress
+          <strong style={{ color: "#1d4ed8" }}>{inProg}</strong> In Progress
         </button>
         <button
           type="button"
           className={`ip-stat-chip ip-stat-chip-clickable ${filterStatus === "onhold" ? "active" : ""}`}
           onClick={() => handleStatClick("onhold")}
         >
-          <strong style={{ color: "#c2410c" }}>{stats.onHold}</strong> On Hold
+          <strong style={{ color: "#c2410c" }}>{onHold}</strong> On Hold
         </button>
         <button
           type="button"
           className={`ip-stat-chip green ip-stat-chip-clickable ${filterStatus === "completed" ? "active" : ""}`}
           onClick={() => handleStatClick("completed")}
         >
-          Completed <strong>{stats.completed}</strong>
+          Completed <strong>{completed}</strong>
         </button>
       </div>
 
       {error && (
         <div style={{ background: "rgba(239,68,68,0.08)", border: "1px solid #ef4444", borderRadius: 8, padding: "12px 16px", color: "#b91c1c", marginBottom: 18 }}>
-          ⚠ {error} — <button onClick={() => refreshAll(false)} style={{ color: "#1d4ed8", textDecoration: "underline" }}>retry</button>
+          ⚠ {error} — <button onClick={() => fetchDocuments(false)} style={{ color: "#1d4ed8", textDecoration: "underline" }}>retry</button>
         </div>
       )}
 
@@ -923,10 +916,10 @@ export default function IssuPrinFormt() {
               </div>
             </div>
           ))
-        ) : documents.length === 0 ? (
+        ) : visible.length === 0 ? (
           <div className="ip-empty">No documents found.</div>
         ) : (
-          documents.map(doc => (
+          visible.map(doc => (
             <DocumentCard
               key={doc.id}
               doc={doc}
@@ -946,33 +939,6 @@ export default function IssuPrinFormt() {
           ))
         )}
       </div>
-
-      {/* Pagination — 25 documents per page */}
-      {!loading && documents.length > 0 && (
-        <div className="ip-toolbar" style={{ justifyContent: "center", marginTop: 12 }}>
-          <button
-            type="button"
-            className="ip-btn ip-btn-outline"
-            style={{ flex: "unset", padding: "8px 18px" }}
-            disabled={page === 0}
-            onClick={() => setPage(p => Math.max(p - 1, 0))}
-          >
-            ‹ Prev
-          </button>
-          <span style={{ padding: "0 14px", fontSize: "0.85rem", color: "#6c8bb3" }}>
-            Page {page + 1} of {Math.max(totalPages, 1)} · {totalElements} total
-          </span>
-          <button
-            type="button"
-            className="ip-btn ip-btn-outline"
-            style={{ flex: "unset", padding: "8px 18px" }}
-            disabled={page + 1 >= totalPages}
-            onClick={() => setPage(p => p + 1)}
-          >
-            Next ›
-          </button>
-        </div>
-      )}
     </div>
   );
 }
