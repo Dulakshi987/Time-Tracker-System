@@ -1,12 +1,12 @@
 package com.controller.Issue_Print_Portal;
 
+import com.dto.IssuePrintPageResponse;
 import com.entity.Issue;
 import com.service.IssuePrintService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
-import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -34,6 +34,30 @@ public class IssuePrintController {
             @RequestParam(defaultValue = "50") int size) {
         Pageable pageable = PageRequest.of(page, size);
         return ResponseEntity.ok(issuePrintService.getAllPaged(pageable));
+    }
+
+    // ── New: filtered + paginated search, used by the Print Portal UI ──
+    @GetMapping("/search")
+    public ResponseEntity<IssuePrintPageResponse> search(
+            @RequestParam(required = false) String from,
+            @RequestParam(required = false) String to,
+            @RequestParam(required = false) String jobType,
+            @RequestParam(required = false) String status,
+            @RequestParam(required = false) String search,
+            @RequestParam(required = false) String divisions,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "24") int size) {
+        return ResponseEntity.ok(
+            issuePrintService.search(from, to, jobType, status, search, divisions, page, size)
+        );
+    }
+
+    // ── New: document numbers already used, for duplicate check across
+    //          ALL documents (not just the currently loaded page) ──────
+    @GetMapping("/used-document-numbers")
+    public ResponseEntity<List<String>> usedDocumentNumbers(
+            @RequestParam(required = false) Long excludeId) {
+        return ResponseEntity.ok(issuePrintService.getUsedDocumentNumbers(excludeId));
     }
 
     @GetMapping("/{id}")

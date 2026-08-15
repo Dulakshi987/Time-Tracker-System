@@ -32,6 +32,9 @@ const HOLD_REASONS = [
 const DOC_NO_MAX_LENGTH = 10;
 const isValidDocumentNo = (value) => /^\d{1,10}$/.test(value || "");
 
+// Pagination
+const PAGE_SIZE = 24;
+
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
 function formatDate(d) { return d || "—"; }
@@ -51,36 +54,6 @@ function formatDuration(seconds) {
   const m = Math.floor((seconds % 3600) / 60);
   const s = seconds % 60;
   return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
-}
-
-function computeRequestIds(documents) {
-  const dateKeyOf = (doc) => {
-    if (doc.requestDate) return String(doc.requestDate).substring(0, 10);
-    if (doc.createdDatetime) return String(doc.createdDatetime).substring(0, 10);
-    return null;
-  };
-
-  const groups = {};
-  documents.forEach(doc => {
-    const key = dateKeyOf(doc) || "unknown";
-    if (!groups[key]) groups[key] = [];
-    groups[key].push(doc);
-  });
-
-  const idMap = {};
-  Object.entries(groups).forEach(([key, group]) => {
-    const compactDate = key === "unknown" ? "00000000" : key.replace(/-/g, "");
-    group
-      .slice()
-      .sort((a, b) => (a.createdDatetime && b.createdDatetime
-        ? new Date(a.createdDatetime) - new Date(b.createdDatetime)
-        : a.id - b.id))
-      .forEach((doc, idx) => {
-        idMap[doc.id] = `${compactDate}/${String(idx + 1).padStart(4, "0")}`;
-      });
-  });
-
-  return idMap;
 }
 
 function jobTypeColor(jt) {
@@ -116,32 +89,6 @@ function getSriLankaTodayKey() {
   const colombo = new Date(colomboMs);
   const pad = (n) => String(n).padStart(2, "0");
   return `${colombo.getFullYear()}-${pad(colombo.getMonth() + 1)}-${pad(colombo.getDate())}`;
-}
-
-// requestDate is stored as a plain date (no time/timezone component), so a
-// straight string comparison against YYYY-MM-DD keys is correct as-is.
-function docDateKey(doc) {
-  return doc.requestDate ? String(doc.requestDate).substring(0, 10) : null;
-}
-
-function matchesDateFilter(doc, mode, fromDate, toDate) {
-  if (mode === "ALL") return true;
-
-  const key = docDateKey(doc);
-
-  if (mode === "TODAY") {
-    return key === getSriLankaTodayKey();
-  }
-
-  if (mode === "CUSTOM") {
-    if (!fromDate && !toDate) return true;
-    if (!key) return false;
-    if (fromDate && key < fromDate) return false;
-    if (toDate && key > toDate) return false;
-    return true;
-  }
-
-  return true;
 }
 
 // ── Person Picker (Only Master Data - No "Other") ───────────────────────────
@@ -228,8 +175,8 @@ function HoldPopup({ onConfirm, onCancel, printOperators, operatorsLoading }) {
 
 // ── Print Done Popup (also used for Edit of a completed document) ──────────
 // `existingDocumentNos` = document numbers already used by OTHER documents
-// (the current document's own number, when editing, is excluded by the
-// caller before this prop is passed in) — used to block duplicates.
+// ACROSS THE WHOLE DATASET (fetched fresh from the server when the popup
+// opens — not just the currently loaded page) — used to block duplicates.
 function PrintDonePopup({
   onConfirm,
   onCancel,
@@ -239,6 +186,7 @@ function PrintDonePopup({
   initialPrintedBy,
   isEdit,
   existingDocumentNos = [],
+  existingDocsLoading,
 }) {
   const [documentNo, setDocumentNo] = useState(initialDocumentNo || "");
   const [printedBy, setPrintedBy] = useState(initialPrintedBy || "");
@@ -288,6 +236,9 @@ function PrintDonePopup({
             autoFocus
           />
           {docNoError && <span className="ip-field-error">{docNoError}</span>}
+          {existingDocsLoading && (
+            <span style={{ fontSize: "0.72rem", color: "#6c8bb3" }}>Checking existing document numbers…</span>
+          )}
         </div>
 
         <span className="ip-popup-label">Printed By</span>
@@ -464,11 +415,18 @@ export default function IssuPrinFormt() {
   const [lastUpdated, setLastUpdated] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
 
+  // ── Pagination — server-side. Only the current page's documents are
+  // ever held in `documents`; stats come from the server too so the chips
+  // reflect the FULL filtered set, not just what's on screen.
+  const [page, setPage] = useState(0);
+  const [totalPages, setTotalPages] = useState(0);
+  const [totalElements, setTotalElements] = useState(0);
+  const [statsFromServer, setStatsFromServer] = useState({
+    total: 0, pending: 0, inProgress: 0, onHold: 0, completed: 0,
+  });
+
   // ── Date filter — defaults to "Today" (Sri Lanka time). "All" clears
-  // it, "Custom" opens a From/To range. Recomputes on every render, so
-  // at midnight Colombo time "Today" automatically rolls over to the new
-  // day the next time this component re-renders (e.g. after a manual
-  // refresh) without needing a full page reload.
+  // it, "Custom" opens a From/To range.
   const [dateFilterMode, setDateFilterMode] = useState("TODAY"); // "TODAY" | "ALL" | "CUSTOM"
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
@@ -481,6 +439,13 @@ export default function IssuPrinFormt() {
   const [popupOperators, setPopupOperators] = useState([]);
   const [popupOperatorsLoading, setPopupOperatorsLoading] = useState(false);
 
+  // Document numbers already used ACROSS ALL documents (fetched fresh
+  // from the server each time the Print Done / Edit popup opens, since
+  // `documents` only holds the current page and can't be relied on for
+  // a global duplicate check anymore).
+  const [existingDocumentNos, setExistingDocumentNos] = useState([]);
+  const [existingDocsLoading, setExistingDocsLoading] = useState(false);
+
   const [activePopup, setActivePopup] = useState(null);
   const [activeId, setActiveId] = useState(null);
   const [editValues, setEditValues] = useState({ documentNo: "", printedBy: "" });
@@ -490,10 +455,39 @@ export default function IssuPrinFormt() {
     else setRefreshing(true);
     setError(null);
     try {
-      const res = await fetch(API_BASE);
+      const params = new URLSearchParams();
+
+      if (dateFilterMode === "TODAY") {
+        const today = getSriLankaTodayKey();
+        params.set("from", today);
+        params.set("to", today);
+      } else if (dateFilterMode === "CUSTOM") {
+        if (fromDate) params.set("from", fromDate);
+        if (toDate) params.set("to", toDate);
+      }
+      if (filterType !== "ALL") params.set("jobType", filterType);
+      if (filterStatus !== "ALL") params.set("status", filterStatus);
+      if (search.trim()) params.set("search", search.trim());
+      if (!isAdminRole && user?.divisions?.length) {
+        params.set("divisions", user.divisions.join(","));
+      }
+      params.set("page", String(page));
+      params.set("size", String(PAGE_SIZE));
+
+      const res = await fetch(`${API_BASE}/search?${params.toString()}`);
       if (!res.ok) throw new Error(`Server error: ${res.status}`);
       const data = await res.json();
-      setDocuments(data);
+
+      setDocuments(data.content || []);
+      setTotalPages(data.totalPages || 0);
+      setTotalElements(data.totalElements || 0);
+      setStatsFromServer({
+        total: data.stats?.total || 0,
+        pending: data.stats?.pending || 0,
+        inProgress: data.stats?.inProgress || 0,
+        onHold: data.stats?.onHold || 0,
+        completed: data.stats?.completed || 0,
+      });
       setLastUpdated(new Date());
     } catch (err) {
       setError(err.message);
@@ -501,7 +495,7 @@ export default function IssuPrinFormt() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, []);
+  }, [dateFilterMode, fromDate, toDate, filterType, filterStatus, search, page, isAdminRole, user]);
 
   const fetchDivisions = useCallback(async () => {
     try {
@@ -557,17 +551,48 @@ export default function IssuPrinFormt() {
     }
   }, []);
 
+  // Document numbers already used, across the whole dataset — fetched
+  // fresh each time the Print Done / Edit popup opens.
+  const fetchExistingDocumentNos = useCallback(async (excludeId) => {
+    setExistingDocsLoading(true);
+    try {
+      const params = new URLSearchParams();
+      if (excludeId != null) params.set("excludeId", String(excludeId));
+      const res = await fetch(`${API_BASE}/used-document-numbers?${params.toString()}`);
+      if (res.ok) {
+        const data = await res.json();
+        setExistingDocumentNos(data || []);
+      } else {
+        setExistingDocumentNos([]);
+      }
+    } catch (e) {
+      console.warn("Failed to load existing document numbers", e);
+      setExistingDocumentNos([]);
+    } finally {
+      setExistingDocsLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     fetchDocuments(false);
+  }, [fetchDocuments]);
+
+  useEffect(() => {
     fetchDivisions();
-  }, [fetchDocuments, fetchDivisions]);
+  }, [fetchDivisions]);
+
+  // Any filter/search/date change should reset back to page 0 — otherwise
+  // you could land on a page that no longer exists for the new filter.
+  useEffect(() => {
+    setPage(0);
+  }, [dateFilterMode, fromDate, toDate, filterType, filterStatus, search]);
 
   // ── Auto-refresh DISABLED to reduce Railway data usage ─────────────────
   // This used to poll the backend every AUTO_REFRESH (10s) on every open
   // tab/device, which was driving up Railway's daily usage. Data now only
-  // loads on: initial page load (above), popup open (operators), and the
-  // manual "↻ Refresh" button in the header. Uncomment to re-enable
-  // polling if needed later.
+  // loads on: initial page load / filter change (above), popup open
+  // (operators + doc numbers), and the manual "↻ Refresh" button in the
+  // header. Uncomment to re-enable polling if needed later.
   //
   // useEffect(() => {
   //   const id = setInterval(() => {
@@ -586,6 +611,7 @@ export default function IssuPrinFormt() {
     setActiveId(null);
     setEditValues({ documentNo: "", printedBy: "" });
     setPopupOperators([]);
+    setExistingDocumentNos([]);
   };
 
   const handleStart = async (id) => {
@@ -610,7 +636,10 @@ export default function IssuPrinFormt() {
     setActiveId(id);
     setEditValues({ documentNo: "", printedBy: "" });
     setActivePopup("end");
-    await fetchOperatorsForDivision(doc?.divisionNo);
+    await Promise.all([
+      fetchOperatorsForDivision(doc?.divisionNo),
+      fetchExistingDocumentNos(id),
+    ]);
   };
 
   // Edit — reopens the same popup pre-filled with the completed document's values
@@ -622,7 +651,10 @@ export default function IssuPrinFormt() {
       printedBy: doc.printedBy || "",
     });
     setActivePopup("end");
-    await fetchOperatorsForDivision(doc?.divisionNo);
+    await Promise.all([
+      fetchOperatorsForDivision(doc?.divisionNo),
+      fetchExistingDocumentNos(doc.id),
+    ]);
   };
 
   // Delete — removes the document entirely
@@ -664,30 +696,11 @@ export default function IssuPrinFormt() {
     } catch (err) { alert("Print Done failed: " + err.message); }
   };
 
-  const requestIdMap = useMemo(() => computeRequestIds(documents), [documents]);
+  // documents already come back filtered, division-scoped, paged, and
+  // with requestId attached from the server — nothing left to compute here.
+  const visible = documents;
 
-  // ── Division-wise scoping ────────────────────────────────────────────
-  // Admin / System Administrator see every division. Everyone else only
-  // sees documents whose divisionNo is in their own `user.divisions` list.
-  const divisionScoped = useMemo(
-    () => documents.filter(doc => canSeeDivision(user, doc.divisionNo)),
-    [documents, user]
-  );
-
-  // Document Numbers already used by OTHER documents — passed into the
-  // Print Done / Edit popup so it can block duplicates. When editing an
-  // existing document, that document's own current number is excluded
-  // (so saving the same value back doesn't trip the duplicate check).
-  const existingDocumentNos = useMemo(
-    () =>
-      documents
-        .filter(d => d.id !== activeId)
-        .map(d => d.printDocumentNo)
-        .filter(Boolean),
-    [documents, activeId]
-  );
-
-  const jobTypes = ["ALL", ...new Set(divisionScoped.map(d => d.jobType).filter(Boolean))];
+  const jobTypes = ["ALL", ...new Set(documents.map(d => d.jobType).filter(Boolean))];
 
   const STATUS_FILTERS = [
     { value: "ALL", label: "All Status" },
@@ -703,33 +716,13 @@ export default function IssuPrinFormt() {
     { value: "CUSTOM", label: "Custom" },
   ];
 
-  const visible = divisionScoped.filter(doc => {
-    const q = search.toLowerCase();
-    const matchSearch = !q || [
-      String(doc.id), doc.jobwbs, doc.reservationNo,
-      doc.enteredBy, doc.jobType, doc.requestedBy, doc.vehicleNo
-    ].some(v => (v || "").toLowerCase().includes(q));
-
-    const matchType = filterType === "ALL" || doc.jobType === filterType;
-    const matchStatus = filterStatus === "ALL" || statusClass(doc.printStatus) === filterStatus;
-    const matchDate = matchesDateFilter(doc, dateFilterMode, fromDate, toDate);
-
-    return matchSearch && matchType && matchStatus && matchDate;
-  });
-
-  // Stat chips reflect the date filter too, so the counts on screen always
-  // match what's actually shown in the grid below (e.g. "Today" only
-  // counts today's documents, not every document ever entered).
-  const dateScoped = useMemo(
-    () => divisionScoped.filter(doc => matchesDateFilter(doc, dateFilterMode, fromDate, toDate)),
-    [divisionScoped, dateFilterMode, fromDate, toDate]
-  );
-
-  const total = dateScoped.length;
-  const pending = dateScoped.filter(d => statusClass(d.printStatus) === "pending").length;
-  const inProg = dateScoped.filter(d => statusClass(d.printStatus) === "inprogress").length;
-  const onHold = dateScoped.filter(d => statusClass(d.printStatus) === "onhold").length;
-  const completed = dateScoped.filter(d => statusClass(d.printStatus) === "completed").length;
+  // Stat chips — from the server, over the FULL filtered set (not just
+  // the current page), so counts always match reality.
+  const total = statsFromServer.total;
+  const pending = statsFromServer.pending;
+  const inProg = statsFromServer.inProgress;
+  const onHold = statsFromServer.onHold;
+  const completed = statsFromServer.completed;
 
   // clicking a stat chip filters the grid by that status (Total clears the filter)
   const handleStatClick = (statusValue) => setFilterStatus(statusValue);
@@ -754,6 +747,7 @@ export default function IssuPrinFormt() {
           initialPrintedBy={editValues.printedBy}
           isEdit={!!editValues.documentNo || !!editValues.printedBy}
           existingDocumentNos={existingDocumentNos}
+          existingDocsLoading={existingDocsLoading}
         />
       )}
 
@@ -923,7 +917,7 @@ export default function IssuPrinFormt() {
             <DocumentCard
               key={doc.id}
               doc={doc}
-              requestId={requestIdMap[doc.id]}
+              requestId={doc.requestId}
               divisionLabel={
                 doc.divisionNo
                   ? `${doc.divisionNo} — ${divisionNoToName[doc.divisionNo] || ""}`
@@ -939,6 +933,33 @@ export default function IssuPrinFormt() {
           ))
         )}
       </div>
+
+      {/* Pagination controls */}
+      {!loading && totalPages > 1 && (
+        <div className="ip-toolbar" style={{ justifyContent: "center", marginTop: 20 }}>
+          <button
+            type="button"
+            className="ip-btn ip-btn-outline"
+            style={{ flex: "unset", padding: "8px 16px" }}
+            disabled={page <= 0}
+            onClick={() => setPage(p => Math.max(0, p - 1))}
+          >
+            ← Prev
+          </button>
+          <span style={{ color: "#6c8bb3", fontSize: "0.85rem" }}>
+            Page {page + 1} of {totalPages} · {totalElements} total
+          </span>
+          <button
+            type="button"
+            className="ip-btn ip-btn-outline"
+            style={{ flex: "unset", padding: "8px 16px" }}
+            disabled={page >= totalPages - 1}
+            onClick={() => setPage(p => Math.min(totalPages - 1, p + 1))}
+          >
+            Next →
+          </button>
+        </div>
+      )}
     </div>
   );
 }

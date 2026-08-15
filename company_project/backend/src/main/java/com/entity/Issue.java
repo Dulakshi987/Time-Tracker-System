@@ -252,4 +252,9 @@ public class Issue {
 
     @Column(name = "file_number")
     private String fileNumber;
+
+    // Issue.java — class body එකේ ඕනම තැනක add කරන්න (column නෑ, DB touch වෙන්නෙ නෑ)
+@Transient
+private String requestId;
 }
+
