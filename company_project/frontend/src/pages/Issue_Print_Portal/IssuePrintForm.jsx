@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import "./IssuePrint.css";
 import { formatSriLankaTime } from "../../utils/dateUtils";
@@ -34,6 +34,27 @@ const isValidDocumentNo = (value) => /^\d{1,10}$/.test(value || "");
 
 // Pagination
 const PAGE_SIZE = 24;
+
+// sessionStorage cache — survives the page being backgrounded/suspended
+// and remounted when the user switches back from another app, so we
+// don't fire a fresh network request just because the component
+// re-mounted. Cleared automatically when the tab/session actually ends
+// (e.g. logout + new login = new session = fresh data).
+function readCache(key) {
+  try {
+    const raw = sessionStorage.getItem(key);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+function writeCache(key, value) {
+  try {
+    sessionStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    // storage full/unavailable — just skip caching, not fatal
+  }
+}
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -455,78 +476,122 @@ export default function IssuPrinFormt() {
   const [activeId, setActiveId] = useState(null);
   const [editValues, setEditValues] = useState({ documentNo: "", printedBy: "" });
 
-  const fetchDocuments = useCallback(async (silent = false) => {
-    if (!silent) setLoading(true);
-    else setRefreshing(true);
-    setError(null);
-    try {
-      const params = new URLSearchParams();
+const abortRef = useRef(null);
 
-      if (dateFilterMode === "TODAY") {
-        const today = getSriLankaTodayKey();
-        params.set("from", today);
-        params.set("to", today);
-      } else if (dateFilterMode === "CUSTOM") {
-        if (fromDate) params.set("from", fromDate);
-        if (toDate) params.set("to", toDate);
-      }
-      if (filterType !== "ALL") params.set("jobType", filterType);
-      if (filterStatus !== "ALL") params.set("status", filterStatus);
-      if (search.trim()) params.set("search", search.trim());
-      if (!isAdminRole && user?.divisions?.length) {
-        params.set("divisions", user.divisions.join(","));
-      }
-      params.set("page", String(page));
-      params.set("size", String(PAGE_SIZE));
+const fetchDocuments = useCallback(async (silent = false, force = false) => {
+  const params = new URLSearchParams();
 
-      const res = await fetch(`${API_BASE}/search?${params.toString()}`);
-      if (!res.ok) throw new Error(`Server error: ${res.status}`);
-      const data = await res.json();
+  if (dateFilterMode === "TODAY") {
+    const today = getSriLankaTodayKey();
+    params.set("from", today);
+    params.set("to", today);
+  } else if (dateFilterMode === "CUSTOM") {
+    if (fromDate) params.set("from", fromDate);
+    if (toDate) params.set("to", toDate);
+  }
+  if (filterType !== "ALL") params.set("jobType", filterType);
+  if (filterStatus !== "ALL") params.set("status", filterStatus);
+  if (search.trim()) params.set("search", search.trim());
+  if (!isAdminRole && user?.divisions?.length) {
+    params.set("divisions", user.divisions.join(","));
+  }
+  params.set("page", String(page));
+  params.set("size", String(PAGE_SIZE));
 
-      setDocuments(data.content || []);
-      setTotalPages(data.totalPages || 0);
-      setTotalElements(data.totalElements || 0);
-      setStatsFromServer({
-        total: data.stats?.total || 0,
-        pending: data.stats?.pending || 0,
-        inProgress: data.stats?.inProgress || 0,
-        onHold: data.stats?.onHold || 0,
-        completed: data.stats?.completed || 0,
-      });
-      setLastUpdated(new Date());
-    } catch (err) {
-      setError(err.message);
-    } finally {
+  const cacheKey = `ip_documents_${params.toString()}`;
+
+  // Cache hit — reuse without hitting the network at all, UNLESS the
+  // caller explicitly forced a refresh (Refresh button).
+  if (!force) {
+    const cached = readCache(cacheKey);
+    if (cached) {
+      setDocuments(cached.documents || []);
+      setTotalPages(cached.totalPages || 0);
+      setTotalElements(cached.totalElements || 0);
+      setStatsFromServer(cached.stats || { total: 0, pending: 0, inProgress: 0, onHold: 0, completed: 0 });
+      setLastUpdated(cached.lastUpdated ? new Date(cached.lastUpdated) : null);
       setLoading(false);
-      setRefreshing(false);
+      return;
     }
-  }, [dateFilterMode, fromDate, toDate, filterType, filterStatus, search, page, isAdminRole, user]);
+  }
 
-  const fetchDivisions = useCallback(async () => {
-    try {
-      const res = await fetch(`${SETUP_API}/divisions`);
-      if (res.ok) {
-        const data = await res.json();
-        setDivisions(data || []);
-      }
-    } catch (e) {
-      console.warn("Failed to load divisions", e);
-    }
-  }, []);
+  if (!silent) setLoading(true);
+  else setRefreshing(true);
+  setError(null);
 
-  // Distinct Job Types across the whole dataset, used for the filter
-  // dropdown — independent of pagination/filters so it never loses options.
-  const fetchJobTypes = useCallback(async () => {
-    try {
-      const res = await fetch(`${API_BASE}/job-types`);
-      if (res.ok) {
-        const data = await res.json();
-        setAllJobTypes(data || []);
-      }
-    } catch (e) {
-      console.warn("Failed to load job types", e);
+  // Abort any in-flight request from before (e.g. tab was hidden mid-request)
+  if (abortRef.current) abortRef.current.abort();
+  const controller = new AbortController();
+  abortRef.current = controller;
+
+  try {
+    const res = await fetch(`${API_BASE}/search?${params.toString()}`, { signal: controller.signal });
+    if (!res.ok) throw new Error(`Server error: ${res.status}`);
+    const data = await res.json();
+
+    const stats = {
+      total: data.stats?.total || 0,
+      pending: data.stats?.pending || 0,
+      inProgress: data.stats?.inProgress || 0,
+      onHold: data.stats?.onHold || 0,
+      completed: data.stats?.completed || 0,
+    };
+    const now = new Date();
+
+    setDocuments(data.content || []);
+    setTotalPages(data.totalPages || 0);
+    setTotalElements(data.totalElements || 0);
+    setStatsFromServer(stats);
+    setLastUpdated(now);
+
+    writeCache(cacheKey, {
+      documents: data.content || [],
+      totalPages: data.totalPages || 0,
+      totalElements: data.totalElements || 0,
+      stats,
+      lastUpdated: now.toISOString(),
+    });
+  } catch (err) {
+    if (err.name !== "AbortError") setError(err.message);
+  } finally {
+    setLoading(false);
+    setRefreshing(false);
+  }
+}, [dateFilterMode, fromDate, toDate, filterType, filterStatus, search, page, isAdminRole, user]);
+
+ const fetchDivisions = useCallback(async (force = false) => {
+  if (!force) {
+    const cached = readCache("ip_divisions");
+    if (cached) { setDivisions(cached); return; }
+  }
+  try {
+    const res = await fetch(`${SETUP_API}/divisions`);
+    if (res.ok) {
+      const data = await res.json();
+      setDivisions(data || []);
+      writeCache("ip_divisions", data || []);
     }
-  }, []);
+  } catch (e) {
+    console.warn("Failed to load divisions", e);
+  }
+}, []);
+
+const fetchJobTypes = useCallback(async (force = false) => {
+  if (!force) {
+    const cached = readCache("ip_job_types");
+    if (cached) { setAllJobTypes(cached); return; }
+  }
+  try {
+    const res = await fetch(`${API_BASE}/job-types`);
+    if (res.ok) {
+      const data = await res.json();
+      setAllJobTypes(data || []);
+      writeCache("ip_job_types", data || []);
+    }
+  } catch (e) {
+    console.warn("Failed to load job types", e);
+  }
+}, []);
 
   const divisionNoToName = useMemo(() => {
     const map = {};
@@ -600,6 +665,16 @@ export default function IssuPrinFormt() {
     fetchDivisions();
     fetchJobTypes();
   }, [fetchDivisions, fetchJobTypes]);
+
+  useEffect(() => {
+  const handleVisibility = () => {
+    if (document.hidden && abortRef.current) {
+      abortRef.current.abort();
+    }
+  };
+  document.addEventListener("visibilitychange", handleVisibility);
+  return () => document.removeEventListener("visibilitychange", handleVisibility);
+}, []);
 
   // Any filter/search/date change should reset back to page 0 — otherwise
   // you could land on a page that no longer exists for the new filter.
@@ -796,8 +871,7 @@ export default function IssuPrinFormt() {
           <button
             className="ip-btn ip-btn-outline"
             style={{ flex: "unset", padding: "8px 18px" }}
-            onClick={() => fetchDocuments(false)}
-          >
+             onClick={() => fetchDocuments(false, true)}          >
             ↻ Refresh
           </button>
           {!isAdminRole && (
