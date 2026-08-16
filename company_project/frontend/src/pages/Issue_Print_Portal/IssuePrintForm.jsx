@@ -710,12 +710,18 @@ const fetchJobTypes = useCallback(async (force = false) => {
   };
 
   const handleStart = async (id) => {
-    if (!perms.start) return;
-    try {
-      await fetch(`${API_BASE}/${id}/start`, { method: "PUT" });
-      fetchDocuments(true);
-    } catch (err) { alert("Start failed: " + err.message); }
-  };
+  if (!perms.start) return;
+  try {
+    const res = await fetch(`${API_BASE}/${id}/start`, { method: "PUT" });
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      throw new Error(`Server returned ${res.status}${text ? ": " + text : ""}`);
+    }
+    fetchDocuments(true, true);
+  } catch (err) {
+    alert("Start failed: " + err.message);
+  }
+};
 
   const handleHoldClick = async (id) => {
     if (!perms.hold) return;
@@ -765,31 +771,45 @@ const fetchJobTypes = useCallback(async (force = false) => {
     }
   };
 
-  const handleHoldConfirm = async (holdReason, heldBy) => {
-    const id = activeId;
-    closePopup();
-    try {
-      await fetch(`${API_BASE}/${id}/hold`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ holdReason, heldBy }),
-      });
-      fetchDocuments(true);
-    } catch (err) { alert("Hold failed: " + err.message); }
-  };
+  cconst handleHoldConfirm = async (holdReason, heldBy) => {
+  const id = activeId;
+  closePopup();
+  try {
+    const res = await fetch(`${API_BASE}/${id}/hold`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ holdReason, heldBy }),
+    });
+    if (!res.ok) throw new Error(`Server returned ${res.status}`);
+    fetchDocuments(true, true);
+  } catch (err) { alert("Hold failed: " + err.message); }
+};
 
-  const handlePrintDoneConfirm = async (printDocumentNo, printedBy) => {
-    const id = activeId;
-    closePopup();
-    try {
-      await fetch(`${API_BASE}/${id}/end`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ printDocumentNo, printedBy }),
-      });
-      fetchDocuments(true);
-    } catch (err) { alert("Print Done failed: " + err.message); }
-  };
+const handlePrintDoneConfirm = async (printDocumentNo, printedBy) => {
+  const id = activeId;
+  closePopup();
+  try {
+    const res = await fetch(`${API_BASE}/${id}/end`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ printDocumentNo, printedBy }),
+    });
+    if (!res.ok) throw new Error(`Server returned ${res.status}`);
+    fetchDocuments(true, true);
+  } catch (err) { alert("Print Done failed: " + err.message); }
+};
+
+const handleDeleteClick = async (id) => {
+  if (!perms.delete) return;
+  if (!window.confirm("Delete this document permanently? This cannot be undone.")) return;
+  try {
+    const res = await fetch(`${API_BASE}/${id}`, { method: "DELETE" });
+    if (!res.ok) throw new Error(`Server error: ${res.status}`);
+    fetchDocuments(true, true);
+  } catch (err) {
+    alert("Delete failed: " + err.message);
+  }
+};
 
   // documents already come back filtered, division-scoped, paged, and
   // with requestId attached from the server — nothing left to compute here.
