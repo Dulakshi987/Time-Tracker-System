@@ -1126,7 +1126,6 @@ export default function IssueCheckForm() {
   const [dateFilterMode, setDateFilterMode] = useState("TODAY"); // "TODAY" | "ALL" | "CUSTOM"
   const [fromDate,     setFromDate]     = useState("");
   const [toDate,       setToDate]       = useState("");
-  
 
   // Logged-in user (from sessionStorage via permissions.js) — read once on
   // mount. Used to compute which buttons this role is allowed to see/use.
@@ -1178,93 +1177,36 @@ export default function IssueCheckForm() {
   };
 
   // ── Fetch documents ──
- const fetchDocuments = useCallback(async (silent = false) => {
-  if (!silent) setLoading(true);
-  else setRefreshing(true);
-  setError(null);
-  try {
-    const params = new URLSearchParams();
+  // Fetches the FULL matching set once; search/type/status/date filtering
+  // and pagination all happen client-side below (see `visible` /
+  // `paginatedVisible`), so this must NOT be server-paginated.
+  const fetchDocuments = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true);
+    else setRefreshing(true);
+    setError(null);
+    try {
+      const res = await fetch(`${API_BASE}/ready-for-check`); // TODO: confirm this matches your backend route
+      if (!res.ok) throw new Error(`Server error: ${res.status}`);
+      const readyForCheck = await res.json();
 
-    if (dateFilterMode === "TODAY") {
-      const today = getSriLankaTodayKey();
-      params.set("from", today);
-      params.set("to", today);
-    } else if (dateFilterMode === "CUSTOM") {
-      if (fromDate) params.set("from", fromDate);
-      if (toDate) params.set("to", toDate);
+      // ── Division scoping ──────────────────────────────────────────────
+      // Admin / System Administrator (allDivisions: true) see everything.
+      // Every other role (Checker included) is hard-scoped to only the
+      // division(s) assigned to their User Account in Master Setup — same
+      // rule AdminDashboard already uses.
+      const divisionScoped = hasAllDivisionAccess(currentUser)
+        ? readyForCheck
+        : readyForCheck.filter(d => canSeeDivision(currentUser, d.divisionNo));
+
+      setDocuments(divisionScoped);
+      setLastUpdated(new Date());
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
     }
-    if (filterType !== "ALL") params.set("jobType", filterType);
-    if (filterStatus !== "ALL") params.set("status", filterStatus);
-    if (search.trim()) params.set("search", search.trim());
-    if (!hasAllDivisionAccess(currentUser) && currentUser?.divisions?.length) {
-      params.set("divisions", currentUser.divisions.join(","));
-    }
-    params.set("page", String(currentPage - 1)); // server is 0-indexed
-    params.set("size", String(ITEMS_PER_PAGE));
-
-    const res = await fetch(`${API_BASE}/search?${params.toString()}`);
-    if (!res.ok) throw new Error(`Server error: ${res.status}`);
-    const data = await res.json();
-
-    setDocuments(data.content || []);
-    setTotalPages(data.totalPages || 0);
-    setStatsFromServer({
-      total: data.stats?.total || 0,
-      pending: data.stats?.pending || 0,
-      inProgress: data.stats?.inProgress || 0,
-      onHold: data.stats?.onHold || 0,
-      completed: data.stats?.completed || 0,
-    });
-    setLastUpdated(new Date());
-  } catch (err) {
-    setError(err.message);
-  } finally {
-    setLoading(false);
-    setRefreshing(false);
-  }
-}, [dateFilterMode, fromDate, toDate, filterType, filterStatus, search, currentPage, currentUser]);
-
-// ── small, separate fetch just for the alert banners ──
-const fetchAlerts = useCallback(async () => {
-  try {
-    const params = new URLSearchParams();
-    if (!hasAllDivisionAccess(currentUser) && currentUser?.divisions?.length) {
-      params.set("divisions", currentUser.divisions.join(","));
-    }
-    const res = await fetch(`${API_BASE}/alerts?${params.toString()}`);
-    if (res.ok) setAlertDocs(await res.json());
-  } catch (e) {
-    console.warn("Failed to load alerts", e);
-  }
-}, [currentUser]);
-
-const fetchJobTypes = useCallback(async () => {
-  try {
-    const res = await fetch(`${API_BASE}/job-types`);
-    if (res.ok) setAllJobTypes(await res.json());
-  } catch (e) {
-    console.warn("Failed to load job types", e);
-  }
-}, []);
-
-    // ── Division scoping ──────────────────────────────────────────────
-    // Admin / System Administrator (allDivisions: true) see everything.
-    // Every other role (Checker included) is hard-scoped to only the
-    // division(s) assigned to their User Account in Master Setup — same
-    // rule AdminDashboard already uses.
-    const divisionScoped = hasAllDivisionAccess(currentUser)
-      ? readyForCheck
-      : readyForCheck.filter(d => canSeeDivision(currentUser, d.divisionNo));
-
-    setDocuments(divisionScoped);
-    setLastUpdated(new Date());
-  } catch (err) {
-    setError(err.message);
-  } finally {
-    setLoading(false);
-    setRefreshing(false);
-  }
-}, [currentUser]);
+  }, [currentUser]);
 
   // ── Fetch divisions ──
   const fetchDivisions = useCallback(async () => {
@@ -1315,24 +1257,22 @@ const fetchJobTypes = useCallback(async () => {
       setPopupOperators([]);
     } finally {
       setPopupOperatorsLoading(false);
-      
     }
   }, []);
 
- useEffect(() => {
-  fetchDocuments(false);
-}, [fetchDocuments]);
+  useEffect(() => {
+    fetchDocuments(false);
+  }, [fetchDocuments]);
 
-useEffect(() => {
-  fetchAlerts();
-  fetchJobTypes();
-  fetchDivisions();
-}, [fetchAlerts, fetchJobTypes, fetchDivisions]);
+  useEffect(() => {
+    fetchDivisions();
+  }, [fetchDivisions]);
 
-// reset to page 1 on filter change (keep this effect, just simplified)
-useEffect(() => {
-  setCurrentPage(1);
-}, [search, filterType, filterStatus, dateFilterMode, fromDate, toDate]);
+  // Reset to page 1 whenever a filter changes, so the user never lands on
+  // a page that's now out of range / empty.
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [search, filterType, filterStatus, dateFilterMode, fromDate, toDate]);
 
   // Auto-refresh is intentionally disabled — data only updates via the
   // ↻ Refresh button (or a silent re-fetch right after an action).
@@ -1515,12 +1455,6 @@ useEffect(() => {
 
   // ── Pagination — slice the filtered `visible` list into pages of 10.
   const totalPages = Math.max(1, Math.ceil(visible.length / ITEMS_PER_PAGE));
-
-  // Reset to page 1 whenever a filter changes, so the user never lands on
-  // a page that's now out of range / empty.
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [search, filterType, filterStatus, dateFilterMode, fromDate, toDate]);
 
   // Safety clamp — e.g. if a background refresh shrinks the result set
   // while the user is sitting on a later page.
