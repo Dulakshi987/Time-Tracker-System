@@ -15,7 +15,7 @@ import java.util.Map;
 
 @RestController
 @RequestMapping("/api/print-portal")
-@CrossOrigin(origins = "http://localhost:5173", "https://logitrack-warehouse-system.netlify.app/")
+@CrossOrigin(origins = {"http://localhost:5173", "https://logitrack-warehouse-system.netlify.app/"})
 public class IssuePrintController {
 
     @Autowired
