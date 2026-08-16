@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import "./IssueDelivery.css";
 import { formatSriLankaTime } from "../../utils/dateUtils";
@@ -19,8 +19,29 @@ import {
 
 const API_BASE = "https://time-tracker-system-production.up.railway.app/api/delivery-portal";
 const SETUP_API = "https://time-tracker-system-production.up.railway.app/api/admin-setup";
-// const AUTO_REFRESH = 10000;
-const OPERATOR_REFRESH = 15000;
+
+// ── Data-usage settings ─────────────────────────────────────────────────
+// NOTE ON RAILWAY / DATA USAGE:
+// This page used to (1) auto-poll delivery operators every 15s forever,
+// and (2) pull EVERY Check-Done document on every load and after every
+// single action, then filter/paginate all of it in the browser. On a
+// phone on mobile data, that adds up fast and it's also what was driving
+// Railway's egress usage up.
+//
+// Fixed here by:
+//  - No background polling anywhere (operators load once; nothing loops).
+//  - The table now calls a paginated backend endpoint (/paged) that does
+//    all searching/filtering/sorting server-side and only ever sends back
+//    one page of rows (see PAGE_SIZE_OPTIONS below) plus small stat totals
+//    — never the full document list.
+//  - Search is debounced so typing doesn't fire a request per keystroke.
+//  - The Job Type dropdown is filled from a tiny /filters endpoint instead
+//    of being derived from a full document list.
+const PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
+const DEFAULT_PAGE_SIZE = 25;
+const SEARCH_DEBOUNCE_MS = 450;
+
+const DELIVERY_STATUSES = ["PENDING", "IN_PROGRESS", "ON_HOLD", "CANCELLED", "COMPLETED"];
 
 const HOLD_REASONS = [
   "Vehicle not available",
@@ -53,16 +74,12 @@ function formatTime(t) { return t ? String(t).substring(0, 5) : "—"; }
 
 function formatDateTime(dt) {
   if (!dt) return "—";
-  // now delegates to the shared Sri-Lanka-aware formatter — every call
-  // site below (Print/Pick/Check/Delivery/Handover/Hold/Cancel sections
-  // in ViewDrawer) picks up the fix automatically, no other lines change.
   return formatSriLankaTime(dt);
 }
 
-// Days are now always measured against the *request* date/time — this is
-// when the customer originally raised the request, not when it was printed.
-// The per-row "days pending" number always shows; only the ⚠ overdue
-// highlight + banner kick in once it passes this threshold.
+// Days are measured against the *request* date/time. The per-row "days
+// pending" number always shows; only the ⚠ overdue highlight kicks in once
+// it passes this threshold. Must match OVERDUE_DAYS in DeliveryPortalService.
 const OVERDUE_DAYS = 30;
 
 function getRequestDateTime(doc) {
@@ -87,47 +104,6 @@ function daysPending(doc) {
   const now = new Date();
   const diffMs = now.getTime() - requested.getTime();
   return Math.max(0, Math.floor(diffMs / (1000 * 60 * 60 * 24)));
-}
-
-// ── Date filter helpers ──────────────────────────────────────────────────
-// Returns today's date key (YYYY-MM-DD) in Sri Lanka time (UTC+5:30, no
-// DST), regardless of what timezone the browser/server/device is actually
-// running in. This is what "Today" always compares against, so the filter
-// is correct no matter where the page is opened from. Mirrors the Print
-// Portal / Pick Portal / Check Portal implementation exactly.
-function getSriLankaTodayKey() {
-  const now = new Date();
-  const utcMs = now.getTime() + now.getTimezoneOffset() * 60000;
-  const colomboMs = utcMs + 5.5 * 60 * 60000;
-  const colombo = new Date(colomboMs);
-  const pad = (n) => String(n).padStart(2, "0");
-  return `${colombo.getFullYear()}-${pad(colombo.getMonth() + 1)}-${pad(colombo.getDate())}`;
-}
-
-// requestDate is stored as a plain date (no time/timezone component), so a
-// straight string comparison against YYYY-MM-DD keys is correct as-is.
-function docDateKey(doc) {
-  return doc.requestDate ? String(doc.requestDate).substring(0, 10) : null;
-}
-
-function matchesDateFilter(doc, mode, fromDate, toDate) {
-  if (mode === "ALL") return true;
-
-  const key = docDateKey(doc);
-
-  if (mode === "TODAY") {
-    return key === getSriLankaTodayKey();
-  }
-
-  if (mode === "CUSTOM") {
-    if (!fromDate && !toDate) return true;
-    if (!key) return false;
-    if (fromDate && key < fromDate) return false;
-    if (toDate && key > toDate) return false;
-    return true;
-  }
-
-  return true;
 }
 
 function jobTypeColor(jt) {
@@ -161,8 +137,7 @@ function statusLabel(s) {
   }[c];
 }
 
-// Color palette for status badges + action buttons. bg/text used for solid
-// badges & active buttons, border used for outlined/inactive buttons.
+// Color palette for status badges + action buttons.
 const STATUS_COLORS = {
   pending:    { bg: "#f59e0b", text: "#1a1206", border: "#f59e0b" }, // amber
   inprogress: { bg: "#3b82f6", text: "#eaf2ff", border: "#3b82f6" }, // blue
@@ -190,62 +165,39 @@ function yn(v) {
   return v || "—";
 }
 
-// Same numbering scheme as the other portals — groups by request date,
-// numbers within the day, e.g. 20260816/0001. Resets automatically when
-// the date changes.
-function computeRequestIds(documents) {
-  const dateKeyOf = (doc) => {
-    if (doc.requestDate) return String(doc.requestDate).substring(0, 10);
-    if (doc.createdDatetime) return String(doc.createdDatetime).substring(0, 10);
-    return null;
-  };
+// The backend now stamps a display request id (reqId, or the transient
+// requestId) on each document. Fall back to "#<id>" if neither is present
+// so older records still render something sensible.
+function displayRequestId(doc) {
+  return doc.reqId || doc.requestId || `#${doc.id}`;
+}
 
-  const groups = {};
-  documents.forEach(doc => {
-    const key = dateKeyOf(doc) || "unknown";
-    if (!groups[key]) groups[key] = [];
-    groups[key].push(doc);
+function buildQuery(params) {
+  const qs = new URLSearchParams();
+  Object.entries(params).forEach(([k, v]) => {
+    if (v !== undefined && v !== null && v !== "") qs.set(k, v);
   });
-
-  const idMap = {};
-  Object.entries(groups).forEach(([key, group]) => {
-    const compactDate = key === "unknown" ? "00000000" : key.replace(/-/g, "");
-    group
-      .slice()
-      .sort((a, b) => (a.createdDatetime && b.createdDatetime
-        ? new Date(a.createdDatetime) - new Date(b.createdDatetime)
-        : a.id - b.id))
-      .forEach((doc, idx) => {
-        idMap[doc.id] = `${compactDate}/${String(idx + 1).padStart(4, "0")}`;
-      });
-  });
-
-  return idMap;
+  return qs.toString();
 }
 
 // ── Delivery operators — live from Master Setup (DB), division-aware ───────
-// Returns the raw operator records (name + divisionNo) so callers can filter
-// by whichever Division the current document belongs to — same pattern as
-// the Pick Portal's division-scoped picker list.
-
+// Loads ONCE (no polling interval) — the list of operator names rarely
+// changes mid-session, and each hold/cancel/deliver/handover popup only
+// needs whatever was current when it was opened.
 function useDeliveryOperators() {
   const [operators, setOperators] = useState([]);
 
-  const load = useCallback(() => {
+  useEffect(() => {
+    let cancelled = false;
     fetch(`${SETUP_API}/delivery-operators`)
       .then(res => {
         if (!res.ok) throw new Error(`Server error: ${res.status}`);
         return res.json();
       })
-      .then(data => setOperators(Array.isArray(data) ? data : []))
-      .catch(() => { /* keep last known list on transient errors */ });
+      .then(data => { if (!cancelled) setOperators(Array.isArray(data) ? data : []); })
+      .catch(() => { /* keep empty list on transient errors */ });
+    return () => { cancelled = true; };
   }, []);
-
-  useEffect(() => {
-    load();
-    const id = setInterval(load, OPERATOR_REFRESH);
-    return () => clearInterval(id);
-  }, [load]);
 
   return operators;
 }
@@ -448,9 +400,6 @@ function DeliveryDonePopup({ operatorNames, onConfirm, onCancel }) {
 }
 
 // ── Popup: Handover (Handed Over By) ────────────────────────────────────────
-// A document can be handed over only while it is On Hold or Cancelled.
-// Once confirmed, Delivered / Hold / Cancel and the Delete button all lock
-// for that row (see DocumentRow's isLocked).
 
 function HandoverPopup({ operatorNames, onConfirm, onCancel }) {
   const [handoverBy, setHandoverBy] = useState("");
@@ -765,14 +714,10 @@ function ViewDrawer({ doc, divisionLabel, onClose, onChangeVehicle }) {
 //
 // Handover rule: Handover is only clickable while the row's status is
 // On Hold or Cancelled — and only if it hasn't already been handed over.
-// For every other status (Pending, In Progress, Delivered) the Handover
-// button stays disabled, while Hold / Cancel / Delivered remain normally
-// clickable.
 //
-// Reactivate rule (NEW): once Handover is confirmed, the same button
-// automatically switches into a "Reactivate" button (still clickable, in
-// purple). Clicking Reactivate clears the handover + unlocks the row again,
-// so Delivered / Hold / Cancel / Delete all become clickable once more.
+// Reactivate rule: once Handover is confirmed, the same button switches
+// into a "Reactivate" button. Clicking it clears the handover + unlocks
+// the row again.
 
 function DocumentRow({ doc, requestId, divisionLabel, canManage, canHandover: canHandoverAccess, onView, onDelivered, onHold, onCancelled, onHandover, onReactivate, onEdit, onDelete }) {
   const sc = statusClass(doc.deliveryStatus);
@@ -780,7 +725,6 @@ function DocumentRow({ doc, requestId, divisionLabel, canManage, canHandover: ca
 
   const isLocked = sc === "completed" || sc === "onhold" || sc === "cancelled" || isHandedOver;
 
-  // Handover enabled ONLY when On Hold or Cancelled (and not already handed over).
   const canHandover = (sc === "onhold" || sc === "cancelled") && !isHandedOver;
   const lockedTitle = "Locked — Hold / Cancelled / Delivered / Handed Over";
 
@@ -945,14 +889,62 @@ function SkeletonRow({ columnCount }) {
   );
 }
 
+// ── Pagination bar ──────────────────────────────────────────────────────────
+
+function PaginationBar({ page, totalPages, totalElements, pageSize, onPageChange, onPageSizeChange }) {
+  const safeTotalPages = Math.max(totalPages, 1);
+  const from = totalElements === 0 ? 0 : page * pageSize + 1;
+  const to = Math.min((page + 1) * pageSize, totalElements);
+
+  return (
+    <div
+      style={{
+        display: "flex", alignItems: "center", justifyContent: "space-between",
+        flexWrap: "wrap", gap: 10, padding: "12px 4px", color: "#9db4d6", fontSize: "0.85rem",
+      }}
+    >
+      <span>{totalElements === 0 ? "No rows" : `Showing ${from}–${to} of ${totalElements}`}</span>
+
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <select
+          className="ip-filter-select"
+          value={pageSize}
+          onChange={e => onPageSizeChange(Number(e.target.value))}
+          style={{ padding: "6px 10px" }}
+        >
+          {PAGE_SIZE_OPTIONS.map(n => <option key={n} value={n}>{n} / page</option>)}
+        </select>
+
+        <button
+          type="button"
+          className="ip-btn ip-btn-outline"
+          style={{ flex: "unset", padding: "6px 14px" }}
+          disabled={page <= 0}
+          onClick={() => onPageChange(page - 1)}
+        >
+          ‹ Prev
+        </button>
+        <span>Page {page + 1} of {safeTotalPages}</span>
+        <button
+          type="button"
+          className="ip-btn ip-btn-outline"
+          style={{ flex: "unset", padding: "6px 14px" }}
+          disabled={page + 1 >= safeTotalPages}
+          onClick={() => onPageChange(page + 1)}
+        >
+          Next ›
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ── Main Component ───────────────────────────────────────────────────────────
 
 export default function IssueDeliveryForm() {
   const navigate = useNavigate();
 
   // ── Auth / role guard ──
-  // Redirects to /login if there's no logged-in user, or the logged-in
-  // user's role isn't allowed on the /delivery route (see permissions.js).
   const currentUser = getCurrentUser();
 
   useEffect(() => {
@@ -961,8 +953,6 @@ export default function IssueDeliveryForm() {
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Admin / System Administrator already have logout available elsewhere
-  // (their own dashboard/navbar) — hide the in-portal Logout button for them.
   const isAdminRole =
     currentUser?.staffName === "Admin" ||
     currentUser?.staffName === "System Administrator";
@@ -973,47 +963,51 @@ export default function IssueDeliveryForm() {
   };
 
   // ── Division access ──
-  // Admin / System Administrator (allDivisions: true in permissions.js) see
-  // every division. Every other login only sees documents whose divisionNo
-  // matches the division(s) assigned to their account in Master Setup
-  // (User Accounts → divisionNo, comma-separated for multi-division staff).
   const hasAllDiv = hasAllDivisionAccess(currentUser);
   const userDivisions = useMemo(() => getUserDivisions(currentUser), [currentUser]);
+  const allowedDivisionsCsv = hasAllDiv ? "" : userDivisions.join(",");
 
-  // Manage (Edit/Delete) + Handover columns — Admin / System Administrator only.
-  // Every other login never sees these two columns, regardless of their
-  // ROLE_ACCESS.buttons list.
   const canManageDocs = isAdminRole;
   const canHandoverAccess = isAdminRole;
   const visibleColumnCount = COLUMN_COUNT - (canManageDocs ? 0 : 1) - (canHandoverAccess ? 0 : 1);
 
-  const [documents,    setDocuments]    = useState([]);
-  const [loading,      setLoading]      = useState(true);
-  const [error,        setError]        = useState(null);
-  const [search,       setSearch]       = useState("");
-  const [filterType,   setFilterType]   = useState("ALL");
-  const [filterStatus, setFilterStatus] = useState("ALL");
-  const [filterDivision, setFilterDivision] = useState("ALL"); // Division filter — mirrors Job Type dropdown
-  const [statFilter,   setStatFilter]   = useState("ALL"); // ALL | pending | onhold | completed | cancelled — driven by the stat chips
-  const [lastUpdated,  setLastUpdated]  = useState(null);
-  const [refreshing,   setRefreshing]   = useState(false);
+  // ── Table data (current page only) ──
+  const [documents,     setDocuments]     = useState([]);
+  const [stats,         setStats]         = useState(null); // { total, pending, onHold, completed, cancelled, overdue }
+  const [loading,       setLoading]       = useState(true);
+  const [error,         setError]         = useState(null);
+  const [lastUpdated,   setLastUpdated]   = useState(null);
+  const [refreshing,    setRefreshing]    = useState(false);
 
-  // ── Date filter — defaults to "Today" (Sri Lanka time). "All" clears
-  // it, "Custom" opens a From/To range. Recomputes on every render (and
-  // the auto-refresh timer keeps this component re-rendering), so at
-  // midnight Colombo time "Today" automatically rolls over to the new
-  // day without needing a page reload. Mirrors Print Portal / Pick Portal
-  // / Check Portal.
+  // ── Pagination ──
+  const [page,     setPage]     = useState(0);
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
+  const [totalPages,    setTotalPages]    = useState(0);
+  const [totalElements, setTotalElements] = useState(0);
+
+  // ── Filters ──
+  const [search,        setSearch]        = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const [filterType,    setFilterType]    = useState("ALL");
+  const [filterStatus,  setFilterStatus]  = useState("ALL");
+  const [filterDivision, setFilterDivision] = useState("ALL");
+  const [statFilter,    setStatFilter]    = useState("ALL");
   const [dateFilterMode, setDateFilterMode] = useState("TODAY"); // "TODAY" | "ALL" | "CUSTOM"
-  const [fromDate,     setFromDate]     = useState("");
-  const [toDate,       setToDate]       = useState("");
+  const [fromDate,      setFromDate]      = useState("");
+  const [toDate,        setToDate]        = useState("");
 
-  // Divisions (Admin Master Data) — used to label each row/card and to
-  // scope which delivery operators show up in the popups below.
+  // Debounce search so typing doesn't fire a request per keystroke.
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(search.trim()), SEARCH_DEBOUNCE_MS);
+    return () => clearTimeout(t);
+  }, [search]);
+
+  // Divisions (Admin Master Data) — used to label rows and populate the
+  // Division filter dropdown. Loaded once.
   const [divisions, setDivisions] = useState([]);
+  // Job Type options — tiny payload from /filters, loaded once.
+  const [jobTypeOptions, setJobTypeOptions] = useState([]);
 
-  // Delivery operator names — live from Admin Dashboard → Master Setup →
-  // Delivery (DB), kept as raw records so they can be filtered by division.
   const deliveryOperators = useDeliveryOperators();
 
   const [activePopup,  setActivePopup]  = useState(null); // "hold" | "delivered" | "cancel" | "handover" | "vehicle" | "edit" | null
@@ -1022,16 +1016,32 @@ export default function IssueDeliveryForm() {
   const [vehicleMode,  setVehicleMode]  = useState("request"); // "request" | "delivery"
   const [viewDoc,      setViewDoc]      = useState(null);
 
-  // ── Fetch — only Check Done documents come back from this endpoint ──
+  // ── Fetch current page from the server (search/filters/pagination all
+  // applied server-side — no full-list download). ──
   const fetchDocuments = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
     else setRefreshing(true);
     setError(null);
     try {
-      const res  = await fetch(API_BASE);
+      const query = buildQuery({
+        page, size: pageSize,
+        search: debouncedSearch,
+        jobType: filterType,
+        status: filterStatus,
+        divisionNo: filterDivision,
+        allowedDivisions: allowedDivisionsCsv,
+        dateMode: dateFilterMode,
+        fromDate: dateFilterMode === "CUSTOM" ? fromDate : "",
+        toDate: dateFilterMode === "CUSTOM" ? toDate : "",
+        statFilter,
+      });
+      const res = await fetch(`${API_BASE}/paged?${query}`);
       if (!res.ok) throw new Error(`Server error: ${res.status}`);
       const data = await res.json();
-      setDocuments(data);
+      setDocuments(Array.isArray(data.content) ? data.content : []);
+      setTotalElements(data.totalElements || 0);
+      setTotalPages(data.totalPages || 0);
+      setStats(data.stats || null);
       setLastUpdated(new Date());
     } catch (err) {
       setError(err.message);
@@ -1039,7 +1049,7 @@ export default function IssueDeliveryForm() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, []);
+  }, [page, pageSize, debouncedSearch, filterType, filterStatus, filterDivision, allowedDivisionsCsv, dateFilterMode, fromDate, toDate, statFilter]);
 
   const fetchDivisions = useCallback(async () => {
     try {
@@ -1050,6 +1060,18 @@ export default function IssueDeliveryForm() {
       }
     } catch (e) {
       console.warn("Failed to load divisions", e);
+    }
+  }, []);
+
+  const fetchJobTypeOptions = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_BASE}/filters`);
+      if (res.ok) {
+        const data = await res.json();
+        setJobTypeOptions(Array.isArray(data) ? data : []);
+      }
+    } catch (e) {
+      console.warn("Failed to load filter options", e);
     }
   }, []);
 
@@ -1076,28 +1098,32 @@ export default function IssueDeliveryForm() {
       .filter(Boolean);
   }, [deliveryOperators]);
 
+  // Divisions dropdown, Job Type list — loaded once, NOT re-derived from
+  // the (now partial) document list.
+  useEffect(() => {
+    fetchDivisions();
+    fetchJobTypeOptions();
+  }, [fetchDivisions, fetchJobTypeOptions]);
+
+  // Reset to page 1 whenever a filter (other than page/pageSize itself)
+  // changes, so you don't end up stuck on an out-of-range page.
+  const filterKey = useMemo(() => JSON.stringify({
+    debouncedSearch, filterType, filterStatus, filterDivision,
+    dateFilterMode, fromDate, toDate, statFilter,
+  }), [debouncedSearch, filterType, filterStatus, filterDivision, dateFilterMode, fromDate, toDate, statFilter]);
+
+  const isFirstFilterRun = useRef(true);
+  useEffect(() => {
+    if (isFirstFilterRun.current) { isFirstFilterRun.current = false; return; }
+    setPage(0);
+  }, [filterKey]);
+
+  // Single source of truth: fetch whenever page or any filter changes.
   useEffect(() => {
     fetchDocuments(false);
-    fetchDivisions();
-  }, [fetchDocuments, fetchDivisions]);
+  }, [fetchDocuments]);
 
-  // useEffect(() => {
-  //   const id = setInterval(() => fetchDocuments(true), AUTO_REFRESH);
-  //   return () => clearInterval(id);
-  // }, [fetchDocuments]);
-
-  // ── Access-scoped documents ──
-  // Admin / System Administrator (or any role with allDivisions: true) see
-  // every document. Every other login only ever sees documents belonging to
-  // the division(s) assigned to their account — this feeds the table,
-  // stats, dropdowns, and request-ID numbering below, so nothing in the UI
-  // ever shows another division's data to a non-admin login.
-  const accessScopedDocuments = useMemo(() => {
-    if (hasAllDiv) return documents;
-    return documents.filter((doc) => canSeeDivision(currentUser, doc.divisionNo));
-  }, [documents, hasAllDiv, currentUser]);
-
-  const getDocById = useCallback((id) => accessScopedDocuments.find(d => d.id === id), [accessScopedDocuments]);
+  const getDocById = useCallback((id) => documents.find(d => d.id === id), [documents]);
 
   const handleDeliveredClick = (id) => { setActiveId(id); setActivePopup("delivered"); };
   const handleHoldClick      = (id) => { setActiveId(id); setActivePopup("hold"); };
@@ -1107,7 +1133,7 @@ export default function IssueDeliveryForm() {
   const handleEditClick      = (doc) => { setActiveId(doc.id); setActivePopup("edit"); };
   const closePopup = () => { setActivePopup(null); setActiveId(null); setVehicleDoc(null); setVehicleMode("request"); };
 
-  // keep the view drawer's data in sync after a refresh
+  // keep the view drawer's data in sync after a refresh of the current page
   useEffect(() => {
     if (!viewDoc) return;
     const fresh = documents.find(d => d.id === viewDoc.id);
@@ -1156,10 +1182,6 @@ export default function IssueDeliveryForm() {
     }
   };
 
-  // Handover — locks Delivered/Hold/Cancel + Delete for this row once saved.
-  // NOTE: this calls PUT {API_BASE}/{id}/handover with { handoverBy }.
-  // Add this endpoint on the backend (mirroring /hold, /cancel, /end) so it
-  // persists doc.handoverBy / doc.handoverTime.
   const handleHandoverConfirm = async (handoverBy) => {
     closePopup();
     try {
@@ -1174,15 +1196,6 @@ export default function IssueDeliveryForm() {
     }
   };
 
-  // Reactivate — reverses a Handover. Clears doc.handoverBy/handoverTime and
-  // unlocks Delivered / Hold / Cancel / Delete for this row again.
-  // NOTE: this calls PUT {API_BASE}/{id}/reactivate with no body.
-  // BACKEND CONTRACT: this endpoint must clear handoverBy + handoverTime,
-  // AND reset deliveryStatus away from "On Hold"/"Cancelled" (e.g. back to
-  // "Pending") — otherwise the row will re-lock itself on the next refresh,
-  // since Hold/Cancelled status locks the row on its own.
-  // We also apply an OPTIMISTIC local update immediately on click so the
-  // buttons unlock instantly, without waiting for the next poll.
   const handleReactivateClick = async (id) => {
     if (!window.confirm("Reactivate this document? This will unlock Delivered / Hold / Cancel for this row again.")) return;
 
@@ -1227,9 +1240,6 @@ export default function IssueDeliveryForm() {
     }
   };
 
-  // Updates either the *request* vehicle no (doc.vehicleNo) or the
-  // *delivery* vehicle no (doc.deliveryVehicleNo, entered at "Delivery Done")
-  // depending on which was chosen from the View drawer.
   const handleChangeVehicleConfirm = async (vehicleNo) => {
     const id = vehicleDoc?.id;
     const isDelivery = vehicleMode === "delivery";
@@ -1249,62 +1259,24 @@ export default function IssueDeliveryForm() {
     }
   };
 
-  // ── Filters ──
-  // Job Type / Status / Division dropdown option lists are all built off
-  // accessScopedDocuments, so a non-admin login never even sees another
-  // division's divisionNo as an option.
-  const jobTypes = ["ALL", ...new Set(accessScopedDocuments.map(d => d.jobType).filter(Boolean))];
-  const statuses = ["ALL", ...new Set(accessScopedDocuments.map(d => d.deliveryStatus).filter(Boolean))];
-
-  // Division dropdown — Admin/System Admin get every division that appears
-  // in the data; every other login only gets their own assigned division(s).
+  // Division dropdown — Admin/System Admin get every division from Master
+  // Setup; every other login only ever gets their own assigned division(s).
   const divisionOptions = useMemo(() => {
     const list = hasAllDiv
-      ? [...new Set(accessScopedDocuments.map(d => d.divisionNo).filter(Boolean))]
+      ? divisions.map(d => d.divisionNo).filter(Boolean)
       : userDivisions;
     return ["ALL", ...list];
-  }, [hasAllDiv, userDivisions, accessScopedDocuments]);
+  }, [hasAllDiv, userDivisions, divisions]);
 
-  const visible = accessScopedDocuments.filter(doc => {
-    const q = search.toLowerCase();
-    const matchSearch = !q || [
-      String(doc.id), doc.customerName, doc.jobwbs,
-      doc.reservationNo, doc.enteredBy, doc.jobType, doc.printDocumentNo,
-      doc.requestedBy, doc.vehicleNo, doc.deliveryVehicleNo,
-    ].some(v => (v || "").toLowerCase().includes(q));
+  const jobTypes = ["ALL", ...jobTypeOptions];
+  const statuses = ["ALL", ...DELIVERY_STATUSES];
 
-    const matchType     = filterType     === "ALL" || doc.jobType === filterType;
-    const matchStatus   = filterStatus   === "ALL" || doc.deliveryStatus === filterStatus;
-    const matchDivision = filterDivision === "ALL" || doc.divisionNo === filterDivision;
-    const matchStat     = statFilter     === "ALL" || statusClass(doc.deliveryStatus) === statFilter;
-    const matchDate     = matchesDateFilter(doc, dateFilterMode, fromDate, toDate);
-
-    return matchSearch && matchType && matchStatus && matchDivision && matchStat && matchDate;
-  });
-
-  // Stats — scoped by division access + the date filter too, so counts on
-  // screen always match what's actually shown in the table below (e.g.
-  // "Today" only counts today's documents, not every document ever
-  // entered, and a non-admin login only ever counts their own division).
-  // Mirrors Print Portal / Pick Portal / Check Portal.
-  const dateScoped = useMemo(
-    () => accessScopedDocuments.filter(doc => matchesDateFilter(doc, dateFilterMode, fromDate, toDate)),
-    [accessScopedDocuments, dateFilterMode, fromDate, toDate]
-  );
-
-  const total     = dateScoped.length;
-  const pending   = dateScoped.filter(d => statusClass(d.deliveryStatus) === "pending").length;
-  const onHold    = dateScoped.filter(d => statusClass(d.deliveryStatus) === "onhold").length;
-  const completed = dateScoped.filter(d => statusClass(d.deliveryStatus) === "completed").length;
-  const cancelled = dateScoped.filter(d => statusClass(d.deliveryStatus) === "cancelled").length;
-
-  const overdueDocs  = dateScoped.filter(d => {
-    const p = daysPending(d);
-    return p !== null && p > OVERDUE_DAYS && statusClass(d.deliveryStatus) !== "completed";
-  });
-  const overdueCount = overdueDocs.length;
-
-  const requestIdMap = useMemo(() => computeRequestIds(accessScopedDocuments), [accessScopedDocuments]);
+  const total     = stats?.total ?? 0;
+  const pending   = stats?.pending ?? 0;
+  const onHold    = stats?.onHold ?? 0;
+  const completed = stats?.completed ?? 0;
+  const cancelled = stats?.cancelled ?? 0;
+  const overdueCount = stats?.overdue ?? 0;
 
   const activeDoc = getDocById(activeId);
   const activeOperatorNames = useMemo(
@@ -1415,9 +1387,6 @@ export default function IssueDeliveryForm() {
         <select className="ip-filter-select" value={filterStatus} onChange={e => setFilterStatus(e.target.value)}>
           {statuses.map(s => <option key={s} value={s}>{s === "ALL" ? "All Status" : s}</option>)}
         </select>
-        {/* Division filter — Admin/System Admin see every division that has
-            data; every other login only ever sees their own assigned
-            division(s) here, same as the rest of the portal. */}
         <select className="ip-filter-select" value={filterDivision} onChange={e => setFilterDivision(e.target.value)}>
           {divisionOptions.map(d => (
             <option key={d} value={d}>
@@ -1427,9 +1396,7 @@ export default function IssueDeliveryForm() {
         </select>
       </div>
 
-      {/* ── Date filter — Today (Sri Lanka time, default) / All / Custom
-          range. Same toolbar pattern as Print Portal / Pick Portal / Check
-          Portal. ── */}
+      {/* ── Date filter ── */}
       <div className="ip-toolbar" style={{ marginTop: -6 }}>
         {DATE_FILTER_OPTIONS.map(opt => (
           <button
@@ -1532,7 +1499,7 @@ export default function IssueDeliveryForm() {
         >
           <strong style={{ color: statFilter === "cancelled" ? STATUS_COLORS.cancelled.text : "#ef4444" }}>{cancelled}</strong> Cancelled
         </button>
-        <div className="ip-stat-chip">Showing <strong style={{color:"#a78bfa"}}>{visible.length}</strong> of {total}</div>
+        <div className="ip-stat-chip">Showing <strong style={{color:"#a78bfa"}}>{documents.length}</strong> of {totalElements}</div>
       </div>
 
       {/* ── Error ── */}
@@ -1567,13 +1534,13 @@ export default function IssueDeliveryForm() {
           <tbody>
             {loading ? (
               Array.from({ length: 6 }).map((_, i) => <SkeletonRow key={i} columnCount={visibleColumnCount} />)
-            ) : visible.length === 0 ? (
+            ) : documents.length === 0 ? (
               <tr>
                 <td colSpan={visibleColumnCount}>
                   <div className="ip-empty">
                     <div className="ip-empty-icon">📭</div>
                     <p>
-                      {accessScopedDocuments.length === 0
+                      {totalElements === 0
                         ? "No Check Done documents yet. Complete checks first."
                         : `No documents found${search ? ` for "${search}"` : ""}.`}
                     </p>
@@ -1581,11 +1548,11 @@ export default function IssueDeliveryForm() {
                 </td>
               </tr>
             ) : (
-              visible.map(doc => (
+              documents.map(doc => (
                 <DocumentRow
                   key={doc.id}
                   doc={doc}
-                  requestId={requestIdMap[doc.id]}
+                  requestId={displayRequestId(doc)}
                   divisionLabel={divisionLabelFor(doc)}
                   canManage={canManageDocs}
                   canHandover={canHandoverAccess}
@@ -1603,6 +1570,16 @@ export default function IssueDeliveryForm() {
           </tbody>
         </table>
       </div>
+
+      {/* ── Pagination ── */}
+      <PaginationBar
+        page={page}
+        totalPages={totalPages}
+        totalElements={totalElements}
+        pageSize={pageSize}
+        onPageChange={setPage}
+        onPageSizeChange={(n) => { setPageSize(n); setPage(0); }}
+      />
     </div>
   );
 }

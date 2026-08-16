@@ -1,5 +1,6 @@
 package com.controller.Issue_Delivery_Portal;
 
+import com.dto.IssueDeliveryPageResponse;
 import com.entity.Issue;
 import com.service.DeliveryPortalService;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -20,9 +21,48 @@ public class DeliveryPortalController {
     @Autowired
     private DeliveryPortalService deliveryPortalService;
 
+    // Kept as-is for backward compatibility — Issue Confirm Portal (and
+    // anything else already wired to the plain list) still reads this.
+    // The Delivery Portal UI itself has moved to /paged below so it no
+    // longer downloads every Check-Done document on every load/action.
     @GetMapping
     public ResponseEntity<List<Issue>> getAll() {
         return ResponseEntity.ok(deliveryPortalService.getAllDocuments());
+    }
+
+    // Paginated + filtered read for the Delivery Portal table. All filtering
+    // (search / job type / status / division / date range / stat chip) and
+    // the division-access restriction for non-admin logins happen here on
+    // the server, so only the current page of matching rows is ever sent
+    // to the browser — this is what actually cuts data usage.
+    //
+    // allowedDivisions: comma-separated divisionNo list. The frontend
+    // leaves this empty for Admin / System Administrator and fills it with
+    // the caller's own assigned division(s) for every other login.
+    @GetMapping("/paged")
+    public ResponseEntity<IssueDeliveryPageResponse> getPaged(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "25") int size,
+            @RequestParam(required = false) String search,
+            @RequestParam(required = false) String jobType,
+            @RequestParam(required = false) String status,
+            @RequestParam(required = false) String divisionNo,
+            @RequestParam(required = false) String allowedDivisions,
+            @RequestParam(defaultValue = "TODAY") String dateMode,
+            @RequestParam(required = false) String fromDate,
+            @RequestParam(required = false) String toDate,
+            @RequestParam(required = false) String statFilter
+    ) {
+        return ResponseEntity.ok(deliveryPortalService.getPagedDeliveryDocuments(
+                page, size, search, jobType, status, divisionNo, allowedDivisions,
+                dateMode, fromDate, toDate, statFilter));
+    }
+
+    // Distinct Job Type values only — a few bytes — so the "Job Type"
+    // filter dropdown stays accurate without shipping every document.
+    @GetMapping("/filters")
+    public ResponseEntity<List<String>> getFilterOptions() {
+        return ResponseEntity.ok(deliveryPortalService.getFilterOptions());
     }
 
     @GetMapping("/{id}")
