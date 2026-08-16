@@ -1,22 +1,43 @@
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import "./ConfirmPortal.css";
-import { formatSriLankaTime } from "../../utils/dateUtils"; 
+import { formatSriLankaTime } from "../../utils/dateUtils";
 import {
   getCurrentUser, canAccessRoute, canUseButton, logoutUser,
-  hasAllDivisionAccess, canSeeDivision,
+  hasAllDivisionAccess, getUserDivisions,
 } from "../../config/permissions";
 // ⚠️ Adjust the path above ("../../config/permissions") to match where
 //    permissions.js actually sits relative to this file.
 
-// const DELIVERY_API = "http://localhost:8080/api/delivery-portal";
 // const CONFIRM_API = "http://localhost:8080/api/issue-confirm";
 // const SETUP_API = "http://localhost:8080/api/admin-setup";
 
-const DELIVERY_API = "https://time-tracker-system-production.up.railway.app/api/delivery-portal";
 const CONFIRM_API = "https://time-tracker-system-production.up.railway.app/api/issue-confirm";
 const SETUP_API = "https://time-tracker-system-production.up.railway.app/api/admin-setup";
-// const AUTO_REFRESH = 10000;
+
+// ── Data-usage settings ─────────────────────────────────────────────────
+// NOTE ON RAILWAY / DATA USAGE:
+// This page used to pull EVERY delivered/cancelled document on every load
+// (fetch(DELIVERY_API) → the full document list), then filter/search/
+// paginate all of it in the browser, with no pagination at all — the
+// whole table rendered every matching row at once. On mobile data that's
+// expensive, and it's what was driving Railway's egress usage up.
+//
+// Fixed here the same way as the Delivery Portal:
+//  - No background polling (nothing loops).
+//  - The table now calls a paginated backend endpoint (/paged) that does
+//    all searching/filtering/sorting server-side and only ever sends back
+//    one page of rows (see PAGE_SIZE_OPTIONS below) plus small stat
+//    totals — never the full document list.
+//  - Search is debounced so typing doesn't fire a request per keystroke.
+//  - Req ID numbering is computed server-side (date-grouped, stable
+//    across pages) instead of being recomputed client-side from whatever
+//    partial list happened to be loaded.
+//  - The Division filter is filled from Master Setup (/divisions) instead
+//    of being derived from a full document list.
+const PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
+const DEFAULT_PAGE_SIZE = 25;
+const SEARCH_DEBOUNCE_MS = 450;
 
 // ── Date filter options — Today (Sri Lanka time, default) / All / Custom
 // range. Same pattern as Print Portal / Pick Portal / Check Portal /
@@ -27,10 +48,9 @@ const DATE_FILTER_OPTIONS = [
   { value: "CUSTOM", label: "Custom" },
 ];
 
-// ── Status filter options — clickable pill buttons (same look as the
-// date filter buttons above). "filed" matches displayStatus(doc).cls,
-// i.e. any document that has a File Number attached, regardless of
-// whether it was Delivered or Cancelled underneath.
+// ── Status filter options — clickable pill buttons. "filed" matches any
+// document that has a File Number attached, regardless of whether it was
+// Delivered or Cancelled underneath.
 const STATUS_FILTER_OPTIONS = [
   { value: "ALL", label: "All Status" },
   { value: "completed", label: "Delivered" },
@@ -45,9 +65,6 @@ function formatTime(t) { return t ? String(t).substring(0, 5) : "—"; }
 
 function formatDateTime(dt) {
   if (!dt) return "—";
-  // delegates to the shared Sri-Lanka-aware formatter — every call site in
-  // this file (ViewDrawer's Print/Pick/Check/Delivery/Cancel sections, plus
-  // the table's "Date / Time" column via eventInfo()) is fixed automatically.
   return formatSriLankaTime(dt);
 }
 
@@ -90,39 +107,6 @@ function displayStatus(doc) {
   return { label: statusLabel(sc), cls: sc };
 }
 
-function computeRequestIds(documents) {
-  const dateKeyOf = (doc) => {
-    if (doc.requestDate)     return String(doc.requestDate).substring(0, 10);
-    if (doc.createdDatetime) return String(doc.createdDatetime).substring(0, 10);
-    return null;
-  };
-
-  const groups = {};
-  documents.forEach(doc => {
-    const key = dateKeyOf(doc) || "unknown";
-    if (!groups[key]) groups[key] = [];
-    groups[key].push(doc);
-  });
-
-  const idMap = {};
-  Object.entries(groups).forEach(([key, group]) => {
-    const compactDate = key === "unknown" ? "00000000" : key.replace(/-/g, "");
-    group
-      .slice()
-      .sort((a, b) => {
-        if (a.createdDatetime && b.createdDatetime) {
-          return new Date(a.createdDatetime) - new Date(b.createdDatetime);
-        }
-        return a.id - b.id;
-      })
-      .forEach((doc, idx) => {
-        idMap[doc.id] = `${compactDate}/${String(idx + 1).padStart(4, "0")}`;
-      });
-  });
-
-  return idMap;
-}
-
 function eventInfo(doc) {
   const sc = statusClass(doc.deliveryStatus);
   if (sc === "completed") {
@@ -134,46 +118,12 @@ function eventInfo(doc) {
   return { dateTime: null, by: null, reason: null };
 }
 
-// ── Date filter helpers ──────────────────────────────────────────────────
-// Returns today's date key (YYYY-MM-DD) in Sri Lanka time (UTC+5:30, no
-// DST), regardless of what timezone the browser/server/device is actually
-// running in. This is what "Today" always compares against, so the filter
-// is correct no matter where the page is opened from. Mirrors the Print
-// Portal / Pick Portal / Check Portal / Delivery Portal implementation
-// exactly.
-function getSriLankaTodayKey() {
-  const now = new Date();
-  const utcMs = now.getTime() + now.getTimezoneOffset() * 60000;
-  const colomboMs = utcMs + 5.5 * 60 * 60000;
-  const colombo = new Date(colomboMs);
-  const pad = (n) => String(n).padStart(2, "0");
-  return `${colombo.getFullYear()}-${pad(colombo.getMonth() + 1)}-${pad(colombo.getDate())}`;
-}
-
-// requestDate is stored as a plain date (no time/timezone component), so a
-// straight string comparison against YYYY-MM-DD keys is correct as-is.
-function docDateKey(doc) {
-  return doc.requestDate ? String(doc.requestDate).substring(0, 10) : null;
-}
-
-function matchesDateFilter(doc, mode, fromDate, toDate) {
-  if (mode === "ALL") return true;
-
-  const key = docDateKey(doc);
-
-  if (mode === "TODAY") {
-    return key === getSriLankaTodayKey();
-  }
-
-  if (mode === "CUSTOM") {
-    if (!fromDate && !toDate) return true;
-    if (!key) return false;
-    if (fromDate && key < fromDate) return false;
-    if (toDate && key > toDate) return false;
-    return true;
-  }
-
-  return true;
+function buildQuery(params) {
+  const qs = new URLSearchParams();
+  Object.entries(params).forEach(([k, v]) => {
+    if (v !== undefined && v !== null && v !== "") qs.set(k, v);
+  });
+  return qs.toString();
 }
 
 async function fetchActiveFileNumber() {
@@ -186,7 +136,7 @@ async function fetchActiveFileNumber() {
 
 // ── Add to File popup ───────────────────────────────────────────────────────
 
-function AddFilePopup({ doc, reqId, activeFileNo, loadingFileNo, fileNoError, onConfirm, onCancel }) {
+function AddFilePopup({ doc, activeFileNo, loadingFileNo, fileNoError, onConfirm, onCancel }) {
   const canConfirm = !!activeFileNo && !loadingFileNo;
 
   return (
@@ -197,7 +147,7 @@ function AddFilePopup({ doc, reqId, activeFileNo, loadingFileNo, fileNoError, on
           <button className="icf-popup-close" onClick={onCancel} style={{ color: "#333" }}>✕</button>
         </div>
         <p className="icf-popup-sub" style={{ color: "#333" }}>
-          {doc.printDocumentNo || `Doc #${doc.id}`} (Req ID: {reqId || "—"}) සඳහා
+          {doc.printDocumentNo || `Doc #${doc.id}`} (Req ID: {doc.reqId || "—"}) සඳහා
           admin විසින් setup කළ active file number එක auto-fill වේ
         </p>
 
@@ -439,7 +389,7 @@ function Section({ icon, title, children, accent }) {
   );
 }
 
-function ViewDrawer({ doc, reqId, onClose }) {
+function ViewDrawer({ doc, onClose }) {
   const ds = displayStatus(doc);
 
   return (
@@ -455,7 +405,7 @@ function ViewDrawer({ doc, reqId, onClose }) {
 
         <div className="icf-drawer-body">
           <Section icon="📝" title="Request Details">
-            <DetailRow label="Req ID" value={doc.reqId || reqId} />
+            <DetailRow label="Req ID" value={doc.reqId} />
             <DetailRow label="Customer" value={doc.customerName} />
             <DetailRow label="Job Type" value={
               <span style={{ color: jobTypeColor(doc.jobType), fontWeight: 700 }}>{doc.jobType || "—"}</span>
@@ -554,7 +504,7 @@ function ViewDrawer({ doc, reqId, onClose }) {
           )}
 
           <Section icon="📁" title="File Details" accent="file">
-            <DetailRow label="Req ID" value={doc.reqId || reqId} />
+            <DetailRow label="Req ID" value={doc.reqId} />
             <DetailRow label="File Number" value={doc.fileNumber ? `📁 ${doc.fileNumber}` : "Not yet added to file"} />
           </Section>
         </div>
@@ -562,6 +512,56 @@ function ViewDrawer({ doc, reqId, onClose }) {
         <div className="icf-popup-foot">
           <button className="icf-drawer-close-btn" onClick={onClose}>Close</button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Pagination bar ──────────────────────────────────────────────────────────
+
+function PaginationBar({ page, totalPages, totalElements, pageSize, onPageChange, onPageSizeChange }) {
+  const safeTotalPages = Math.max(totalPages, 1);
+  const from = totalElements === 0 ? 0 : page * pageSize + 1;
+  const to = Math.min((page + 1) * pageSize, totalElements);
+
+  return (
+    <div
+      style={{
+        display: "flex", alignItems: "center", justifyContent: "space-between",
+        flexWrap: "wrap", gap: 10, padding: "12px 4px", color: "#6c8bb3", fontSize: "0.85rem",
+      }}
+    >
+      <span>{totalElements === 0 ? "No rows" : `Showing ${from}–${to} of ${totalElements}`}</span>
+
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <select
+          className="icf-filter-select"
+          value={pageSize}
+          onChange={e => onPageSizeChange(Number(e.target.value))}
+          style={{ padding: "6px 10px" }}
+        >
+          {PAGE_SIZE_OPTIONS.map(n => <option key={n} value={n}>{n} / page</option>)}
+        </select>
+
+        <button
+          type="button"
+          className="icf-btn icf-btn-outline"
+          style={{ flex: "unset", padding: "6px 14px" }}
+          disabled={page <= 0}
+          onClick={() => onPageChange(page - 1)}
+        >
+          ‹ Prev
+        </button>
+        <span>Page {page + 1} of {safeTotalPages}</span>
+        <button
+          type="button"
+          className="icf-btn icf-btn-outline"
+          style={{ flex: "unset", padding: "6px 14px" }}
+          disabled={page + 1 >= safeTotalPages}
+          onClick={() => onPageChange(page + 1)}
+        >
+          Next ›
+        </button>
       </div>
     </div>
   );
@@ -593,27 +593,46 @@ export default function IssueConfirm() {
   const canManageDocs = canUseButton(currentUser, "edit") || canUseButton(currentUser, "delete");
   const visibleColumnCount = canManageDocs ? 12 : 11;
 
+  // ── Division access ──
+  const hasAllDiv = hasAllDivisionAccess(currentUser);
+  const userDivisions = useMemo(() => getUserDivisions(currentUser), [currentUser]);
+  const allowedDivisionsCsv = hasAllDiv ? "" : userDivisions.join(",");
+
+  // ── Table data (current page only) ──
   const [documents,   setDocuments]   = useState([]);
+  const [stats,       setStats]       = useState(null); // { total, completed, cancelled, filed }
   const [loading,     setLoading]     = useState(true);
   const [error,       setError]       = useState(null);
   const [lastUpdated, setLastUpdated] = useState(null);
   const [refreshing,  setRefreshing]  = useState(false);
-  const [filterStatus, setFilterStatus] = useState("ALL"); // "ALL" | "completed" | "cancelled" | "filed"
-  const [filterDivision, setFilterDivision] = useState("ALL");
-  const [search,      setSearch]      = useState("");
-  const [searchField, setSearchField] = useState("ALL");
-  const [savingId,    setSavingId]    = useState(null);
-  const [viewDoc,     setViewDoc]     = useState(null);
 
-  // ── Date filter — defaults to "Today" (Sri Lanka time). "All" clears
-  // it, "Custom" opens a From/To range. Recomputes on every render (and
-  // the auto-refresh timer keeps this component re-rendering), so at
-  // midnight Colombo time "Today" automatically rolls over to the new
-  // day without needing a page reload. Mirrors Print Portal / Pick Portal
-  // / Check Portal / Delivery Portal.
-  const [dateFilterMode, setDateFilterMode] = useState("TODAY"); // "TODAY" | "ALL" | "CUSTOM"
-  const [fromDate,     setFromDate]     = useState("");
-  const [toDate,       setToDate]       = useState("");
+  // ── Pagination ──
+  const [page,     setPage]     = useState(0);
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
+  const [totalPages,    setTotalPages]    = useState(0);
+  const [totalElements, setTotalElements] = useState(0);
+
+  // ── Filters ──
+  const [search,        setSearch]        = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const [filterStatus,  setFilterStatus]  = useState("ALL"); // ALL | completed | cancelled | filed
+  const [filterDivision, setFilterDivision] = useState("ALL");
+  const [dateFilterMode, setDateFilterMode] = useState("TODAY"); // TODAY | ALL | CUSTOM
+  const [fromDate,      setFromDate]      = useState("");
+  const [toDate,        setToDate]        = useState("");
+
+  // Debounce search so typing doesn't fire a request per keystroke.
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(search.trim()), SEARCH_DEBOUNCE_MS);
+    return () => clearTimeout(t);
+  }, [search]);
+
+  // Divisions (Admin Master Data) — used to populate the Division filter
+  // dropdown. Loaded once, NOT derived from the (now partial) document list.
+  const [divisions, setDivisions] = useState([]);
+
+  const [savingId, setSavingId] = useState(null);
+  const [viewDoc,  setViewDoc]  = useState(null);
 
   // Add-to-File popup
   const [fileDoc,       setFileDoc]       = useState(null);
@@ -631,14 +650,29 @@ export default function IssueConfirm() {
   const [statusFields,       setStatusFields]       = useState({ deliveredBy: "", deliveryCancelledBy: "", deliveryCancelReason: "" });
   const [statusActionSaving, setStatusActionSaving] = useState(false);
 
+  // ── Fetch current page from the server (search/filters/pagination all
+  // applied server-side — no full-list download). ──
   const fetchDocuments = useCallback(async (silent = false) => {
-    if (!silent) setLoading(true); else setRefreshing(true);
+    if (!silent) setLoading(true);
+    else setRefreshing(true);
     setError(null);
     try {
-      const res = await fetch(DELIVERY_API);
+      const query = buildQuery({
+        page, size: pageSize,
+        search: debouncedSearch,
+        status: filterStatus,
+        divisionNo: filterDivision === "ALL" && !hasAllDiv ? "" : filterDivision,
+        dateMode: dateFilterMode,
+        fromDate: dateFilterMode === "CUSTOM" ? fromDate : "",
+        toDate: dateFilterMode === "CUSTOM" ? toDate : "",
+      });
+      const res = await fetch(`${CONFIRM_API}/paged?${query}`);
       if (!res.ok) throw new Error(`Server error: ${res.status}`);
       const data = await res.json();
-      setDocuments(data);
+      setDocuments(Array.isArray(data.content) ? data.content : []);
+      setTotalElements(data.totalElements || 0);
+      setTotalPages(data.totalPages || 0);
+      setStats(data.stats || null);
       setLastUpdated(new Date());
     } catch (err) {
       setError(err.message);
@@ -646,85 +680,54 @@ export default function IssueConfirm() {
       setLoading(false);
       setRefreshing(false);
     }
+  }, [page, pageSize, debouncedSearch, filterStatus, filterDivision, hasAllDiv, dateFilterMode, fromDate, toDate]);
+
+  const fetchDivisions = useCallback(async () => {
+    try {
+      const res = await fetch(`${SETUP_API}/divisions`);
+      if (res.ok) {
+        const data = await res.json();
+        setDivisions(data || []);
+      }
+    } catch (e) {
+      console.warn("Failed to load divisions", e);
+    }
   }, []);
 
-  useEffect(() => { fetchDocuments(false); }, [fetchDocuments]);
-  // useEffect(() => {
-  //   const id = setInterval(() => fetchDocuments(true), AUTO_REFRESH);
-  //   return () => clearInterval(id);
-  // }, [fetchDocuments]);
+  useEffect(() => {
+    fetchDivisions();
+  }, [fetchDivisions]);
 
-  const reqIdMap = useMemo(() => computeRequestIds(documents), [documents]);
+  // Reset to page 1 whenever a filter (other than page/pageSize itself)
+  // changes, so you don't end up stuck on an out-of-range page.
+  const filterKey = useMemo(() => JSON.stringify({
+    debouncedSearch, filterStatus, filterDivision, dateFilterMode, fromDate, toDate,
+  }), [debouncedSearch, filterStatus, filterDivision, dateFilterMode, fromDate, toDate]);
 
-  // ── Division-wise access scoping ──────────────────────────────────────
-  // Admin / System Administrator (allDivisions: true) still see every
-  // document. Every other role — including "Print with Document Enter" —
-  // is hard-scoped to only the division(s) assigned to their User Account
-  // (Master Setup → User Accounts → Division(s)), the same rule already
-  // used on the Admin Dashboard. This runs BEFORE any status/search/date
-  // filtering below, so a restricted user can never see another
-  // division's documents no matter what they type in the search box.
-  const divisionScopedDocuments = useMemo(() => {
-    if (hasAllDivisionAccess(currentUser)) return documents;
-    return documents.filter(d => canSeeDivision(currentUser, d.divisionNo));
-  }, [documents, currentUser]);
+  const isFirstFilterRun = useRef(true);
+  useEffect(() => {
+    if (isFirstFilterRun.current) { isFirstFilterRun.current = false; return; }
+    setPage(0);
+  }, [filterKey]);
 
-  // Only Delivered + Cancelled
-  const relevant = divisionScopedDocuments.filter(d => ["completed", "cancelled"].includes(statusClass(d.deliveryStatus)));
+  // Single source of truth: fetch whenever page or any filter changes.
+  useEffect(() => {
+    fetchDocuments(false);
+  }, [fetchDocuments]);
 
-  // ── Division filter dropdown options — built from whatever divisions
-  // actually appear in the documents this user is allowed to see (same
-  // scoping rule as everything else on this page).
+  // Division dropdown — Admin/System Admin get every division from Master
+  // Setup; every other login only ever gets their own assigned division(s).
   const divisionOptions = useMemo(() => {
-    const set = new Set();
-    divisionScopedDocuments.forEach(d => { if (d.divisionNo) set.add(String(d.divisionNo)); });
-    return Array.from(set).sort();
-  }, [divisionScopedDocuments]);
-
-  const visible = relevant.filter(doc => {
-    const dsCls = displayStatus(doc).cls; // "completed" | "cancelled" | "filed"
-    const matchStatus = filterStatus === "ALL" || dsCls === filterStatus;
-    const matchDivision = filterDivision === "ALL" || String(doc.divisionNo || "") === String(filterDivision);
-
-    const q = search.toLowerCase().trim();
-    const reqId = (doc.reqId || reqIdMap[doc.id] || "").toLowerCase();
-
-    // Field-specific search when a field is chosen; otherwise search everything.
-    const fieldMap = {
-      REQID: [reqId],
-      DOCNO: [doc.printDocumentNo],
-      RESERVATION: [doc.reservationNo],
-    };
-
-    const searchPool = searchField === "ALL"
-      ? [
-          reqId,
-          doc.printDocumentNo,
-          doc.reservationNo,
-          doc.jobwbs,
-          doc.customerName,
-          doc.requestedBy,
-          doc.deliveryVehicleNo,
-          doc.deliveredBy,
-          doc.deliveryCancelledBy,
-          doc.fileNumber,
-          String(doc.id),
-        ]
-      : (fieldMap[searchField] || []);
-
-    const matchSearch = !q || searchPool.some(v => (v || "").toLowerCase().includes(q));
-
-    const matchDate = matchesDateFilter(doc, dateFilterMode, fromDate, toDate);
-
-    // Status filter, division filter, search filter and date filter all
-    // combine — "All Status" / "All Divisions" simply mean that part of
-    // the check always passes.
-    return matchStatus && matchDivision && matchSearch && matchDate;
-  });
+    const list = hasAllDiv
+      ? divisions.map(d => d.divisionNo).filter(Boolean)
+      : userDivisions;
+    return ["ALL", ...list];
+  }, [hasAllDiv, userDivisions, divisions]);
 
   const hasActiveToolbarFilters =
     search.trim() !== "" || filterStatus !== "ALL" || filterDivision !== "ALL";
 
+  // keep the view drawer's data in sync after a refresh of the current page
   useEffect(() => {
     if (!viewDoc) return;
     const fresh = documents.find(d => d.id === viewDoc.id);
@@ -762,15 +765,14 @@ export default function IssueConfirm() {
       const res = await fetch(`${CONFIRM_API}/${doc.id}/add-to-file`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ reqId: reqIdMap[doc.id], fileNumber }),
+        body: JSON.stringify({ reqId: doc.reqId, fileNumber }),
       });
       if (res.status === 409) {
         await fetchDocuments(true);
         return;
       }
       if (!res.ok) throw new Error(`Server error: ${res.status}`);
-      const updated = await res.json();
-      setDocuments(prev => prev.map(d => d.id === updated.id ? updated : d));
+      await fetchDocuments(true);
     } catch (err) {
       alert("Add to File failed: " + err.message);
     } finally {
@@ -799,9 +801,8 @@ export default function IssueConfirm() {
         body: JSON.stringify({ fileNumber: editFileValue.trim() }),
       });
       if (!res.ok) throw new Error(`Server error: ${res.status}`);
-      const updated = await res.json();
-      setDocuments(prev => prev.map(d => d.id === updated.id ? updated : d));
       closeFileEdit();
+      fetchDocuments(true);
     } catch (err) {
       alert("Edit failed: " + err.message);
     } finally {
@@ -816,9 +817,8 @@ export default function IssueConfirm() {
     try {
       const res = await fetch(`${CONFIRM_API}/${editFileDoc.id}/file`, { method: "DELETE" });
       if (!res.ok) throw new Error(`Server error: ${res.status}`);
-      const updated = await res.json();
-      setDocuments(prev => prev.map(d => d.id === updated.id ? updated : d));
       closeFileEdit();
+      fetchDocuments(true);
     } catch (err) {
       alert("Delete failed: " + err.message);
     } finally {
@@ -860,9 +860,8 @@ export default function IssueConfirm() {
         body: JSON.stringify(body),
       });
       if (!res.ok) throw new Error(`Server error: ${res.status}`);
-      const updated = await res.json();
-      setDocuments(prev => prev.map(d => d.id === updated.id ? updated : d));
       closeStatusEdit();
+      fetchDocuments(true);
     } catch (err) {
       alert("Edit failed: " + err.message);
     } finally {
@@ -878,7 +877,7 @@ export default function IssueConfirm() {
     try {
       const res = await fetch(`${CONFIRM_API}/${doc.id}`, { method: "DELETE" });
       if (!res.ok) throw new Error(`Server error: ${res.status}`);
-      setDocuments(prev => prev.filter(d => d.id !== doc.id));
+      fetchDocuments(true);
     } catch (err) {
       alert("Delete failed: " + err.message);
     }
@@ -897,21 +896,21 @@ export default function IssueConfirm() {
     return null;
   }
 
+  const total     = stats?.total ?? 0;
+  const completed = stats?.completed ?? 0;
+  const cancelled = stats?.cancelled ?? 0;
+  const filed     = stats?.filed ?? 0;
+
   return (
     <div className="icf-page">
 
       {viewDoc && (
-        <ViewDrawer
-          doc={viewDoc}
-          reqId={reqIdMap[viewDoc.id]}
-          onClose={() => setViewDoc(null)}
-        />
+        <ViewDrawer doc={viewDoc} onClose={() => setViewDoc(null)} />
       )}
 
       {fileDoc && (
         <AddFilePopup
           doc={fileDoc}
-          reqId={reqIdMap[fileDoc.id]}
           activeFileNo={activeFileNo}
           loadingFileNo={loadingFileNo}
           fileNoError={fileNoError}
@@ -985,23 +984,11 @@ export default function IssueConfirm() {
           <input
             className="icf-search"
             type="text"
-            placeholder="Search..."
+            placeholder="Search by Req ID, Doc No, Reservation, Customer, Vehicle No..."
             value={search}
             onChange={e => setSearch(e.target.value)}
           />
         </div>
-
-        {/* <select
-          className="icf-filter-select"
-          value={searchField}
-          onChange={e => setSearchField(e.target.value)}
-          title="Choose which field the search box matches against"
-        >
-          <option value="ALL">Search: All Fields</option>
-          <option value="REQID">Search: Req ID</option>
-          <option value="DOCNO">Search: Doc No</option>
-          <option value="RESERVATION">Search: Reservation No</option>
-        </select> */}
 
         {STATUS_FILTER_OPTIONS.map(opt => (
           <button
@@ -1021,9 +1008,8 @@ export default function IssueConfirm() {
           onChange={e => setFilterDivision(e.target.value)}
           title="Filter by Division No"
         >
-          <option value="ALL">All Divisions</option>
           {divisionOptions.map(dv => (
-            <option key={dv} value={dv}>{dv}</option>
+            <option key={dv} value={dv}>{dv === "ALL" ? "All Divisions" : dv}</option>
           ))}
         </select>
 
@@ -1084,6 +1070,15 @@ export default function IssueConfirm() {
         )}
       </div>
 
+      {/* ── Stats ── */}
+      <div className="icf-date-toolbar" style={{ marginTop: -6, gap: 10 }}>
+        <div className="icf-filter-select">Total <strong>{total}</strong></div>
+        <div className="icf-filter-select">Delivered <strong style={{ color: "#22c55e" }}>{completed}</strong></div>
+        <div className="icf-filter-select">Cancelled <strong style={{ color: "#ef4444" }}>{cancelled}</strong></div>
+        <div className="icf-filter-select">Filed <strong style={{ color: "#a78bfa" }}>{filed}</strong></div>
+        <div className="icf-filter-select">Showing <strong style={{ color: "#a78bfa" }}>{documents.length}</strong> of {totalElements}</div>
+      </div>
+
       {error && (
         <div className="icf-error">
           ⚠ {error} — <button onClick={() => fetchDocuments(false)}>retry</button>
@@ -1112,15 +1107,14 @@ export default function IssueConfirm() {
           <tbody>
             {loading ? (
               <tr><td colSpan={visibleColumnCount} className="icf-empty-cell">Loading...</td></tr>
-            ) : visible.length === 0 ? (
+            ) : documents.length === 0 ? (
               <tr><td colSpan={visibleColumnCount} className="icf-empty-cell">No documents found.</td></tr>
             ) : (
-              visible.map(doc => {
+              documents.map(doc => {
                 const sc = statusClass(doc.deliveryStatus);
                 const info = eventInfo(doc);
                 const ds = displayStatus(doc);
                 const isFiled = !!doc.fileNumber;
-                const reqId = doc.reqId || reqIdMap[doc.id] || "—";
 
                 return (
                   <tr key={doc.id} className="icf-row">
@@ -1135,7 +1129,7 @@ export default function IssueConfirm() {
                       </span>
                     </td>
 
-                    <td className="icf-td-reqid">{reqId}</td>
+                    <td className="icf-td-reqid">{doc.reqId || "—"}</td>
 
                     <td className="icf-td-docno">{doc.printDocumentNo || `Doc #${doc.id}`}</td>
 
@@ -1227,6 +1221,16 @@ export default function IssueConfirm() {
           </tbody>
         </table>
       </div>
+
+      {/* ── Pagination ── */}
+      <PaginationBar
+        page={page}
+        totalPages={totalPages}
+        totalElements={totalElements}
+        pageSize={pageSize}
+        onPageChange={setPage}
+        onPageSizeChange={(n) => { setPageSize(n); setPage(0); }}
+      />
     </div>
   );
 }
