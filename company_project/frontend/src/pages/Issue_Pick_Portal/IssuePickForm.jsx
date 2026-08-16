@@ -842,6 +842,16 @@ export default function IssuPikFormt() {
     navigate("/login", { replace: true });
   };
 
+  const PAGE_SIZE = 24;
+
+  const [page, setPage] = useState(0);
+  const [totalPages, setTotalPages] = useState(0);
+  const [totalElements, setTotalElements] = useState(0);
+  const [allJobTypes, setAllJobTypes] = useState([]);
+  const [statsFromServer, setStatsFromServer] = useState({
+    total: 0, pending: 0, handedOver: 0, inProgress: 0, onHold: 0, completed: 0,
+  });
+
   const [documents, setDocuments] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -892,19 +902,40 @@ export default function IssuPikFormt() {
   else setRefreshing(true);
   setError(null);
   try {
-    const res = await fetch(API_BASE);
+    const params = new URLSearchParams();
+
+    if (dateFilterMode === "TODAY") {
+      const today = getSriLankaTodayKey();
+      params.set("from", today);
+      params.set("to", today);
+    } else if (dateFilterMode === "CUSTOM") {
+      if (fromDate) params.set("from", fromDate);
+      if (toDate) params.set("to", toDate);
+    }
+    if (filterType !== "ALL") params.set("jobType", filterType);
+    if (filterStatus !== "ALL") params.set("status", filterStatus);
+    if (search.trim()) params.set("search", search.trim());
+    if (!hasAllDivisionAccess(currentUser) && currentUser?.divisions?.length) {
+      params.set("divisions", currentUser.divisions.join(","));
+    }
+    params.set("page", String(page));
+    params.set("size", String(PAGE_SIZE));
+
+    const res = await fetch(`${API_BASE}/search?${params.toString()}`);
     if (!res.ok) throw new Error(`Server error: ${res.status}`);
     const data = await res.json();
 
-    const withPrintDocNo = data.filter(
-      d => d.printDocumentNo && String(d.printDocumentNo).trim() !== ""
-    );
-
-    const divisionScoped = hasAllDivisionAccess(currentUser)
-      ? withPrintDocNo
-      : withPrintDocNo.filter(d => canSeeDivision(currentUser, d.divisionNo));
-
-    setDocuments(divisionScoped);
+    setDocuments(data.content || []);
+    setTotalPages(data.totalPages || 0);
+    setTotalElements(data.totalElements || 0);
+    setStatsFromServer({
+      total: data.stats?.total || 0,
+      pending: data.stats?.pending || 0,
+      handedOver: data.stats?.handedOver || 0,
+      inProgress: data.stats?.inProgress || 0,
+      onHold: data.stats?.onHold || 0,
+      completed: data.stats?.completed || 0,
+    });
     setLastUpdated(new Date());
   } catch (err) {
     setError(err.message);
@@ -912,7 +943,19 @@ export default function IssuPikFormt() {
     setLoading(false);
     setRefreshing(false);
   }
-}, [currentUser]);
+}, [dateFilterMode, fromDate, toDate, filterType, filterStatus, search, page, currentUser]);
+
+const fetchJobTypes = useCallback(async () => {
+  try {
+    const res = await fetch(`${API_BASE}/job-types`);
+    if (res.ok) {
+      const data = await res.json();
+      setAllJobTypes(data || []);
+    }
+  } catch (e) {
+    console.warn("Failed to load job types", e);
+  }
+}, []);
 
   const fetchDivisions = useCallback(async () => {
     try {
@@ -962,10 +1005,19 @@ export default function IssuPikFormt() {
     }
   }, []);
 
-  useEffect(() => {
-    fetchDocuments(false);
-    fetchDivisions();
-  }, [fetchDocuments, fetchDivisions]);
+ useEffect(() => {
+  fetchDocuments(false);
+}, [fetchDocuments]);
+
+useEffect(() => {
+  fetchDivisions();
+  fetchJobTypes();
+}, [fetchDivisions, fetchJobTypes]);
+
+// filter/search/date වෙනස් වෙනකොට page 0ට reset කරන්න
+useEffect(() => {
+  setPage(0);
+}, [dateFilterMode, fromDate, toDate, filterType, filterStatus, search]);
 
   // useEffect(() => {
   //   const id = setInterval(() => fetchDocuments(true), AUTO_REFRESH);
@@ -1135,6 +1187,7 @@ export default function IssuPikFormt() {
   }, [activeCheckErrorDocs]);
 
   const jobTypes = ["ALL", ...new Set(documents.map(d => d.jobType).filter(Boolean))];
+  const visible = documents;
 
   const STATUS_FILTERS = [
     { value: "ALL", label: "All Status" },
@@ -1169,12 +1222,12 @@ export default function IssuPikFormt() {
     [documents, dateFilterMode, fromDate, toDate]
   );
 
-  const total = dateScoped.length;
-  const pending = dateScoped.filter(d => statusClass(d.status) === "pending").length;
-  const handedOver = dateScoped.filter(d => statusClass(d.status) === "handedover").length;
-  const inProg = dateScoped.filter(d => statusClass(d.status) === "inprogress").length;
-  const onHold = dateScoped.filter(d => statusClass(d.status) === "onhold").length;
-  const completed = dateScoped.filter(d => statusClass(d.status) === "completed").length;
+  const total = statsFromServer.total;
+  const pending = statsFromServer.pending;
+  const handedOver = statsFromServer.handedOver;
+  const inProg = statsFromServer.inProgress;
+  const onHold = statsFromServer.onHold;
+  const completed = statsFromServer.completed;
 
   const handleStatClick = (statusValue) => setFilterStatus(statusValue);
 
@@ -1404,6 +1457,18 @@ export default function IssuPikFormt() {
           ))
         )}
       </div>
+
+      {!loading && totalPages > 1 && (
+    <div className="ip-toolbar" style={{ justifyContent: "center", marginTop: 20 }}>
+      <button type="button" className="ip-btn ip-btn-outline" style={{ flex: "unset", padding: "8px 16px" }}
+        disabled={page <= 0} onClick={() => setPage(p => Math.max(0, p - 1))}>← Prev</button>
+      <span style={{ color: "#6c8bb3", fontSize: "0.85rem" }}>
+        Page {page + 1} of {totalPages} · {totalElements} total
+      </span>
+      <button type="button" className="ip-btn ip-btn-outline" style={{ flex: "unset", padding: "8px 16px" }}
+        disabled={page >= totalPages - 1} onClick={() => setPage(p => Math.min(totalPages - 1, p + 1))}>Next →</button>
+    </div>
+  )}
     </div>
   );
 }
