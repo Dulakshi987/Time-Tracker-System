@@ -9,6 +9,8 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 import java.util.Map;
+import com.dto.IssuePrintPageResponse;
+
 
 @RestController
 @RequestMapping("/api/check-portal")
@@ -30,6 +32,32 @@ public class CheckPortalController {
     // paging there is also done client-side — see IssueCheckForm.jsx).
     // This is here in case a true server-side paginated view is needed
     // later (e.g. a "load more" list without the search/filter toolbar).
+
+    @GetMapping("/search")
+    public ResponseEntity<IssuePrintPageResponse> search(
+            @RequestParam(required = false) String from,
+            @RequestParam(required = false) String to,
+            @RequestParam(required = false) String jobType,
+            @RequestParam(required = false) String status,
+            @RequestParam(required = false) String search,
+            @RequestParam(required = false) String divisions,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "10") int size) {
+        return ResponseEntity.ok(
+            checkPortalService.search(from, to, jobType, status, search, divisions, page, size)
+        );
+    }
+
+    @GetMapping("/alerts")
+    public ResponseEntity<List<Issue>> alerts(@RequestParam(required = false) String divisions) {
+        return ResponseEntity.ok(checkPortalService.getPickingErrorAlerts(divisions));
+    }
+
+    @GetMapping("/job-types")
+    public ResponseEntity<List<String>> jobTypes() {
+        return ResponseEntity.ok(checkPortalService.getDistinctJobTypes());
+    }
+
     @GetMapping("/paged")
     public ResponseEntity<Page<Issue>> getAllPaged(
             @RequestParam(defaultValue = "0") int page,

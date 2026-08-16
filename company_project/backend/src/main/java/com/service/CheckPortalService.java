@@ -1,5 +1,6 @@
 package com.service;
 
+import com.dto.IssuePrintPageResponse; // reusing same page-response DTO shape
 import com.entity.Issue;
 import com.repository.IssueRepository;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -10,8 +11,10 @@ import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 
 import java.time.Duration;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
-import java.util.List;
+import java.util.*;
+import java.util.stream.Collectors;
 
 @Service
 public class CheckPortalService {
@@ -23,13 +26,6 @@ public class CheckPortalService {
         return issueRepository.findAll();
     }
 
-    // ── Pagination (optional) ──────────────────────────────────────────
-    // Not currently used by the Check Portal frontend — the grid there
-    // filters/searches client-side on the full list, so real server-side
-    // paging would fight the filters (page 1 might come back empty once a
-    // status/date filter is applied). Kept here so a paginated endpoint is
-    // available if it's ever needed (e.g. a future "load more" pattern),
-    // newest documents first.
     public Page<Issue> getDocumentsPaged(int page, int size) {
         int safePage = Math.max(page, 0);
         int safeSize = size <= 0 ? 10 : size;
@@ -71,8 +67,6 @@ public class CheckPortalService {
         return issueRepository.save(doc);
     }
 
-    // hasWrongMaterial is reported at Hold time (per the frontend's HoldPopup),
-    // not at End — so the picking-error flag is stamped here.
     public Issue holdCheck(Long id, String holdReason, String heldBy,
                             String hasWrongMaterial, String wrongMaterialSku, String wrongMaterialQty) {
         Issue doc = getById(id);
@@ -87,8 +81,6 @@ public class CheckPortalService {
             if ("YES".equalsIgnoreCase(hasWrongMaterial)) {
                 doc.setWrongMaterialSku(wrongMaterialSku);
                 doc.setWrongMaterialQty(wrongMaterialQty);
-                // A fresh error report always needs a new Emergency Pick —
-                // clear any stale resolution from a previous cycle.
                 doc.setEmergencyPickResolved(false);
                 doc.setEmergencyPickResolvedBy(null);
                 doc.setEmergencyResolvedTime(null);
@@ -112,9 +104,6 @@ public class CheckPortalService {
             doc.setCheckDurationSeconds(Math.max(totalElapsed - holdTime, 0));
         }
 
-        // ── Handoff to Delivery Portal ──
-        // Delivery Portal filters on checkStatus == COMPLETED, but it also
-        // needs a starting point in time to measure its own duration from.
         if (doc.getDeliveryStatus() == null || doc.getDeliveryStatus().isEmpty()) {
             doc.setDeliveryStatus("PENDING");
             doc.setDeliveryStartTime(endTime);
@@ -123,21 +112,176 @@ public class CheckPortalService {
         return issueRepository.save(doc);
     }
 
-    // fields change; status, timestamps, and durations are left untouched.
     public Issue editCheck(Long id, String heldBy, String checkedBy) {
         Issue doc = getById(id);
-
-        if (heldBy != null && !heldBy.isBlank()) {
-            doc.setCheckHeldBy(heldBy);
-        }
-        if (checkedBy != null && !checkedBy.isBlank()) {
-            doc.setCheckedBy(checkedBy);
-        }
-
+        if (heldBy != null && !heldBy.isBlank())    doc.setCheckHeldBy(heldBy);
+        if (checkedBy != null && !checkedBy.isBlank()) doc.setCheckedBy(checkedBy);
         return issueRepository.save(doc);
     }
 
     public void delete(Long id) {
         issueRepository.deleteById(id);
+    }
+
+    // ══════════════════════════════════════════════════════════════════
+    // ── NEW: Search + Pagination (server-side, cuts data usage) ──────
+    // Only documents ready for check (Pick status = COMPLETED and has a
+    // printDocumentNo) are ever considered — same "readyForCheck" filter
+    // the frontend used to apply client-side after fetching everything.
+    // ══════════════════════════════════════════════════════════════════
+    public IssuePrintPageResponse search(
+            String from, String to, String jobType, String status,
+            String search, String divisionsCsv, int page, int size) {
+
+        List<Issue> base;
+        if (from != null || to != null) {
+            String f = from != null ? from : "2000-01-01";
+            String t = to != null ? to : LocalDate.now().toString();
+            base = issueRepository.findByRequestDateBetween(f, t);
+        } else {
+            base = issueRepository.findAll();
+        }
+
+        // Ready-for-check gate: pick portal must be done, and doc number set
+        base = base.stream()
+                .filter(d -> matchesPickStatus(d.getStatus(), "completed"))
+                .filter(d -> d.getPrintDocumentNo() != null && !d.getPrintDocumentNo().trim().isEmpty())
+                .collect(Collectors.toList());
+
+        if (divisionsCsv != null && !divisionsCsv.isBlank()) {
+            Set<String> allowed = Arrays.stream(divisionsCsv.split(","))
+                    .map(String::trim).filter(s -> !s.isEmpty())
+                    .collect(Collectors.toSet());
+            base = base.stream()
+                    .filter(d -> d.getDivisionNo() != null && allowed.contains(String.valueOf(d.getDivisionNo())))
+                    .collect(Collectors.toList());
+        }
+
+        // Stats computed on the date+division scoped set (before jobType/status/search)
+        long dTotal     = base.size();
+        long dPending   = base.stream().filter(d -> matchesCheckStatus(d, "pending")).count();
+        long dInProg    = base.stream().filter(d -> matchesCheckStatus(d, "inprogress")).count();
+        long dOnHold    = base.stream().filter(d -> matchesCheckStatus(d, "onhold")).count();
+        long dCompleted = base.stream().filter(d -> matchesCheckStatus(d, "completed")).count();
+
+        if (jobType != null && !jobType.isBlank() && !"ALL".equalsIgnoreCase(jobType)) {
+            base = base.stream()
+                    .filter(d -> jobType.equalsIgnoreCase(d.getJobType()))
+                    .collect(Collectors.toList());
+        }
+
+        if (status != null && !status.isBlank() && !"ALL".equalsIgnoreCase(status)) {
+            base = base.stream().filter(d -> matchesCheckStatus(d, status))
+                    .collect(Collectors.toList());
+        }
+
+        if (search != null && !search.isBlank()) {
+            String q = search.toLowerCase();
+            base = base.stream().filter(d ->
+                    containsIgnoreCase(String.valueOf(d.getId()), q) ||
+                    containsIgnoreCase(d.getRequestedBy(), q) ||
+                    containsIgnoreCase(d.getJobwbs(), q) ||
+                    containsIgnoreCase(d.getReservationNo(), q) ||
+                    containsIgnoreCase(d.getEnteredBy(), q) ||
+                    containsIgnoreCase(d.getJobType(), q)
+            ).collect(Collectors.toList());
+        }
+
+        base.sort(Comparator
+                .comparing((Issue d) -> d.getRequestDate() == null ? "" : d.getRequestDate())
+                .thenComparing(d -> d.getCreatedDatetime() == null ? LocalDate.MIN.atStartOfDay() : d.getCreatedDatetime())
+                .thenComparing(Issue::getId));
+
+        // Request ID: grouped by requestDate, same scheme as Pick/Print Portal
+        Map<String, Integer> counters = new HashMap<>();
+        for (Issue d : base) {
+            String key = d.getRequestDate() != null
+                    ? d.getRequestDate().substring(0, Math.min(10, d.getRequestDate().length()))
+                    : "unknown";
+            int idx = counters.merge(key, 1, Integer::sum);
+            String compactDate = "unknown".equals(key) ? "00000000" : key.replace("-", "");
+            d.setRequestId(compactDate + "/" + String.format("%04d", idx));
+        }
+
+        long total = base.size();
+        int safeSize = Math.max(1, size);
+        int totalPages = (int) Math.ceil((double) total / safeSize);
+        int safePage = Math.max(0, Math.min(page, Math.max(0, totalPages - 1)));
+        int fromIdx = safePage * safeSize;
+        int toIdx = Math.min(fromIdx + safeSize, base.size());
+        List<Issue> content = fromIdx < toIdx ? base.subList(fromIdx, toIdx) : Collections.emptyList();
+
+        return new IssuePrintPageResponse(
+                content, safePage, safeSize, total, totalPages,
+                new IssuePrintPageResponse.Stats(dTotal, dPending, dInProg, dOnHold, dCompleted)
+        );
+    }
+
+    // ── NEW: lightweight endpoint for the red/green picking-error banners ──
+    // Returns ONLY flagged documents (small payload) instead of the whole list,
+    // so the alert banners don't need a full fetch to stay accurate.
+    public List<Issue> getPickingErrorAlerts(String divisionsCsv) {
+        List<Issue> base = issueRepository.findAll().stream()
+                .filter(d -> matchesPickStatus(d.getStatus(), "completed"))
+                .filter(d -> d.getPrintDocumentNo() != null && !d.getPrintDocumentNo().trim().isEmpty())
+                .filter(d -> "YES".equalsIgnoreCase(d.getHasWrongMaterial()))
+                .filter(d -> !matchesCheckStatus(d, "completed"))
+                .collect(Collectors.toList());
+
+        if (divisionsCsv != null && !divisionsCsv.isBlank()) {
+            Set<String> allowed = Arrays.stream(divisionsCsv.split(","))
+                    .map(String::trim).filter(s -> !s.isEmpty())
+                    .collect(Collectors.toSet());
+            base = base.stream()
+                    .filter(d -> d.getDivisionNo() != null && allowed.contains(String.valueOf(d.getDivisionNo())))
+                    .collect(Collectors.toList());
+        }
+        return base;
+    }
+
+    // ── NEW: distinct job types for the dropdown, without a full fetch ──
+    public List<String> getDistinctJobTypes() {
+        return issueRepository.findAll().stream()
+                .filter(d -> matchesPickStatus(d.getStatus(), "completed"))
+                .filter(d -> d.getPrintDocumentNo() != null && !d.getPrintDocumentNo().trim().isEmpty())
+                .map(Issue::getJobType)
+                .filter(Objects::nonNull)
+                .filter(s -> !s.isBlank())
+                .distinct()
+                .sorted()
+                .collect(Collectors.toList());
+    }
+
+    private boolean matchesPickStatus(String status, String wanted) {
+        String v = status == null ? "" : status.toLowerCase();
+        boolean isCompleted = v.contains("complete") || v.contains("done");
+        return "completed".equalsIgnoreCase(wanted) ? isCompleted : true;
+    }
+
+    private boolean matchesCheckStatus(Issue d, String wanted) {
+        String status = d.getCheckStatus();
+        String v = status == null ? "" : status.toLowerCase();
+        boolean isHold = v.contains("hold");
+        boolean isProgress = v.contains("progress");
+        boolean isCompleted = v.contains("complete") || v.contains("done");
+        boolean isPending = !isHold && !isProgress && !isCompleted;
+
+        boolean isFlagged = "YES".equalsIgnoreCase(d.getHasWrongMaterial());
+        // NOTE: adjust getter name below to match your Issue entity
+        // (isEmergencyPickResolved() if it's a primitive boolean field)
+        boolean resolved = Boolean.TRUE.equals(d.getEmergencyPickResolved());
+        boolean unresolvedError = isFlagged && !resolved && !isCompleted;
+
+        switch (wanted.toLowerCase()) {
+            case "pending": return isPending || unresolvedError;
+            case "inprogress": return isProgress;
+            case "onhold": return isHold;
+            case "completed": return isCompleted;
+            default: return true;
+        }
+    }
+
+    private boolean containsIgnoreCase(String value, String q) {
+        return value != null && value.toLowerCase().contains(q);
     }
 }
