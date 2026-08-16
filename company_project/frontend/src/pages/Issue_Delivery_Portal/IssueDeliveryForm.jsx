@@ -165,11 +165,47 @@ function yn(v) {
   return v || "—";
 }
 
-// The backend now stamps a display request id (reqId, or the transient
-// requestId) on each document. Fall back to "#<id>" if neither is present
-// so older records still render something sensible.
-function displayRequestId(doc) {
-  return doc.reqId || doc.requestId || `#${doc.id}`;
+// ── Request ID numbering ────────────────────────────────────────────────
+// Groups documents by request date, numbers within the day, e.g.
+// 20260816/0001. Resets automatically when the date changes. Same scheme
+// as Print / Pick / Check Portal so Req IDs line up across every portal.
+// If the backend has already stamped a reqId/requestId on the document,
+// that value wins — this is only the fallback for documents that don't
+// have one yet.
+function computeRequestIds(documents) {
+  const dateKeyOf = (doc) => {
+    if (doc.requestDate) return String(doc.requestDate).substring(0, 10);
+    if (doc.createdDatetime) return String(doc.createdDatetime).substring(0, 10);
+    return null;
+  };
+
+  const groups = {};
+  documents.forEach(doc => {
+    const key = dateKeyOf(doc) || "unknown";
+    if (!groups[key]) groups[key] = [];
+    groups[key].push(doc);
+  });
+
+  const idMap = {};
+  Object.entries(groups).forEach(([key, group]) => {
+    const compactDate = key === "unknown" ? "00000000" : key.replace(/-/g, "");
+    group
+      .slice()
+      .sort((a, b) => (a.createdDatetime && b.createdDatetime
+        ? new Date(a.createdDatetime) - new Date(b.createdDatetime)
+        : a.id - b.id))
+      .forEach((doc, idx) => {
+        idMap[doc.id] = `${compactDate}/${String(idx + 1).padStart(4, "0")}`;
+      });
+  });
+
+  return idMap;
+}
+
+// Prefer a backend-stamped reqId/requestId; fall back to the computed
+// date-based id from the map; fall back again to "#<id>" as a last resort.
+function displayRequestId(doc, requestIdMap) {
+  return doc.reqId || doc.requestId || (requestIdMap && requestIdMap[doc.id]) || `#${doc.id}`;
 }
 
 function buildQuery(params) {
@@ -1123,6 +1159,10 @@ export default function IssueDeliveryForm() {
     fetchDocuments(false);
   }, [fetchDocuments]);
 
+  // Date-based Req ID for the current page of documents (fallback for any
+  // doc the backend hasn't stamped a reqId/requestId onto yet).
+  const requestIdMap = useMemo(() => computeRequestIds(documents), [documents]);
+
   const getDocById = useCallback((id) => documents.find(d => d.id === id), [documents]);
 
   const handleDeliveredClick = (id) => { setActiveId(id); setActivePopup("delivered"); };
@@ -1552,7 +1592,7 @@ export default function IssueDeliveryForm() {
                 <DocumentRow
                   key={doc.id}
                   doc={doc}
-                  requestId={displayRequestId(doc)}
+                  requestId={displayRequestId(doc, requestIdMap)}
                   divisionLabel={divisionLabelFor(doc)}
                   canManage={canManageDocs}
                   canHandover={canHandoverAccess}
