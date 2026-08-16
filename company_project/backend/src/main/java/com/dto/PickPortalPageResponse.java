@@ -39,18 +39,19 @@ public static class Stats {
     public long handedOver; // defaults to 0 for Print Portal callers
 
     // existing 5-arg constructor, kept for backward compatibility
-    public Stats(long total, long pending, long inProgress, long onHold, long completed) {
-        this(total, pending, inProgress, onHold, completed, 0);
-    }
+    public long handedOver;
 
-    // new 6-arg constructor used by Pick Portal
-    public Stats(long total, long pending, long inProgress, long onHold, long completed, long handedOver) {
-        this.total = total;
-        this.pending = pending;
-        this.inProgress = inProgress;
-        this.onHold = onHold;
-        this.completed = completed;
-        this.handedOver = handedOver;
-    }
+public Stats(long total, long pending, long inProgress, long onHold, long completed) {
+    this(total, pending, inProgress, onHold, completed, 0);
+}
+
+public Stats(long total, long pending, long inProgress, long onHold, long completed, long handedOver) {
+    this.total = total;
+    this.pending = pending;
+    this.inProgress = inProgress;
+    this.onHold = onHold;
+    this.completed = completed;
+    this.handedOver = handedOver;
+}
 }
 }

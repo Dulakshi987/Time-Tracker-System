@@ -1187,7 +1187,7 @@ useEffect(() => {
   }, [activeCheckErrorDocs]);
 
   const jobTypes = ["ALL", ...new Set(documents.map(d => d.jobType).filter(Boolean))];
-  const visible = documents;
+  // const visible = documents;
 
   const STATUS_FILTERS = [
     { value: "ALL", label: "All Status" },
