@@ -3,7 +3,7 @@ package com.dto;
 import com.entity.Issue;
 import java.util.List;
 
-public class IssuePrintPageResponse {
+public class PickPortalPageResponse {
 
     private List<Issue> content;
     private int page;
@@ -12,7 +12,7 @@ public class IssuePrintPageResponse {
     private int totalPages;
     private Stats stats;
 
-    public IssuePrintPageResponse(List<Issue> content, int page, int size,
+    public PickPortalPageResponse(List<Issue> content, int page, int size,
                                    long totalElements, int totalPages, Stats stats) {
         this.content = content;
         this.page = page;
@@ -35,7 +35,7 @@ public class IssuePrintPageResponse {
         public long inProgress;
         public long onHold;
         public long completed;
-        public long handedOver; // 0 for Print Portal callers using the 5-arg constructor
+        public long handedOver;
 
         public Stats(long total, long pending, long inProgress, long onHold, long completed) {
             this(total, pending, inProgress, onHold, completed, 0);

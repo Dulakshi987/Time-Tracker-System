@@ -36,13 +36,19 @@ public class IssuePrintPageResponse {
         public long inProgress;
         public long onHold;
         public long completed;
+        public long handedOver; // 0 for Print Portal callers using the 5-arg constructor
 
         public Stats(long total, long pending, long inProgress, long onHold, long completed) {
+            this(total, pending, inProgress, onHold, completed, 0);
+        }
+
+        public Stats(long total, long pending, long inProgress, long onHold, long completed, long handedOver) {
             this.total = total;
             this.pending = pending;
             this.inProgress = inProgress;
             this.onHold = onHold;
             this.completed = completed;
+            this.handedOver = handedOver;
         }
     }
 }
