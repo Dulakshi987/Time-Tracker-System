@@ -759,17 +759,17 @@ const fetchJobTypes = useCallback(async (force = false) => {
   };
 
   // Delete — removes the document entirely
-  const handleDeleteClick = async (id) => {
-    if (!perms.delete) return;
-    if (!window.confirm("Delete this document permanently? This cannot be undone.")) return;
-    try {
-      const res = await fetch(`${API_BASE}/${id}`, { method: "DELETE" });
-      if (!res.ok) throw new Error(`Server error: ${res.status}`);
-      fetchDocuments(true);
-    } catch (err) {
-      alert("Delete failed: " + err.message);
-    }
-  };
+  // const handleDeleteClick = async (id) => {
+  //   if (!perms.delete) return;
+  //   if (!window.confirm("Delete this document permanently? This cannot be undone.")) return;
+  //   try {
+  //     const res = await fetch(`${API_BASE}/${id}`, { method: "DELETE" });
+  //     if (!res.ok) throw new Error(`Server error: ${res.status}`);
+  //     fetchDocuments(true);
+  //   } catch (err) {
+  //     alert("Delete failed: " + err.message);
+  //   }
+  // };
 
   cconst handleHoldConfirm = async (holdReason, heldBy) => {
   const id = activeId;
