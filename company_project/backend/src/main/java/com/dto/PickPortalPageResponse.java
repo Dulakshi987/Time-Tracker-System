@@ -3,7 +3,7 @@ package com.dto;
 import com.entity.Issue;
 import java.util.List;
 
-public class PickPortalPageResponse {
+public class IssuePrintPageResponse {
 
     private List<Issue> content;
     private int page;
@@ -12,7 +12,7 @@ public class PickPortalPageResponse {
     private int totalPages;
     private Stats stats;
 
-    public PickPortalPageResponse(List<Issue> content, int page, int size,
+    public IssuePrintPageResponse(List<Issue> content, int page, int size,
                                    long totalElements, int totalPages, Stats stats) {
         this.content = content;
         this.page = page;
@@ -29,29 +29,25 @@ public class PickPortalPageResponse {
     public int getTotalPages() { return totalPages; }
     public Stats getStats() { return stats; }
 
-   // com/dto/IssuePrintPageResponse.java — Stats inner class replace කරන්න
-public static class Stats {
-    public long total;
-    public long pending;
-    public long inProgress;
-    public long onHold;
-    public long completed;
-    public long handedOver; // defaults to 0 for Print Portal callers
+    public static class Stats {
+        public long total;
+        public long pending;
+        public long inProgress;
+        public long onHold;
+        public long completed;
+        public long handedOver; // 0 for Print Portal callers using the 5-arg constructor
 
-    // existing 5-arg constructor, kept for backward compatibility
-    public long handedOver;
+        public Stats(long total, long pending, long inProgress, long onHold, long completed) {
+            this(total, pending, inProgress, onHold, completed, 0);
+        }
 
-public Stats(long total, long pending, long inProgress, long onHold, long completed) {
-    this(total, pending, inProgress, onHold, completed, 0);
-}
-
-public Stats(long total, long pending, long inProgress, long onHold, long completed, long handedOver) {
-    this.total = total;
-    this.pending = pending;
-    this.inProgress = inProgress;
-    this.onHold = onHold;
-    this.completed = completed;
-    this.handedOver = handedOver;
-}
-}
+        public Stats(long total, long pending, long inProgress, long onHold, long completed, long handedOver) {
+            this.total = total;
+            this.pending = pending;
+            this.inProgress = inProgress;
+            this.onHold = onHold;
+            this.completed = completed;
+            this.handedOver = handedOver;
+        }
+    }
 }
