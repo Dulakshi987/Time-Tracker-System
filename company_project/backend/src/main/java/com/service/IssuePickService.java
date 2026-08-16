@@ -195,8 +195,7 @@ public class IssuePickService {
 
         return new IssuePrintPageResponse(
                 content, safePage, safeSize, total, totalPages,
-                new IssuePrintPageResponse.Stats(total, pending, inProgress, onHold, completed, handedOver)
-        );
+                 new IssuePrintPageResponse.Stats(total, pending, inProgress, onHold, completed, handedOver)        );
     }
 
     // Distinct Job Types across ALL Pick-eligible documents (has printDocumentNo)

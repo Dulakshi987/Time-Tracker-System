@@ -36,14 +36,14 @@ public static class Stats {
     public long inProgress;
     public long onHold;
     public long completed;
-    public long handedOver; // Pick Portal only; 0 for Print Portal responses
+    public long handedOver; // defaults to 0 for Print Portal callers
 
-    // Existing 5-arg constructor — used by Print Portal, defaults handedOver to 0
+    // existing 5-arg constructor, kept for backward compatibility
     public Stats(long total, long pending, long inProgress, long onHold, long completed) {
         this(total, pending, inProgress, onHold, completed, 0);
     }
 
-    // New 6-arg constructor — used by Pick Portal
+    // new 6-arg constructor used by Pick Portal
     public Stats(long total, long pending, long inProgress, long onHold, long completed, long handedOver) {
         this.total = total;
         this.pending = pending;
