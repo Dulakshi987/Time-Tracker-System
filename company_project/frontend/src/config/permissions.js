@@ -86,9 +86,11 @@ export const ROLE_ACCESS = {
       "start", "hold", "end", "handover", "emergency_done",
       "deliver", "cancel", "add_to_file",
     ],
-    // Added "dashboard" so an "All" role account sees the Admin Dashboard
-    // KPI/overview page in the sidebar too, alongside the existing portals.
-    navKeys: ["dashboard", "docentry", "print", "pick", "check", "delivery", "document", "report"],
+    // "dashboard" and "report" removed from here on purpose — only the
+    // Admin / System Administrator roles (navKeys: "*") should see the
+    // Admin Dashboard and Report pages. Every other role, including
+    // "All", now stays limited to its own operational portals below.
+    navKeys: ["docentry", "print", "pick", "check", "delivery", "document"],
     hiddenColumns: {
       docentry: ["actions"],
       print: ["actions"],

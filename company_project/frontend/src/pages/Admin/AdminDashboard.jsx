@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import "./AdminDashboard.css";
 import * as XLSX from "xlsx";
 
@@ -1211,7 +1211,7 @@ const REPORT_CATEGORY_OPTIONS = [
   { key: "delivery", label: "Delivery Details" },
 ];
 
-function ReportPanel({ documents, jobTypes }) {
+function ReportPanel({ documents, jobTypes, hasLoadedOnce, onLoadData, loading }) {
   const [category, setCategory]           = useState("all");
   const [jobTypeFilter, setJobTypeFilter] = useState("ALL");
   const [dateFieldMode, setDateFieldMode] = useState("start");
@@ -1222,12 +1222,13 @@ function ReportPanel({ documents, jobTypes }) {
   const activeDateField = dateFieldMode === "hold" ? stageDates.hold : stageDates.start;
 
   const rows = useMemo(() => {
+    if (!hasLoadedOnce) return [];
     return documents.filter(d => {
       if (jobTypeFilter !== "ALL" && (d.jobType || "").toLowerCase() !== jobTypeFilter.toLowerCase()) return false;
       if (!dateFieldInRange(d, activeDateField, dateFrom, dateTo)) return false;
       return true;
     });
-  }, [documents, jobTypeFilter, activeDateField, dateFrom, dateTo]);
+  }, [documents, jobTypeFilter, activeDateField, dateFrom, dateTo, hasLoadedOnce]);
 
   const cols = PORTAL_COLUMNS[category];
   const categoryLabel = REPORT_CATEGORY_OPTIONS.find(o => o.key === category)?.label || category;
@@ -1235,9 +1236,22 @@ function ReportPanel({ documents, jobTypes }) {
   return (
     <div>
       <h2 className="adm-title">Report</h2>
-      <p className="adm-subtitle">Pick a category, job type, and date range — the table below and the Excel export both follow your selection.</p>
+      <p className="adm-subtitle">Pick a category, job type, and date range, then press "🔄 Load Data" — the table and Excel export only ever show data you explicitly fetched.</p>
 
       <div className="adm-xl-toolbar">
+        {/* Own Load Data button for this tab — nothing here fetches on its
+            own; documents only ever come from an explicit press of this
+            (or the top bar's) Load Data button. */}
+        <button
+          type="button"
+          onClick={onLoadData}
+          disabled={loading}
+          className="adm-xl-export-btn"
+          style={{ background: "#0b63ce", borderColor: "#0b63ce", opacity: loading ? 0.6 : 1 }}
+        >
+          <Icon.refresh /> {loading ? "Loading…" : "Load Data"}
+        </button>
+
         <select
           className="adm-xl-select"
           value={category}
@@ -1253,6 +1267,7 @@ function ReportPanel({ documents, jobTypes }) {
 
         <button
           className="adm-xl-export-btn"
+          disabled={!hasLoadedOnce}
           onClick={() => exportToExcel(rows, cols, `report_${category}`, categoryLabel.substring(0, 31))}
         >
           ⬇ Export {categoryLabel} ({rows.length})
@@ -1288,22 +1303,29 @@ function ReportPanel({ documents, jobTypes }) {
         )}
       </div>
 
-      <div className="adm-xl-table-wrap">
-        <table className="adm-xl-table">
-          <thead><tr>{cols.map(c => <th key={c}>{c}</th>)}</tr></thead>
-          <tbody>
-            {rows.length === 0 ? (
-              <tr><td colSpan={cols.length} className="adm-eff-empty">No data for this filter</td></tr>
-            ) : rows.map(d => (
-              <tr key={d.id}>
-                {cols.map(c => (
-                  <td key={c}>{renderCellValue(d, c)}</td>
-                ))}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      {!hasLoadedOnce ? (
+        <div className="adm-loading" style={{ textAlign: "center", padding: "40px 16px" }}>
+          No data loaded yet. Press <strong>🔄 Load Data</strong> above to fetch the report.
+          <br />Nothing loads automatically — this saves Railway usage and mobile data.
+        </div>
+      ) : (
+        <div className="adm-xl-table-wrap">
+          <table className="adm-xl-table">
+            <thead><tr>{cols.map(c => <th key={c}>{c}</th>)}</tr></thead>
+            <tbody>
+              {rows.length === 0 ? (
+                <tr><td colSpan={cols.length} className="adm-eff-empty">No data for this filter</td></tr>
+              ) : rows.map(d => (
+                <tr key={d.id}>
+                  {cols.map(c => (
+                    <td key={c}>{renderCellValue(d, c)}</td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }
@@ -1449,6 +1471,14 @@ export default function AdminDashboard() {
   // "loaded, and there's genuinely nothing to show".
   const [hasFetchedOnce, setHasFetchedOnce] = useState(false);
 
+  // Holds the AbortController for whichever /print-portal request is
+  // currently in flight, so it can be cancelled the moment the tab/app
+  // goes to the background (see the visibilitychange effect near the
+  // bottom of this component). This is what makes a request "sleep"
+  // instead of quietly finishing in the background and burning Railway
+  // usage for a screen nobody is looking at.
+  const inFlightAbortRef = useRef(null);
+
   const [range, setRange]       = useState("TODAY");
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate]     = useState("");
@@ -1500,18 +1530,35 @@ export default function AdminDashboard() {
   }, [jobCategories, selectedDivisionName]);
 
   const fetchDocuments = useCallback(async (silent = false) => {
+    // Cancel anything still in flight before starting a new request —
+    // avoids two overlapping /print-portal calls stacking up on Railway.
+    if (inFlightAbortRef.current) {
+      inFlightAbortRef.current.abort();
+    }
+    const controller = new AbortController();
+    inFlightAbortRef.current = controller;
+
     if (!silent) setLoading(true);
     setError(null);
     try {
-      const res = await fetch(MASTER_API);
+      const res = await fetch(MASTER_API, { signal: controller.signal });
       if (!res.ok) throw new Error(`Server error: ${res.status}`);
       const data = await res.json();
       setDocuments(data);
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setLoading(false);
       setHasFetchedOnce(true);
+    } catch (err) {
+      // AbortError fires when we cancelled this request ourselves (new
+      // load started, or the tab went to the background) — that's not a
+      // real failure, so stay quiet and don't flip on the error banner
+      // or mark hasFetchedOnce, since nothing was actually fetched.
+      if (err.name === "AbortError") return;
+      setError(err.message);
+      setHasFetchedOnce(true);
+    } finally {
+      if (inFlightAbortRef.current === controller) {
+        setLoading(false);
+        inFlightAbortRef.current = null;
+      }
     }
   }, []);
 
@@ -1540,6 +1587,27 @@ export default function AdminDashboard() {
     fetchDivisions();
     fetchJobCategories();
   }, [fetchDocuments, fetchDivisions, fetchJobCategories]);
+
+  // ── Background tab / app-switch handling ──────────────────────────────
+  // When the browser/app is put in the background (screen off, switched to
+  // another app like WhatsApp, tab hidden, etc.) any /print-portal request
+  // still in flight gets aborted immediately instead of being left to
+  // finish silently — that's the "sleep" behaviour that was asked for.
+  // Nothing auto-fetches again when the app comes back to the foreground
+  // either: the user has to press "Load Data" again, same as any other
+  // time, so coming back from WhatsApp costs zero extra requests unless
+  // the user explicitly asks for fresh data.
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.hidden && inFlightAbortRef.current) {
+        inFlightAbortRef.current.abort();
+        inFlightAbortRef.current = null;
+        setLoading(false);
+      }
+    };
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => document.removeEventListener("visibilitychange", handleVisibilityChange);
+  }, []);
 
   const hasLoadedOnce = hasFetchedOnce;
 
@@ -1659,10 +1727,26 @@ export default function AdminDashboard() {
         {activeView === "check"       && <IssueCheckForm />}
         {activeView === "delivery"    && <IssueDeliveryForm />}
         {activeView === "document"    && <ConfirmPortal />}
-        {activeView === "fullreport"  && <DocumentsExcelPanel documents={divisionScopedDocuments} jobTypes={jobTypes} />}
+        {activeView === "fullreport"  && (
+          <DocumentsExcelPanel
+            documents={divisionScopedDocuments}
+            jobTypes={jobTypes}
+            hasLoadedOnce={hasLoadedOnce}
+            onLoadData={handleLoadData}
+            loading={loading}
+          />
+        )}
         {activeView === "mastersetup" && <MasterSetupPanel />}
         {activeView === "notify"      && <NotificationPanel documents={divisionScopedDocuments} />}
-        {activeView === "report"      && <ReportPanel documents={divisionScopedDocuments} jobTypes={jobTypes} />}
+        {activeView === "report"      && (
+          <ReportPanel
+            documents={divisionScopedDocuments}
+            jobTypes={jobTypes}
+            hasLoadedOnce={hasLoadedOnce}
+            onLoadData={handleLoadData}
+            loading={loading}
+          />
+        )}
       </div>
     </div>
   );
@@ -1749,7 +1833,7 @@ function scopeDivisionsForCurrentUser(divisions) {
   return divisions.filter(d => allowed.includes(String(d.divisionNo)));
 }
 
-function DocumentsExcelPanel({ documents, jobTypes }) {
+function DocumentsExcelPanel({ documents, jobTypes, hasLoadedOnce, onLoadData, loading }) {
   const [jobTypeFilter, setJobTypeFilter] = useState("ALL");
   const [portalFilter, setPortalFilter] = useState("all");
   const [search, setSearch] = useState("");
@@ -1762,6 +1846,7 @@ function DocumentsExcelPanel({ documents, jobTypes }) {
   const activeDateField = dateFieldMode === "hold" ? stageDates.hold : stageDates.start;
 
   const rows = useMemo(() => {
+    if (!hasLoadedOnce) return [];
     return documents.filter(d => {
       if (jobTypeFilter !== "ALL" && (d.jobType || "").toLowerCase() !== jobTypeFilter.toLowerCase()) return false;
       if (!dateFieldInRange(d, activeDateField, dateFrom, dateTo)) return false;
@@ -1772,16 +1857,29 @@ function DocumentsExcelPanel({ documents, jobTypes }) {
       }
       return true;
     });
-  }, [documents, jobTypeFilter, search, activeDateField, dateFrom, dateTo]);
+  }, [documents, jobTypeFilter, search, activeDateField, dateFrom, dateTo, hasLoadedOnce]);
 
   const cols = PORTAL_COLUMNS[portalFilter];
 
   return (
     <div>
       <h2 className="adm-title">All Documents</h2>
-      <p className="adm-subtitle">Every document, every portal, one table.</p>
+      <p className="adm-subtitle">Every document, every portal, one table — press "🔄 Load Data" to fetch it.</p>
 
       <div className="adm-xl-toolbar">
+        {/* Own Load Data button for this tab too, same reasoning as
+            ReportPanel: this view should never show data that wasn't
+            explicitly fetched. */}
+        <button
+          type="button"
+          onClick={onLoadData}
+          disabled={loading}
+          className="adm-xl-export-btn"
+          style={{ background: "#0b63ce", borderColor: "#0b63ce", opacity: loading ? 0.6 : 1 }}
+        >
+          <Icon.refresh /> {loading ? "Loading…" : "Load Data"}
+        </button>
+
         <select className="adm-xl-select" value={jobTypeFilter} onChange={e => setJobTypeFilter(e.target.value)}>
           <option value="ALL">All Job Types</option>
           {jobTypes.map(t => <option key={t} value={t}>{t}</option>)}
@@ -1811,6 +1909,7 @@ function DocumentsExcelPanel({ documents, jobTypes }) {
 
         <button
           className="adm-xl-export-btn"
+          disabled={!hasLoadedOnce}
           onClick={() => exportToExcel(rows, cols, `${portalFilter}_documents`, portalFilter)}
         >
           ⬇ Export {portalFilter === "all" ? "This View" : portalFilter}
@@ -1818,6 +1917,7 @@ function DocumentsExcelPanel({ documents, jobTypes }) {
 
         <button
           className="adm-xl-export-btn all"
+          disabled={!hasLoadedOnce}
           onClick={() => {
             const wb = XLSX.utils.book_new();
             Object.entries(PORTAL_COLUMNS).forEach(([key, columns]) => {
@@ -1832,6 +1932,7 @@ function DocumentsExcelPanel({ documents, jobTypes }) {
 
         <button
           className="adm-xl-export-btn jobtype"
+          disabled={!hasLoadedOnce}
           onClick={() => {
             const wb = XLSX.utils.book_new();
             jobTypes.forEach(t => {
@@ -1880,20 +1981,29 @@ function DocumentsExcelPanel({ documents, jobTypes }) {
         )}
       </div>
 
-      <div className="adm-xl-table-wrap">
-        <table className="adm-xl-table">
-          <thead><tr>{cols.map(c => <th key={c}>{c}</th>)}</tr></thead>
-          <tbody>
-            {rows.map(d => (
-              <tr key={d.id}>
-                {cols.map(c => (
-                  <td key={c}>{renderCellValue(d, c)}</td>
-                ))}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      {!hasLoadedOnce ? (
+        <div className="adm-loading" style={{ textAlign: "center", padding: "40px 16px" }}>
+          No data loaded yet. Press <strong>🔄 Load Data</strong> above to fetch documents.
+          <br />Nothing loads automatically — this saves Railway usage and mobile data.
+        </div>
+      ) : (
+        <div className="adm-xl-table-wrap">
+          <table className="adm-xl-table">
+            <thead><tr>{cols.map(c => <th key={c}>{c}</th>)}</tr></thead>
+            <tbody>
+              {rows.length === 0 ? (
+                <tr><td colSpan={cols.length} className="adm-eff-empty">No data for this filter</td></tr>
+              ) : rows.map(d => (
+                <tr key={d.id}>
+                  {cols.map(c => (
+                    <td key={c}>{renderCellValue(d, c)}</td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }
