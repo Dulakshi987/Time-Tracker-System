@@ -1,4 +1,3 @@
-// src/main/java/com/dto/IssueDeliveryPageResponse.java
 package com.dto;
 
 import com.entity.Issue;
