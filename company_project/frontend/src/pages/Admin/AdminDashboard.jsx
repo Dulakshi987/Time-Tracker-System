@@ -524,9 +524,24 @@ function FilterBar({
   operator, setOperator, operators,
   division, setDivision, divisions,
   jobType, setJobType, jobTypeOptions,
+  onLoadData, loading,
 }) {
   return (
     <div className="adm-filterbar">
+      {/* Manual refresh — this is the ONLY thing that re-fetches dashboard
+          data now. Placed right here (not just in the top bar) so it's
+          always visible on screen, next to the range buttons, and never
+          gets pushed off to the right on narrower screens. */}
+      <button
+        type="button"
+        onClick={onLoadData}
+        disabled={loading}
+        className="adm-range-btn"
+        style={{ background: "#0b63ce", color: "#fff", borderColor: "#0b63ce", opacity: loading ? 0.6 : 1 }}
+      >
+        <Icon.refresh /> {loading ? "Loading…" : "Load Data"}
+      </button>
+
       {RANGE_OPTIONS.map(opt => (
         <button
           key={opt.key}
@@ -700,7 +715,6 @@ function StaffPanel() {
 
   const load = useCallback(() => { apiGet("/staff").then(setRows).catch(e => setErr(e.message)); }, []);
   // Loads once when this panel first mounts. No interval — press "Load Data" to refresh.
-  useEffect(() => { load(); }, [load]);
 
   const submit = async () => {
     if (!name.trim()) return;
@@ -815,7 +829,6 @@ function UserAccountsPanel() {
     apiGet("/divisions").then(list => setDivisions(scopeDivisionsForCurrentUser(list))).catch(() => {});
     apiGet("/users").then(setRows).catch(e => setErr(e.message));
   }, []);
-  useEffect(() => { load(); }, [load]);
 
   const divisionNameByNo = useMemo(() => {
     const map = {};
@@ -910,7 +923,6 @@ function DivisionPanel() {
   const [err, setErr] = useState(null);
 
   const load = useCallback(() => { apiGet("/divisions").then(setRows).catch(e => setErr(e.message)); }, []);
-  useEffect(() => { load(); }, [load]);
 
   const submit = async () => {
     try {
@@ -957,7 +969,6 @@ function OperatorPanel({ tabKey }) {
     apiGet(cfg.path).then(setRows).catch(e => setErr(e.message));
     apiGet("/divisions").then(setDivisions).catch(() => {});
   }, [cfg.path]);
-  useEffect(() => { load(); }, [load]);
 
   const divisionNameByNo = useMemo(() => {
     const map = {};
@@ -1027,7 +1038,6 @@ function JobCategoryPanel() {
     apiGet("/divisions").then(list => setDivisions(list.map(d => d.divisionName)));
     apiGet("/job-categories").then(setRows).catch(e => setErr(e.message));
   }, []);
-  useEffect(() => { load(); }, [load]);
 
   const submit = async () => {
     try {
@@ -1070,7 +1080,6 @@ function FileNumberPanel() {
   const [err, setErr] = useState(null);
 
   const load = useCallback(() => { apiGet("/file-numbers").then(setRows).catch(e => setErr(e.message)); }, []);
-  useEffect(() => { load(); }, [load]);
 
   const submit = async () => {
     try {
@@ -1433,8 +1442,12 @@ export default function AdminDashboard() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   const [documents, setDocuments]   = useState([]);
-  const [loading, setLoading]       = useState(true);
+  const [loading, setLoading]       = useState(false);
   const [error, setError]           = useState(null);
+  // Set to true only after the first successful/failed fetch triggered by
+  // pressing "Load Data" — used to tell "haven't loaded yet" apart from
+  // "loaded, and there's genuinely nothing to show".
+  const [hasFetchedOnce, setHasFetchedOnce] = useState(false);
 
   const [range, setRange]       = useState("TODAY");
   const [fromDate, setFromDate] = useState("");
@@ -1498,6 +1511,7 @@ export default function AdminDashboard() {
       setError(err.message);
     } finally {
       setLoading(false);
+      setHasFetchedOnce(true);
     }
   }, []);
 
@@ -1515,23 +1529,19 @@ export default function AdminDashboard() {
     } catch (e) { /* non-fatal */ }
   }, []);
 
-  // ── Manual "Load Data" — this is now the ONLY way (besides the very
-  // first load when the page opens) that documents/divisions/job
-  // categories get re-fetched from the Railway backend. There is no
-  // setInterval / auto-polling anywhere in this component anymore, which
-  // is what was driving up Railway request usage and mobile data usage.
+  // ── Manual "Load Data" — this is now the ONLY thing anywhere in this
+  // component that talks to the backend. There is no useEffect firing on
+  // mount, no setInterval polling — the very first request to Railway
+  // only happens once the user presses "🔄 Load Data". Before that,
+  // documents/divisions/jobCategories stay empty and nothing is fetched
+  // at all, so opening the page costs zero backend/data usage.
   const handleLoadData = useCallback(() => {
     fetchDocuments(false);
     fetchDivisions();
     fetchJobCategories();
   }, [fetchDocuments, fetchDivisions, fetchJobCategories]);
 
-  useEffect(() => { fetchDocuments(false); }, [fetchDocuments]);
-
-  useEffect(() => {
-    fetchDivisions();
-    fetchJobCategories();
-  }, [fetchDivisions, fetchJobCategories]);
+  const hasLoadedOnce = hasFetchedOnce;
 
   // Base data set for every view below — filtered down to only the
   // divisions this user is allowed to see.
@@ -1612,6 +1622,8 @@ export default function AdminDashboard() {
               divisions={visibleDivisionsList}
               jobType={jobType} setJobType={setJobType}
               jobTypeOptions={jobTypeOptionsForDivision}
+              onLoadData={handleLoadData}
+              loading={loading}
             />
 
             {loading && <div className="adm-loading">Loading dashboard…</div>}
@@ -1620,7 +1632,13 @@ export default function AdminDashboard() {
                 ⚠ {error} — <button onClick={() => fetchDocuments(false)}>retry</button>
               </div>
             )}
-            {!loading && !error && (
+            {!loading && !error && !hasLoadedOnce && (
+              <div className="adm-loading" style={{ textAlign: "center", padding: "40px 16px" }}>
+                No data loaded yet. Press <strong>🔄 Load Data</strong> above to fetch the dashboard.
+                <br />Nothing loads automatically — this saves Railway usage and mobile data.
+              </div>
+            )}
+            {!loading && !error && hasLoadedOnce && (
               <DashboardPanel
                 documents={filtered}
                 jobCategories={jobCategories}
