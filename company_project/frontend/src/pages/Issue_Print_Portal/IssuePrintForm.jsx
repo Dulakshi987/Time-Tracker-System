@@ -476,122 +476,122 @@ export default function IssuPrinFormt() {
   const [activeId, setActiveId] = useState(null);
   const [editValues, setEditValues] = useState({ documentNo: "", printedBy: "" });
 
-const abortRef = useRef(null);
+  const abortRef = useRef(null);
 
-const fetchDocuments = useCallback(async (silent = false, force = false) => {
-  const params = new URLSearchParams();
+  const fetchDocuments = useCallback(async (silent = false, force = false) => {
+    const params = new URLSearchParams();
 
-  if (dateFilterMode === "TODAY") {
-    const today = getSriLankaTodayKey();
-    params.set("from", today);
-    params.set("to", today);
-  } else if (dateFilterMode === "CUSTOM") {
-    if (fromDate) params.set("from", fromDate);
-    if (toDate) params.set("to", toDate);
-  }
-  if (filterType !== "ALL") params.set("jobType", filterType);
-  if (filterStatus !== "ALL") params.set("status", filterStatus);
-  if (search.trim()) params.set("search", search.trim());
-  if (!isAdminRole && user?.divisions?.length) {
-    params.set("divisions", user.divisions.join(","));
-  }
-  params.set("page", String(page));
-  params.set("size", String(PAGE_SIZE));
+    if (dateFilterMode === "TODAY") {
+      const today = getSriLankaTodayKey();
+      params.set("from", today);
+      params.set("to", today);
+    } else if (dateFilterMode === "CUSTOM") {
+      if (fromDate) params.set("from", fromDate);
+      if (toDate) params.set("to", toDate);
+    }
+    if (filterType !== "ALL") params.set("jobType", filterType);
+    if (filterStatus !== "ALL") params.set("status", filterStatus);
+    if (search.trim()) params.set("search", search.trim());
+    if (!isAdminRole && user?.divisions?.length) {
+      params.set("divisions", user.divisions.join(","));
+    }
+    params.set("page", String(page));
+    params.set("size", String(PAGE_SIZE));
 
-  const cacheKey = `ip_documents_${params.toString()}`;
+    const cacheKey = `ip_documents_${params.toString()}`;
 
-  // Cache hit — reuse without hitting the network at all, UNLESS the
-  // caller explicitly forced a refresh (Refresh button).
-  if (!force) {
-    const cached = readCache(cacheKey);
-    if (cached) {
-      setDocuments(cached.documents || []);
-      setTotalPages(cached.totalPages || 0);
-      setTotalElements(cached.totalElements || 0);
-      setStatsFromServer(cached.stats || { total: 0, pending: 0, inProgress: 0, onHold: 0, completed: 0 });
-      setLastUpdated(cached.lastUpdated ? new Date(cached.lastUpdated) : null);
+    // Cache hit — reuse without hitting the network at all, UNLESS the
+    // caller explicitly forced a refresh (Refresh button).
+    if (!force) {
+      const cached = readCache(cacheKey);
+      if (cached) {
+        setDocuments(cached.documents || []);
+        setTotalPages(cached.totalPages || 0);
+        setTotalElements(cached.totalElements || 0);
+        setStatsFromServer(cached.stats || { total: 0, pending: 0, inProgress: 0, onHold: 0, completed: 0 });
+        setLastUpdated(cached.lastUpdated ? new Date(cached.lastUpdated) : null);
+        setLoading(false);
+        return;
+      }
+    }
+
+    if (!silent) setLoading(true);
+    else setRefreshing(true);
+    setError(null);
+
+    // Abort any in-flight request from before (e.g. tab was hidden mid-request)
+    if (abortRef.current) abortRef.current.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+
+    try {
+      const res = await fetch(`${API_BASE}/search?${params.toString()}`, { signal: controller.signal });
+      if (!res.ok) throw new Error(`Server error: ${res.status}`);
+      const data = await res.json();
+
+      const stats = {
+        total: data.stats?.total || 0,
+        pending: data.stats?.pending || 0,
+        inProgress: data.stats?.inProgress || 0,
+        onHold: data.stats?.onHold || 0,
+        completed: data.stats?.completed || 0,
+      };
+      const now = new Date();
+
+      setDocuments(data.content || []);
+      setTotalPages(data.totalPages || 0);
+      setTotalElements(data.totalElements || 0);
+      setStatsFromServer(stats);
+      setLastUpdated(now);
+
+      writeCache(cacheKey, {
+        documents: data.content || [],
+        totalPages: data.totalPages || 0,
+        totalElements: data.totalElements || 0,
+        stats,
+        lastUpdated: now.toISOString(),
+      });
+    } catch (err) {
+      if (err.name !== "AbortError") setError(err.message);
+    } finally {
       setLoading(false);
-      return;
+      setRefreshing(false);
     }
-  }
+  }, [dateFilterMode, fromDate, toDate, filterType, filterStatus, search, page, isAdminRole, user]);
 
-  if (!silent) setLoading(true);
-  else setRefreshing(true);
-  setError(null);
-
-  // Abort any in-flight request from before (e.g. tab was hidden mid-request)
-  if (abortRef.current) abortRef.current.abort();
-  const controller = new AbortController();
-  abortRef.current = controller;
-
-  try {
-    const res = await fetch(`${API_BASE}/search?${params.toString()}`, { signal: controller.signal });
-    if (!res.ok) throw new Error(`Server error: ${res.status}`);
-    const data = await res.json();
-
-    const stats = {
-      total: data.stats?.total || 0,
-      pending: data.stats?.pending || 0,
-      inProgress: data.stats?.inProgress || 0,
-      onHold: data.stats?.onHold || 0,
-      completed: data.stats?.completed || 0,
-    };
-    const now = new Date();
-
-    setDocuments(data.content || []);
-    setTotalPages(data.totalPages || 0);
-    setTotalElements(data.totalElements || 0);
-    setStatsFromServer(stats);
-    setLastUpdated(now);
-
-    writeCache(cacheKey, {
-      documents: data.content || [],
-      totalPages: data.totalPages || 0,
-      totalElements: data.totalElements || 0,
-      stats,
-      lastUpdated: now.toISOString(),
-    });
-  } catch (err) {
-    if (err.name !== "AbortError") setError(err.message);
-  } finally {
-    setLoading(false);
-    setRefreshing(false);
-  }
-}, [dateFilterMode, fromDate, toDate, filterType, filterStatus, search, page, isAdminRole, user]);
-
- const fetchDivisions = useCallback(async (force = false) => {
-  if (!force) {
-    const cached = readCache("ip_divisions");
-    if (cached) { setDivisions(cached); return; }
-  }
-  try {
-    const res = await fetch(`${SETUP_API}/divisions`);
-    if (res.ok) {
-      const data = await res.json();
-      setDivisions(data || []);
-      writeCache("ip_divisions", data || []);
+  const fetchDivisions = useCallback(async (force = false) => {
+    if (!force) {
+      const cached = readCache("ip_divisions");
+      if (cached) { setDivisions(cached); return; }
     }
-  } catch (e) {
-    console.warn("Failed to load divisions", e);
-  }
-}, []);
-
-const fetchJobTypes = useCallback(async (force = false) => {
-  if (!force) {
-    const cached = readCache("ip_job_types");
-    if (cached) { setAllJobTypes(cached); return; }
-  }
-  try {
-    const res = await fetch(`${API_BASE}/job-types`);
-    if (res.ok) {
-      const data = await res.json();
-      setAllJobTypes(data || []);
-      writeCache("ip_job_types", data || []);
+    try {
+      const res = await fetch(`${SETUP_API}/divisions`);
+      if (res.ok) {
+        const data = await res.json();
+        setDivisions(data || []);
+        writeCache("ip_divisions", data || []);
+      }
+    } catch (e) {
+      console.warn("Failed to load divisions", e);
     }
-  } catch (e) {
-    console.warn("Failed to load job types", e);
-  }
-}, []);
+  }, []);
+
+  const fetchJobTypes = useCallback(async (force = false) => {
+    if (!force) {
+      const cached = readCache("ip_job_types");
+      if (cached) { setAllJobTypes(cached); return; }
+    }
+    try {
+      const res = await fetch(`${API_BASE}/job-types`);
+      if (res.ok) {
+        const data = await res.json();
+        setAllJobTypes(data || []);
+        writeCache("ip_job_types", data || []);
+      }
+    } catch (e) {
+      console.warn("Failed to load job types", e);
+    }
+  }, []);
 
   const divisionNoToName = useMemo(() => {
     const map = {};
@@ -667,14 +667,14 @@ const fetchJobTypes = useCallback(async (force = false) => {
   }, [fetchDivisions, fetchJobTypes]);
 
   useEffect(() => {
-  const handleVisibility = () => {
-    if (document.hidden && abortRef.current) {
-      abortRef.current.abort();
-    }
-  };
-  document.addEventListener("visibilitychange", handleVisibility);
-  return () => document.removeEventListener("visibilitychange", handleVisibility);
-}, []);
+    const handleVisibility = () => {
+      if (document.hidden && abortRef.current) {
+        abortRef.current.abort();
+      }
+    };
+    document.addEventListener("visibilitychange", handleVisibility);
+    return () => document.removeEventListener("visibilitychange", handleVisibility);
+  }, []);
 
   // Any filter/search/date change should reset back to page 0 — otherwise
   // you could land on a page that no longer exists for the new filter.
@@ -710,18 +710,18 @@ const fetchJobTypes = useCallback(async (force = false) => {
   };
 
   const handleStart = async (id) => {
-  if (!perms.start) return;
-  try {
-    const res = await fetch(`${API_BASE}/${id}/start`, { method: "PUT" });
-    if (!res.ok) {
-      const text = await res.text().catch(() => "");
-      throw new Error(`Server returned ${res.status}${text ? ": " + text : ""}`);
+    if (!perms.start) return;
+    try {
+      const res = await fetch(`${API_BASE}/${id}/start`, { method: "PUT" });
+      if (!res.ok) {
+        const text = await res.text().catch(() => "");
+        throw new Error(`Server returned ${res.status}${text ? ": " + text : ""}`);
+      }
+      fetchDocuments(true, true);
+    } catch (err) {
+      alert("Start failed: " + err.message);
     }
-    fetchDocuments(true, true);
-  } catch (err) {
-    alert("Start failed: " + err.message);
-  }
-};
+  };
 
   const handleHoldClick = async (id) => {
     if (!perms.hold) return;
@@ -759,57 +759,45 @@ const fetchJobTypes = useCallback(async (force = false) => {
   };
 
   // Delete — removes the document entirely
-  // const handleDeleteClick = async (id) => {
-  //   if (!perms.delete) return;
-  //   if (!window.confirm("Delete this document permanently? This cannot be undone.")) return;
-  //   try {
-  //     const res = await fetch(`${API_BASE}/${id}`, { method: "DELETE" });
-  //     if (!res.ok) throw new Error(`Server error: ${res.status}`);
-  //     fetchDocuments(true);
-  //   } catch (err) {
-  //     alert("Delete failed: " + err.message);
-  //   }
-  // };
+  const handleDeleteClick = async (id) => {
+    if (!perms.delete) return;
+    if (!window.confirm("Delete this document permanently? This cannot be undone.")) return;
+    try {
+      const res = await fetch(`${API_BASE}/${id}`, { method: "DELETE" });
+      if (!res.ok) throw new Error(`Server error: ${res.status}`);
+      fetchDocuments(true, true);
+    } catch (err) {
+      alert("Delete failed: " + err.message);
+    }
+  };
 
-  cconst handleHoldConfirm = async (holdReason, heldBy) => {
-  const id = activeId;
-  closePopup();
-  try {
-    const res = await fetch(`${API_BASE}/${id}/hold`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ holdReason, heldBy }),
-    });
-    if (!res.ok) throw new Error(`Server returned ${res.status}`);
-    fetchDocuments(true, true);
-  } catch (err) { alert("Hold failed: " + err.message); }
-};
+  const handleHoldConfirm = async (holdReason, heldBy) => {
+    const id = activeId;
+    closePopup();
+    try {
+      const res = await fetch(`${API_BASE}/${id}/hold`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ holdReason, heldBy }),
+      });
+      if (!res.ok) throw new Error(`Server returned ${res.status}`);
+      fetchDocuments(true, true);
+    } catch (err) { alert("Hold failed: " + err.message); }
+  };
 
-const handlePrintDoneConfirm = async (printDocumentNo, printedBy) => {
-  const id = activeId;
-  closePopup();
-  try {
-    const res = await fetch(`${API_BASE}/${id}/end`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ printDocumentNo, printedBy }),
-    });
-    if (!res.ok) throw new Error(`Server returned ${res.status}`);
-    fetchDocuments(true, true);
-  } catch (err) { alert("Print Done failed: " + err.message); }
-};
-
-const handleDeleteClick = async (id) => {
-  if (!perms.delete) return;
-  if (!window.confirm("Delete this document permanently? This cannot be undone.")) return;
-  try {
-    const res = await fetch(`${API_BASE}/${id}`, { method: "DELETE" });
-    if (!res.ok) throw new Error(`Server error: ${res.status}`);
-    fetchDocuments(true, true);
-  } catch (err) {
-    alert("Delete failed: " + err.message);
-  }
-};
+  const handlePrintDoneConfirm = async (printDocumentNo, printedBy) => {
+    const id = activeId;
+    closePopup();
+    try {
+      const res = await fetch(`${API_BASE}/${id}/end`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ printDocumentNo, printedBy }),
+      });
+      if (!res.ok) throw new Error(`Server returned ${res.status}`);
+      fetchDocuments(true, true);
+    } catch (err) { alert("Print Done failed: " + err.message); }
+  };
 
   // documents already come back filtered, division-scoped, paged, and
   // with requestId attached from the server — nothing left to compute here.
@@ -891,7 +879,8 @@ const handleDeleteClick = async (id) => {
           <button
             className="ip-btn ip-btn-outline"
             style={{ flex: "unset", padding: "8px 18px" }}
-             onClick={() => fetchDocuments(false, true)}          >
+            onClick={() => fetchDocuments(false, true)}
+          >
             ↻ Refresh
           </button>
           {!isAdminRole && (
@@ -1013,7 +1002,7 @@ const handleDeleteClick = async (id) => {
 
       {error && (
         <div style={{ background: "rgba(239,68,68,0.08)", border: "1px solid #ef4444", borderRadius: 8, padding: "12px 16px", color: "#b91c1c", marginBottom: 18 }}>
-          ⚠ {error} — <button onClick={() => fetchDocuments(false)} style={{ color: "#1d4ed8", textDecoration: "underline" }}>retry</button>
+          ⚠ {error} — <button onClick={() => fetchDocuments(false, true)} style={{ color: "#1d4ed8", textDecoration: "underline" }}>retry</button>
         </div>
       )}
 
