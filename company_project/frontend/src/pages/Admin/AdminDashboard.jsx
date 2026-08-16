@@ -22,7 +22,12 @@ import { formatSriLankaTime } from "../../utils/dateUtils";
 // const SETUP_API    = "http://localhost:8080/api/admin-setup";
 const MASTER_API   = "https://time-tracker-system-production.up.railway.app/api/print-portal";
 const SETUP_API    = "https://time-tracker-system-production.up.railway.app/api/admin-setup";
-const AUTO_REFRESH = 1000;
+// NOTE: Auto-refresh (setInterval polling) has been removed everywhere in
+// this file on purpose — it was hitting the Railway backend once every
+// second per open tab, which burns through Railway usage and mobile data
+// for no reason. Every panel now loads data ONCE on mount, and again only
+// when the user explicitly presses a "🔄 Load Data" button. Nothing here
+// refreshes itself automatically anymore.
 
 // ── Generic helpers ──────────────────────────────────────────────────────
 
@@ -439,6 +444,9 @@ const Icon = {
   logout: (p) => (
     <svg {...ICON_PROPS} {...p}><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><path d="M16 17l5-5-5-5"/><path d="M21 12H9"/></svg>
   ),
+  refresh: (p) => (
+    <svg {...ICON_PROPS} {...p}><path d="M20 11A8 8 0 105.3 16.3M4 4v6h6"/></svg>
+  ),
 };
 
 // ── Sidebar ──────────────────────────────────────────────────────────────
@@ -673,6 +681,17 @@ function SetupTable({ rows, cols, onEdit, onDelete }) {
   );
 }
 
+// Small reusable "🔄 Load Data" button used across every Master Setup
+// panel now that nothing auto-refreshes. Pressing it is the ONLY way
+// (besides first opening the tab) that a panel re-fetches from the API.
+function LoadDataButton({ onClick }) {
+  return (
+    <button type="button" className="adm-xl-clear-btn" onClick={onClick}>
+      <Icon.refresh /> Load Data
+    </button>
+  );
+}
+
 function StaffPanel() {
   const [rows, setRows] = useState([]);
   const [name, setName] = useState("");
@@ -680,7 +699,8 @@ function StaffPanel() {
   const [err, setErr] = useState(null);
 
   const load = useCallback(() => { apiGet("/staff").then(setRows).catch(e => setErr(e.message)); }, []);
-  useEffect(() => { load(); const id = setInterval(load, AUTO_REFRESH); return () => clearInterval(id); }, [load]);
+  // Loads once when this panel first mounts. No interval — press "Load Data" to refresh.
+  useEffect(() => { load(); }, [load]);
 
   const submit = async () => {
     if (!name.trim()) return;
@@ -699,6 +719,7 @@ function StaffPanel() {
         <input className="adm-config-input" placeholder="Full name" value={name} onChange={e => setName(e.target.value)} />
         <button className="adm-config-add-btn" onClick={submit}>{editId ? "Update" : "+ Create"}</button>
         {editId && <button className="adm-xl-clear-btn" onClick={() => { setEditId(null); setName(""); }}>Cancel</button>}
+        <LoadDataButton onClick={load} />
       </div>
       <SetupTable
         rows={rows}
@@ -794,7 +815,7 @@ function UserAccountsPanel() {
     apiGet("/divisions").then(list => setDivisions(scopeDivisionsForCurrentUser(list))).catch(() => {});
     apiGet("/users").then(setRows).catch(e => setErr(e.message));
   }, []);
-  useEffect(() => { load(); const id = setInterval(load, AUTO_REFRESH); return () => clearInterval(id); }, [load]);
+  useEffect(() => { load(); }, [load]);
 
   const divisionNameByNo = useMemo(() => {
     const map = {};
@@ -855,6 +876,7 @@ function UserAccountsPanel() {
         <button className="adm-config-add-btn" onClick={submit}>{editId ? "Update Account" : "+ Create Account"}</button>
         {editId && <button className="adm-xl-clear-btn" onClick={() => { setEditId(null); setForm({ staffName: "", fullName: "", nic: "", username: "", password: "", confirmPassword: "", divisionNo: "" }); }}>Cancel</button>}
         <button className="adm-setup-forgot-btn" onClick={() => setShowForgot(s => !s)}>Forgot Password?</button>
+        <LoadDataButton onClick={load} />
       </div>
 
       {showForgot && (
@@ -888,7 +910,7 @@ function DivisionPanel() {
   const [err, setErr] = useState(null);
 
   const load = useCallback(() => { apiGet("/divisions").then(setRows).catch(e => setErr(e.message)); }, []);
-  useEffect(() => { load(); const id = setInterval(load, AUTO_REFRESH); return () => clearInterval(id); }, [load]);
+  useEffect(() => { load(); }, [load]);
 
   const submit = async () => {
     try {
@@ -910,6 +932,7 @@ function DivisionPanel() {
       <div className="adm-setup-form-row">
         <button className="adm-config-add-btn" onClick={submit}>{editId ? "Update" : "+ Create"}</button>
         {editId && <button className="adm-xl-clear-btn" onClick={() => { setEditId(null); setForm({ divisionName: "", divisionNo: "", divisionHead: "" }); }}>Cancel</button>}
+        <LoadDataButton onClick={load} />
       </div>
       <SetupTable
         rows={rows}
@@ -934,7 +957,7 @@ function OperatorPanel({ tabKey }) {
     apiGet(cfg.path).then(setRows).catch(e => setErr(e.message));
     apiGet("/divisions").then(setDivisions).catch(() => {});
   }, [cfg.path]);
-  useEffect(() => { load(); const id = setInterval(load, AUTO_REFRESH); return () => clearInterval(id); }, [load]);
+  useEffect(() => { load(); }, [load]);
 
   const divisionNameByNo = useMemo(() => {
     const map = {};
@@ -978,6 +1001,7 @@ function OperatorPanel({ tabKey }) {
       <div className="adm-setup-form-row">
         <button className="adm-config-add-btn" onClick={submit}>{editId ? "Update" : "+ Create"}</button>
         {editId && <button className="adm-xl-clear-btn" onClick={() => { setEditId(null); setForm({ name: "", nic: "", nicName: "", divisionNo: "" }); }}>Cancel</button>}
+        <LoadDataButton onClick={load} />
       </div>
       <SetupTable
         rows={displayRows}
@@ -1003,7 +1027,7 @@ function JobCategoryPanel() {
     apiGet("/divisions").then(list => setDivisions(list.map(d => d.divisionName)));
     apiGet("/job-categories").then(setRows).catch(e => setErr(e.message));
   }, []);
-  useEffect(() => { load(); const id = setInterval(load, AUTO_REFRESH); return () => clearInterval(id); }, [load]);
+  useEffect(() => { load(); }, [load]);
 
   const submit = async () => {
     try {
@@ -1027,6 +1051,7 @@ function JobCategoryPanel() {
       <div className="adm-setup-form-row">
         <button className="adm-config-add-btn" onClick={submit}>{editId ? "Update" : "+ Save"}</button>
         {editId && <button className="adm-xl-clear-btn" onClick={() => { setEditId(null); setForm({ categoryName: "", divisionName: "" }); }}>Cancel</button>}
+        <LoadDataButton onClick={load} />
       </div>
       <SetupTable
         rows={rows}
@@ -1045,7 +1070,7 @@ function FileNumberPanel() {
   const [err, setErr] = useState(null);
 
   const load = useCallback(() => { apiGet("/file-numbers").then(setRows).catch(e => setErr(e.message)); }, []);
-  useEffect(() => { load(); const id = setInterval(load, AUTO_REFRESH); return () => clearInterval(id); }, [load]);
+  useEffect(() => { load(); }, [load]);
 
   const submit = async () => {
     try {
@@ -1070,6 +1095,7 @@ function FileNumberPanel() {
       <div className="adm-setup-form-row">
         <button className="adm-config-add-btn" onClick={submit}>{editId ? "Update" : "+ Create"}</button>
         {editId && <button className="adm-xl-clear-btn" onClick={() => { setEditId(null); setForm({ fileNo: "", fromDate: "", toDate: "", active: false }); }}>Cancel</button>}
+        <LoadDataButton onClick={load} />
       </div>
       <SetupTable
         rows={rows.map(r => ({ ...r, activeLabel: r.active ? "✅ Active" : "—" }))}
@@ -1086,7 +1112,7 @@ function MasterSetupPanel() {
   return (
     <div>
       <h2 className="adm-title">Master Setup</h2>
-      <p className="adm-subtitle">All 10 sections below save straight to the database and update in real time.</p>
+      <p className="adm-subtitle">All 10 sections below save straight to the database. Each section loads once when you open its tab — press "🔄 Load Data" any time to refresh it.</p>
 
       <div className="adm-setup-tabrow">
         {SETUP_TABS.map(t => (
@@ -1346,7 +1372,7 @@ function DashboardPanel({ documents, jobCategories, divisionsList, division, job
     <div>
       <h2 className="adm-title">Fentons Operation Efficiency Dashboard</h2>
       <p className="adm-subtitle">
-        Live view, recalculates automatically as documents update.
+        Press "🔄 Load Data" (top bar) to refresh — this view no longer updates on its own.
         {scopeLabel && <> — filtered to <strong>{scopeLabel}</strong></>}
       </p>
 
@@ -1489,17 +1515,22 @@ export default function AdminDashboard() {
     } catch (e) { /* non-fatal */ }
   }, []);
 
+  // ── Manual "Load Data" — this is now the ONLY way (besides the very
+  // first load when the page opens) that documents/divisions/job
+  // categories get re-fetched from the Railway backend. There is no
+  // setInterval / auto-polling anywhere in this component anymore, which
+  // is what was driving up Railway request usage and mobile data usage.
+  const handleLoadData = useCallback(() => {
+    fetchDocuments(false);
+    fetchDivisions();
+    fetchJobCategories();
+  }, [fetchDocuments, fetchDivisions, fetchJobCategories]);
+
   useEffect(() => { fetchDocuments(false); }, [fetchDocuments]);
-  useEffect(() => {
-    const id = setInterval(() => fetchDocuments(true), AUTO_REFRESH);
-    return () => clearInterval(id);
-  }, [fetchDocuments]);
 
   useEffect(() => {
     fetchDivisions();
     fetchJobCategories();
-    const id = setInterval(() => { fetchDivisions(); fetchJobCategories(); }, AUTO_REFRESH * 5);
-    return () => clearInterval(id);
   }, [fetchDivisions, fetchJobCategories]);
 
   // Base data set for every view below — filtered down to only the
@@ -1559,6 +1590,14 @@ export default function AdminDashboard() {
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
           </button>
           <span className="adm-topbar-label">{activeLabel}</span>
+          <button
+            className="adm-xl-export-btn"
+            style={{ marginLeft: "auto" }}
+            onClick={handleLoadData}
+            title="Manually refresh documents, divisions & job categories — nothing here auto-refreshes anymore"
+          >
+            <Icon.refresh /> Load Data
+          </button>
         </div>
 
         {activeView === "dashboard" && (
