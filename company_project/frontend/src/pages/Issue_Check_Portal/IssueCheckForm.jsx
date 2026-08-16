@@ -1110,11 +1110,31 @@ export default function IssueCheckForm() {
   const [lastUpdated,  setLastUpdated]  = useState(null);
   const [refreshing,   setRefreshing]   = useState(false);
 
-  // ── Grid pagination — 10 cards per page. Purely client-side since the
-  // grid is built from `documents` after search/type/status/date filters
-  // are already applied below. Reset back to page 1 whenever any filter
-  // changes so the user never lands on a now-empty page.
-  const [currentPage, setCurrentPage] = useState(1);
+  // ── Grid pagination — 10 cards per page, done server-side by
+  // GET /api/check-portal/search (page/size params). `documents` always
+  // holds just the current page's content; totalPages/totalElements come
+  // straight from the server response. Reset back to page 1 whenever any
+  // filter changes so the user never lands on a now-empty page.
+  const [currentPage,   setCurrentPage]   = useState(1);
+  const [totalPages,    setTotalPages]    = useState(1);
+  const [totalElements, setTotalElements] = useState(0);
+
+  // Stat-chip counts — from data.stats in the /search response. Scoped by
+  // date + division (same as the grid) but computed BEFORE the jobType/
+  // status/search filters, so these always reflect the full date range
+  // regardless of which status chip is currently selected.
+  const [stats, setStats] = useState({ total: 0, pending: 0, inProgress: 0, onHold: 0, completed: 0 });
+
+  // Picking-error alert banners — a small, dedicated payload from
+  // GET /api/check-portal/alerts, independent of the current page/filters,
+  // so the red/green banners stay accurate even when the flagged document
+  // isn't on the page currently being viewed.
+  const [alertDocs, setAlertDocs] = useState([]);
+
+  // Full distinct job-type list for the dropdown — from
+  // GET /api/check-portal/job-types, since `documents` only holds the
+  // current page and can't be used to build a complete dropdown.
+  const [allJobTypes, setAllJobTypes] = useState([]);
 
   // ── Date filter — defaults to "Today" (Sri Lanka time). "All" clears
   // it, "Custom" opens a From/To range. Recomputes on every render so at
@@ -1177,28 +1197,52 @@ export default function IssueCheckForm() {
   };
 
   // ── Fetch documents ──
-  // Fetches the FULL matching set once; search/type/status/date filtering
-  // and pagination all happen client-side below (see `visible` /
-  // `paginatedVisible`), so this must NOT be server-paginated.
+  // GET /api/check-portal/search — server-side filtering, pagination, and
+  // stats. Only sends `divisions` when the logged-in role is scoped to
+  // specific divisions (Admin / System Administrator see everything, so
+  // no divisions param is sent for them — matches hasAllDivisionAccess
+  // everywhere else in the app).
   const fetchDocuments = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
     else setRefreshing(true);
     setError(null);
     try {
-      const res = await fetch(`${API_BASE}/ready-for-check`); // TODO: confirm this matches your backend route
+      const params = new URLSearchParams();
+
+      if (dateFilterMode === "TODAY") {
+        const today = getSriLankaTodayKey();
+        params.set("from", today);
+        params.set("to", today);
+      } else if (dateFilterMode === "CUSTOM") {
+        if (fromDate) params.set("from", fromDate);
+        if (toDate) params.set("to", toDate);
+      }
+      if (filterType !== "ALL") params.set("jobType", filterType);
+      if (filterStatus !== "ALL") params.set("status", filterStatus);
+      if (search.trim()) params.set("search", search.trim());
+      if (!hasAllDivisionAccess(currentUser) && currentUser?.divisions?.length) {
+        params.set("divisions", currentUser.divisions.join(","));
+      }
+      params.set("page", String(currentPage - 1)); // backend is 0-indexed
+      params.set("size", String(ITEMS_PER_PAGE));
+
+      const res = await fetch(`${API_BASE}/search?${params.toString()}`);
       if (!res.ok) throw new Error(`Server error: ${res.status}`);
-      const readyForCheck = await res.json();
+      const data = await res.json();
 
-      // ── Division scoping ──────────────────────────────────────────────
-      // Admin / System Administrator (allDivisions: true) see everything.
-      // Every other role (Checker included) is hard-scoped to only the
-      // division(s) assigned to their User Account in Master Setup — same
-      // rule AdminDashboard already uses.
-      const divisionScoped = hasAllDivisionAccess(currentUser)
-        ? readyForCheck
-        : readyForCheck.filter(d => canSeeDivision(currentUser, d.divisionNo));
-
-      setDocuments(divisionScoped);
+      setDocuments(data.content || []);
+      setTotalPages(data.totalPages || 1);
+      // NOTE: field name for the overall filtered record count wasn't
+      // confirmed against IssuePrintPageResponse's actual getters — this
+      // tries the common names and falls back to the current page size.
+      setTotalElements(data.totalElements ?? data.total ?? (data.content ? data.content.length : 0));
+      setStats({
+        total:      data.stats?.total ?? 0,
+        pending:    data.stats?.pending ?? 0,
+        inProgress: data.stats?.inProgress ?? 0,
+        onHold:     data.stats?.onHold ?? 0,
+        completed:  data.stats?.completed ?? 0,
+      });
       setLastUpdated(new Date());
     } catch (err) {
       setError(err.message);
@@ -1206,7 +1250,34 @@ export default function IssueCheckForm() {
       setLoading(false);
       setRefreshing(false);
     }
+  }, [dateFilterMode, fromDate, toDate, filterType, filterStatus, search, currentPage, currentUser]);
+
+  // ── Fetch picking-error alert banners ──
+  // GET /api/check-portal/alerts — small dedicated payload of flagged,
+  // not-yet-completed documents, independent of the current page/filters.
+  const fetchAlerts = useCallback(async () => {
+    try {
+      const params = new URLSearchParams();
+      if (!hasAllDivisionAccess(currentUser) && currentUser?.divisions?.length) {
+        params.set("divisions", currentUser.divisions.join(","));
+      }
+      const res = await fetch(`${API_BASE}/alerts?${params.toString()}`);
+      if (res.ok) setAlertDocs(await res.json());
+    } catch (e) {
+      console.warn("Failed to load alerts", e);
+    }
   }, [currentUser]);
+
+  // ── Fetch full distinct job-type list for the dropdown ──
+  // GET /api/check-portal/job-types
+  const fetchJobTypes = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_BASE}/job-types`);
+      if (res.ok) setAllJobTypes(await res.json());
+    } catch (e) {
+      console.warn("Failed to load job types", e);
+    }
+  }, []);
 
   // ── Fetch divisions ──
   const fetchDivisions = useCallback(async () => {
@@ -1265,8 +1336,10 @@ export default function IssueCheckForm() {
   }, [fetchDocuments]);
 
   useEffect(() => {
+    fetchAlerts();
+    fetchJobTypes();
     fetchDivisions();
-  }, [fetchDivisions]);
+  }, [fetchAlerts, fetchJobTypes, fetchDivisions]);
 
   // Reset to page 1 whenever a filter changes, so the user never lands on
   // a page that's now out of range / empty.
@@ -1338,10 +1411,15 @@ export default function IssueCheckForm() {
     const id = activeId;
     closePopup();
     try {
+      // NOTE: CheckPortalController#hold() only reads "holdReason" off the
+      // request body (body.getOrDefault("holdReason", "")) — there is no
+      // "pickingErrorReason" key on that endpoint. Sending it under that
+      // name silently dropped it, so it's renamed to holdReason here to
+      // match what the backend actually persists (checkHoldReason).
       const res = await fetch(`${API_BASE}/${id}/hold`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ heldBy, hasWrongMaterial, wrongMaterialSku, wrongMaterialQty, pickingErrorReason }),
+        body: JSON.stringify({ heldBy, hasWrongMaterial, wrongMaterialSku, wrongMaterialQty, holdReason: pickingErrorReason }),
       });
       await assertOk(res, "Hold");
       fetchDocuments(true);
@@ -1394,22 +1472,34 @@ export default function IssueCheckForm() {
     }
   };
 
-  const requestIdMap = useMemo(() => computeRequestIds(documents), [documents]);
+  // Request ID display — the backend's search() sets doc.requestId on
+  // each Issue while building the full filtered/sorted list (before
+  // pagination), so it's already correct per the grouped-by-request-date
+  // scheme. alertDocs come from a separate endpoint that doesn't run
+  // through search(), so they won't carry requestId — fall back to the
+  // document's own id there.
+  const requestIdOf = (doc) => doc?.requestId || (doc?.id != null ? `#${doc.id}` : "—");
 
+  // requestIdMap covers both the current page and the alert docs, so the
+  // popups/banners below (which can reference either set) all resolve
+  // consistently through one lookup.
+  const requestIdMap = useMemo(() => {
+    const map = {};
+    [...documents, ...alertDocs].forEach(d => { map[d.id] = requestIdOf(d); });
+    return map;
+  }, [documents, alertDocs]);
+
+  // Active / resolved picking-error banners — driven by the dedicated
+  // /alerts endpoint (not the current page), so they stay accurate
+  // regardless of which page or filters the grid is currently showing.
   const activeErrorDocs = useMemo(
-    () => documents.filter(d => {
-      const isFlagged = (d.hasWrongMaterial || "").toUpperCase() === "YES";
-      return isFlagged && !d.emergencyPickResolved && statusClass(d.checkStatus) !== "completed";
-    }),
-    [documents]
+    () => alertDocs.filter(d => !d.emergencyPickResolved),
+    [alertDocs]
   );
 
   const resolvedErrorDocs = useMemo(
-    () => documents.filter(d => {
-      const isFlagged = (d.hasWrongMaterial || "").toUpperCase() === "YES";
-      return isFlagged && d.emergencyPickResolved && statusClass(d.checkStatus) !== "completed";
-    }),
-    [documents]
+    () => alertDocs.filter(d => d.emergencyPickResolved),
+    [alertDocs]
   );
 
   useEffect(() => {
@@ -1425,36 +1515,9 @@ export default function IssueCheckForm() {
     });
   }, [resolvedErrorDocs]);
 
-  // ── Filters ──
-  const jobTypes = ["ALL", ...new Set(documents.map(d => d.jobType).filter(Boolean))];
-
-  const visible = documents.filter(doc => {
-    const q = search.toLowerCase();
-    const matchSearch = !q || [
-      String(doc.id), doc.requestedBy, doc.jobwbs,
-      doc.reservationNo, doc.enteredBy, doc.jobType,
-    ].some(v => (v || "").toLowerCase().includes(q));
-
-    const matchType = filterType === "ALL" || doc.jobType === filterType;
-
-    // "Pending" is merged with unresolved picking errors — a flagged
-    // document that hasn't been re-picked yet counts as Pending even if its
-    // raw checkStatus is something else (e.g. ON_HOLD).
-    const docSc = statusClass(doc.checkStatus);
-    const isWrongMaterial = (doc.hasWrongMaterial || "").toUpperCase() === "YES";
-    const hasUnresolvedError = isWrongMaterial && !doc.emergencyPickResolved && docSc !== "completed";
-    const matchStatus =
-      filterStatus === "ALL" ? true :
-      filterStatus === "pending" ? (docSc === "pending" || hasUnresolvedError) :
-      docSc === filterStatus;
-
-    const matchDate = matchesDateFilter(doc, dateFilterMode, fromDate, toDate);
-
-    return matchSearch && matchType && matchStatus && matchDate;
-  });
-
-  // ── Pagination — slice the filtered `visible` list into pages of 10.
-  const totalPages = Math.max(1, Math.ceil(visible.length / ITEMS_PER_PAGE));
+  // Job-type dropdown — full list from /job-types, since `documents` only
+  // ever holds the current page and can't be used to build a complete set.
+  const jobTypes = ["ALL", ...allJobTypes];
 
   // Safety clamp — e.g. if a background refresh shrinks the result set
   // while the user is sitting on a later page.
@@ -1462,40 +1525,20 @@ export default function IssueCheckForm() {
     if (currentPage > totalPages) setCurrentPage(totalPages);
   }, [currentPage, totalPages]);
 
-  const paginatedVisible = useMemo(
-    () => visible.slice((currentPage - 1) * ITEMS_PER_PAGE, currentPage * ITEMS_PER_PAGE),
-    [visible, currentPage]
-  );
-
-  // Stats — scoped by the date filter too, so counts on screen always match
-  // what's actually shown in the grid below (e.g. "Today" only counts
-  // today's documents, not every document ever entered). Mirrors Print
-  // Portal / Pick Portal.
-  const dateScoped = useMemo(
-    () => documents.filter(doc => matchesDateFilter(doc, dateFilterMode, fromDate, toDate)),
-    [documents, dateFilterMode, fromDate, toDate]
-  );
-
-  const total     = dateScoped.length;
-  const inProg    = dateScoped.filter(d => statusClass(d.checkStatus) === "inprogress").length;
-  const onHold    = dateScoped.filter(d => statusClass(d.checkStatus) === "onhold").length;
-  const completed = dateScoped.filter(d => statusClass(d.checkStatus) === "completed").length;
-  const wrongCount = dateScoped.filter(d => (d.hasWrongMaterial || "").toUpperCase() === "YES").length;
-
-  // "Wrong Material" is merged into "Pending" — a document with an
-  // unresolved picking error is counted (and shown) under Pending rather
-  // than as a separate bucket.
-  const isPendingOrUnresolvedError = (d) => {
-    const sc = statusClass(d.checkStatus);
-    const isFlagged = (d.hasWrongMaterial || "").toUpperCase() === "YES";
-    const hasUnresolvedError = isFlagged && !d.emergencyPickResolved && sc !== "completed";
-    return sc === "pending" || hasUnresolvedError;
-  };
-  const pending = dateScoped.filter(isPendingOrUnresolvedError).length;
+  // Stat-chip counts come straight from the server (data.stats in
+  // fetchDocuments) — date + division scoped, computed before the
+  // jobType/status/search filters, same semantics the client-side version
+  // used to compute locally.
+  const { total, pending, inProgress: inProg, onHold, completed } = stats;
+  // Not provided as a discrete field by /search — approximated from the
+  // alert-banner payload (division-scoped, not date-scoped).
+  const wrongCount = alertDocs.length;
 
   const handleStatClick = (statusValue) => setFilterStatus(statusValue);
 
-  const viewingDoc = documents.find(d => d.id === activeId) || null;
+  const viewingDoc = documents.find(d => d.id === activeId)
+    || alertDocs.find(d => d.id === activeId)
+    || null;
   const viewingDivisionLabel = viewingDoc?.divisionNo
     ? `${viewingDoc.divisionNo} — ${divisionNoToName[viewingDoc.divisionNo] || ""}`
     : null;
@@ -1763,7 +1806,7 @@ export default function IssueCheckForm() {
           Check Done <strong>{completed}</strong>
         </button>
         <div className="ip-stat-chip">
-          Showing <strong style={{color:"#a78bfa"}}>{paginatedVisible.length}</strong> of {visible.length}
+          Showing <strong style={{color:"#a78bfa"}}>{documents.length}</strong> of {totalElements}
           {totalPages > 1 && (
             <span style={{ marginLeft: 6, color: "#7c8db0" }}>
               (Page {currentPage}/{totalPages})
@@ -1791,13 +1834,13 @@ export default function IssueCheckForm() {
       <div className="ip-grid">
         {loading ? (
           [1,2,3,4,5,6].map(i => <SkeletonCard key={i} />)
-        ) : visible.length === 0 ? (
+        ) : documents.length === 0 ? (
           <div className="ip-empty">
             <div className="ip-empty-icon">📭</div>
             <p>No documents found{search ? ` for "${search}"` : ""}.</p>
           </div>
         ) : (
-          paginatedVisible.map(doc => (
+          documents.map(doc => (
             <DocumentCard
               key={doc.id}
               doc={doc}
@@ -1826,7 +1869,7 @@ export default function IssueCheckForm() {
       </div>
 
       {/* ── Pagination controls — hidden when only 1 page ── */}
-      {!loading && visible.length > 0 && (
+      {!loading && documents.length > 0 && (
         <PaginationBar
           currentPage={currentPage}
           totalPages={totalPages}
