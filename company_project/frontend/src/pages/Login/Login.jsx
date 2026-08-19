@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import "./Login.css";
 import { getDefaultRoute } from "../../config/permissions";
 
@@ -9,12 +9,19 @@ const AUTH_API = "https://time-tracker-system-production.up.railway.app/api/auth
 
 export default function Login() {
   const navigate = useNavigate();
+  const location = useLocation();
 
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+
+  // Shown when useIdleLogout() redirected here after 10 min of inactivity.
+  const idleMessage =
+    location.state?.reason === "idle-timeout"
+      ? "You were logged out due to inactivity. Please sign in again."
+      : null;
 
   const submit = async (e) => {
     e.preventDefault();
@@ -69,6 +76,7 @@ export default function Login() {
         <div className="login-title">Fentons Admin</div>
         <div className="login-subtitle">Sign in to continue to the dashboard</div>
 
+        {idleMessage && <div className="login-error">⏱ {idleMessage}</div>}
         {error && <div className="login-error">⚠ {error}</div>}
 
         <form onSubmit={submit} className="login-form">

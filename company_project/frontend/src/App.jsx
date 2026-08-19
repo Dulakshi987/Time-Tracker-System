@@ -10,6 +10,7 @@ import AdminDashboard from "./pages/Admin/AdminDashboard";
 import DocumentForm from "./pages/Documents_Portal/DocumentForm";
 
 import { getCurrentUser, canAccessRoute, getDefaultRoute } from "./config/permissions";
+import useIdleLogout from "./hooks/useIdleLogout";
 
 // Blocks a route unless:
 //  1. someone is logged in (sessionStorage "fentons_user"), AND
@@ -31,6 +32,11 @@ function ProtectedRoute({ children, path }) {
 }
 
 function App() {
+  // Auto-logout after 10 minutes of inactivity, on any logged-in route.
+  // Must be called inside the Router (BrowserRouter wraps <App /> in
+  // main.jsx/index.js), which it is since App() runs inside that tree.
+  useIdleLogout();
+
   return (
     <Routes>
       <Route path="/" element={<Login />} />
