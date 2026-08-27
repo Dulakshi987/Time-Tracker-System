@@ -1073,15 +1073,58 @@ function JobCategoryPanel() {
   );
 }
 
+// ═══════════════════════════════════════════════════════════════════════
+// ── FILE NUMBER PANEL (bulk-enabled) ────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════
+
+function chunkArray(arr, size) {
+  const out = [];
+  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+  return out;
+}
+
+// Splits pasted text into a deduplicated list of file numbers — accepts
+// newline- or comma-separated input (or a mix of both), so pasting from a
+// spreadsheet column or a comma list both work.
+function parseFileNoList(text) {
+  return Array.from(
+    new Set(
+      text
+        .split(/[\n,]+/)
+        .map(s => s.trim())
+        .filter(Boolean)
+    )
+  );
+}
+
 function FileNumberPanel() {
   const [rows, setRows] = useState([]);
   const [form, setForm] = useState({ fileNo: "", fromDate: "", toDate: "", active: false });
   const [editId, setEditId] = useState(null);
   const [err, setErr] = useState(null);
 
+  // ── Bulk add / activate ────────────────────────────────────────────
+  // Paste many file numbers at once (one per line, or comma separated —
+  // tested up to thousands) with a shared From/To date, and mark them ALL
+  // active in one go. Numbers that already exist as rows get UPDATED (so
+  // this also re-activates existing ones); numbers that don't exist yet
+  // get CREATED, already active.
+  const [bulkMode, setBulkMode] = useState(false);
+  const [bulkText, setBulkText] = useState("");
+  const [bulkFromDate, setBulkFromDate] = useState("");
+  const [bulkToDate, setBulkToDate] = useState("");
+  const [bulkActive, setBulkActive] = useState(true);
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [bulkProgress, setBulkProgress] = useState({ done: 0, total: 0 });
+  const [bulkErrors, setBulkErrors] = useState([]);
+
+  // ── Select existing rows to bulk activate/deactivate ────────────────
+  const [selected, setSelected] = useState(() => new Set());
+
   const load = useCallback(() => { apiGet("/file-numbers").then(setRows).catch(e => setErr(e.message)); }, []);
 
   const submit = async () => {
+    if (!form.fileNo.trim()) return;
     try {
       const body = { ...form, createdBy: "admin" };
       if (editId) await apiPut(`/file-numbers/${editId}`, body); else await apiPost("/file-numbers", body);
@@ -1089,10 +1132,155 @@ function FileNumberPanel() {
     } catch (e) { setErr(e.message); }
   };
 
+  const rowsByFileNo = useMemo(() => {
+    const map = {};
+    rows.forEach(r => { map[String(r.fileNo).trim().toLowerCase()] = r; });
+    return map;
+  }, [rows]);
+
+  const runBulkSubmit = async () => {
+    const list = parseFileNoList(bulkText);
+    if (list.length === 0) return;
+    setBulkBusy(true);
+    setBulkErrors([]);
+    setBulkProgress({ done: 0, total: list.length });
+
+    const errors = [];
+    let done = 0;
+    const batches = chunkArray(list, 25); // 25 requests in flight at a time, so 10k doesn't flood the server
+
+    for (const batch of batches) {
+      await Promise.all(batch.map(async fileNo => {
+        try {
+          const existing = rowsByFileNo[fileNo.toLowerCase()];
+          const body = {
+            fileNo,
+            fromDate: bulkFromDate,
+            toDate: bulkToDate,
+            active: bulkActive,
+            createdBy: "admin",
+          };
+          if (existing) await apiPut(`/file-numbers/${existing.id}`, body);
+          else await apiPost("/file-numbers", body);
+        } catch (e) {
+          errors.push(`${fileNo}: ${e.message}`);
+        } finally {
+          done += 1;
+          setBulkProgress({ done, total: list.length });
+        }
+      }));
+    }
+
+    setBulkErrors(errors);
+    setBulkBusy(false);
+    load();
+  };
+
+  const toggleSelectAll = () => {
+    setSelected(prev => (prev.size === rows.length ? new Set() : new Set(rows.map(r => r.id))));
+  };
+
+  const toggleSelectOne = (id) => {
+    setSelected(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const bulkSetActiveForSelected = async (activeVal) => {
+    if (selected.size === 0) return;
+    setBulkBusy(true);
+    setBulkErrors([]);
+    const ids = Array.from(selected);
+    const errors = [];
+    let done = 0;
+    setBulkProgress({ done: 0, total: ids.length });
+    const batches = chunkArray(ids, 25);
+    for (const batch of batches) {
+      await Promise.all(batch.map(async id => {
+        const r = rows.find(x => x.id === id);
+        if (!r) { done += 1; setBulkProgress({ done, total: ids.length }); return; }
+        try {
+          await apiPut(`/file-numbers/${id}`, { ...r, active: activeVal });
+        } catch (e) {
+          errors.push(`${r.fileNo}: ${e.message}`);
+        } finally {
+          done += 1;
+          setBulkProgress({ done, total: ids.length });
+        }
+      }));
+    }
+    setBulkErrors(errors);
+    setBulkBusy(false);
+    setSelected(new Set());
+    load();
+  };
+
+  const parsedBulkCount = useMemo(() => parseFileNoList(bulkText).length, [bulkText]);
+
   return (
     <div>
       <h3 className="adm-setup-title"><Icon.fileno /> Document File No — mark as many file numbers Active at once as you need; From/To Date is stored alongside each one</h3>
       {err && <div className="adm-error">⚠ {err}</div>}
+
+      <div className="adm-setup-form-row">
+        <button
+          type="button"
+          className="adm-config-add-btn"
+          onClick={() => setBulkMode(m => !m)}
+        >
+          {bulkMode ? "✕ Close Bulk Add" : "⚡ Bulk Add / Activate"}
+        </button>
+        <LoadDataButton onClick={load} />
+      </div>
+
+      {bulkMode && (
+        <div style={{ background: "#0e1b2c", border: "1px solid #2a4062", borderRadius: 8, padding: 12, marginTop: 10 }}>
+          <p style={{ color: "#9fb4d1", fontSize: 13, marginTop: 0 }}>
+            Paste file numbers below — one per line, or comma-separated (works for 10,000+ at once).
+            Numbers that already exist get updated to Active; new numbers get created already Active.
+          </p>
+          <textarea
+            className="adm-config-input"
+            style={{ width: "100%", minHeight: 140, fontFamily: "monospace", resize: "vertical" }}
+            placeholder={"e.g.\nFN-1001\nFN-1002\nFN-1003\n...or comma-separated: FN-1001, FN-1002, FN-1003"}
+            value={bulkText}
+            onChange={e => setBulkText(e.target.value)}
+          />
+          <div className="adm-setup-form-grid" style={{ marginTop: 10 }}>
+            <input type="date" className="adm-date-input" value={bulkFromDate} onChange={e => setBulkFromDate(e.target.value)} />
+            <input type="date" className="adm-date-input" value={bulkToDate} onChange={e => setBulkToDate(e.target.value)} />
+            <label className="adm-setup-checkbox-label">
+              <input type="checkbox" checked={bulkActive} onChange={e => setBulkActive(e.target.checked)} /> Mark Active
+            </label>
+          </div>
+          <div className="adm-setup-form-row" style={{ marginTop: 10 }}>
+            <button
+              type="button"
+              className="adm-config-add-btn"
+              disabled={bulkBusy || parsedBulkCount === 0}
+              onClick={runBulkSubmit}
+              style={{ opacity: bulkBusy || parsedBulkCount === 0 ? 0.6 : 1 }}
+            >
+              {bulkBusy
+                ? `Processing ${bulkProgress.done}/${bulkProgress.total}…`
+                : `Create / Activate ${parsedBulkCount || ""} File No${parsedBulkCount === 1 ? "" : "s"}`}
+            </button>
+          </div>
+          {bulkErrors.length > 0 && (
+            <div className="adm-error" style={{ marginTop: 10, maxHeight: 140, overflowY: "auto" }}>
+              ⚠ {bulkErrors.length} failed:
+              <ul style={{ margin: "6px 0 0", paddingLeft: 18 }}>
+                {bulkErrors.slice(0, 50).map((e, i) => <li key={i}>{e}</li>)}
+              </ul>
+              {bulkErrors.length > 50 && <div>…and {bulkErrors.length - 50} more</div>}
+            </div>
+          )}
+        </div>
+      )}
+
+      <h4 style={{ color: "#dce8fa", marginTop: 20, marginBottom: 6 }}>Add / Edit Single File No</h4>
       <div className="adm-setup-form-grid">
         <input className="adm-config-input" placeholder="File No" value={form.fileNo} onChange={e => setForm({ ...form, fileNo: e.target.value })} />
         <input type="date" className="adm-date-input" value={form.fromDate} onChange={e => setForm({ ...form, fromDate: e.target.value })} />
@@ -1104,14 +1292,55 @@ function FileNumberPanel() {
       <div className="adm-setup-form-row">
         <button className="adm-config-add-btn" onClick={submit}>{editId ? "Update" : "+ Create"}</button>
         {editId && <button className="adm-xl-clear-btn" onClick={() => { setEditId(null); setForm({ fileNo: "", fromDate: "", toDate: "", active: false }); }}>Cancel</button>}
-        <LoadDataButton onClick={load} />
       </div>
-      <SetupTable
-        rows={rows.map(r => ({ ...r, activeLabel: r.active ? "✅ Active" : "—" }))}
-        cols={[{ key: "id", label: "ID" }, { key: "fileNo", label: "File No" }, { key: "fromDate", label: "From" }, { key: "toDate", label: "To" }, { key: "activeLabel", label: "Status" }, { key: "createdBy", label: "Created By" }]}
-        onEdit={r => { setEditId(r.id); setForm({ fileNo: r.fileNo || "", fromDate: r.fromDate || "", toDate: r.toDate || "", active: !!r.active }); }}
-        onDelete={id => apiDelete(`/file-numbers/${id}`).then(load)}
-      />
+
+      {selected.size > 0 && (
+        <div className="adm-setup-form-row" style={{ marginTop: 10 }}>
+          <span style={{ color: "#9fb4d1", fontSize: 13 }}>{selected.size} selected</span>
+          <button className="adm-config-add-btn" disabled={bulkBusy} onClick={() => bulkSetActiveForSelected(true)}>
+            {bulkBusy ? `Processing ${bulkProgress.done}/${bulkProgress.total}…` : "✅ Activate Selected"}
+          </button>
+          <button className="adm-xl-clear-btn" disabled={bulkBusy} onClick={() => bulkSetActiveForSelected(false)}>
+            Deactivate Selected
+          </button>
+        </div>
+      )}
+
+      <div className="adm-xl-table-wrap" style={{ marginTop: 14 }}>
+        <table className="adm-xl-table">
+          <thead>
+            <tr>
+              <th>
+                <input
+                  type="checkbox"
+                  checked={rows.length > 0 && selected.size === rows.length}
+                  onChange={toggleSelectAll}
+                />
+              </th>
+              <th>ID</th><th>File No</th><th>From</th><th>To</th><th>Status</th><th>Created By</th><th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.length === 0 ? (
+              <tr><td colSpan={8} className="adm-eff-empty">No records yet</td></tr>
+            ) : rows.map(r => (
+              <tr key={r.id}>
+                <td><input type="checkbox" checked={selected.has(r.id)} onChange={() => toggleSelectOne(r.id)} /></td>
+                <td>{r.id}</td>
+                <td>{r.fileNo}</td>
+                <td>{r.fromDate}</td>
+                <td>{r.toDate}</td>
+                <td>{r.active ? "✅ Active" : "—"}</td>
+                <td>{r.createdBy}</td>
+                <td>
+                  <button className="adm-setup-edit-btn" onClick={() => { setEditId(r.id); setForm({ fileNo: r.fileNo || "", fromDate: r.fromDate || "", toDate: r.toDate || "", active: !!r.active }); }}>Edit</button>
+                  <button className="adm-setup-del-btn" onClick={() => apiDelete(`/file-numbers/${r.id}`).then(load)}>Delete</button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
