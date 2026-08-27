@@ -126,18 +126,40 @@ function buildQuery(params) {
   return qs.toString();
 }
 
-async function fetchActiveFileNumber() {
+// ── Active file numbers ───────────────────────────────────────────────────
+// Multiple File Numbers can be marked ACTIVE at once in Master Setup now
+// (see AdminSetupService / AdminSetupController), so this returns the
+// FULL list of currently-active rows instead of picking just one. Falls
+// back to filtering `/file-numbers` client-side if the dedicated
+// `/file-numbers/active` endpoint isn't available for some reason.
+async function fetchActiveFileNumbers() {
+  try {
+    const res = await fetch(`${SETUP_API}/file-numbers/active`);
+    if (res.ok) {
+      const data = await res.json();
+      if (Array.isArray(data)) return data;
+      // Older backend still returning a single object/null — normalize.
+      return data ? [data] : [];
+    }
+  } catch (e) {
+    // fall through to the manual filter below
+  }
+
   const res = await fetch(`${SETUP_API}/file-numbers`);
   if (!res.ok) throw new Error(`Server error: ${res.status}`);
   const list = await res.json();
-  const active = list.find(f => f.active === true || f.active === "true");
-  return active ? active.fileNo : null;
+  return (Array.isArray(list) ? list : []).filter(
+    f => f.active === true || f.active === "true"
+  );
 }
 
 // ── Add to File popup ───────────────────────────────────────────────────────
 
-function AddFilePopup({ doc, activeFileNo, loadingFileNo, fileNoError, onConfirm, onCancel }) {
-  const canConfirm = !!activeFileNo && !loadingFileNo;
+function AddFilePopup({
+  doc, activeFileNumbers, selectedFileNo, onSelectFileNo,
+  loadingFileNo, fileNoError, onConfirm, onCancel,
+}) {
+  const canConfirm = !!selectedFileNo && !loadingFileNo;
 
   return (
     <div className="icf-popup-overlay">
@@ -148,27 +170,62 @@ function AddFilePopup({ doc, activeFileNo, loadingFileNo, fileNoError, onConfirm
         </div>
         <p className="icf-popup-sub" style={{ color: "#333" }}>
           {doc.printDocumentNo || `Doc #${doc.id}`} (Req ID: {doc.reqId || "—"}) සඳහා
-          admin විසින් setup කළ active file number එක auto-fill වේ
+          admin විසින් Active කළ file number එකක් තෝරන්න
         </p>
 
         <div className="icf-popup-field">
-          <span className="icf-popup-label" style={{ color: "#222", fontWeight: 600 }}>Active File Number</span>
-          <input
-            className="icf-popup-text-input"
-            type="text"
-            value={loadingFileNo ? "Loading..." : (activeFileNo || "")}
-            readOnly
-            placeholder="No active file number set by admin"
-            style={{ color: "#111" }}
-          />
+          <span className="icf-popup-label" style={{ color: "#222", fontWeight: 600 }}>
+            Active File Numbers{activeFileNumbers.length > 0 ? ` (${activeFileNumbers.length})` : ""}
+          </span>
+
+          {loadingFileNo ? (
+            <div style={{ color: "#555", padding: "10px 0" }}>Loading...</div>
+          ) : activeFileNumbers.length > 0 ? (
+            <div
+              style={{
+                display: "flex", flexDirection: "column", gap: 8,
+                maxHeight: 240, overflowY: "auto", marginTop: 8,
+              }}
+            >
+              {activeFileNumbers.map(f => {
+                const isSelected = selectedFileNo === f.fileNo;
+                return (
+                  <label
+                    key={f.id ?? f.fileNo}
+                    style={{
+                      display: "flex", alignItems: "center", gap: 10,
+                      padding: "10px 12px", borderRadius: 8, cursor: "pointer",
+                      border: isSelected ? "2px solid #7c3aed" : "1.5px solid #d8dee8",
+                      background: isSelected ? "#f5f0ff" : "#fff",
+                    }}
+                  >
+                    <input
+                      type="radio"
+                      name="active-file-no"
+                      checked={isSelected}
+                      onChange={() => onSelectFileNo(f.fileNo)}
+                    />
+                    <div style={{ display: "flex", flexDirection: "column" }}>
+                      <span style={{ fontWeight: 700, color: "#111" }}>📁 {f.fileNo}</span>
+                      {(f.fromDate || f.toDate) && (
+                        <span style={{ fontSize: "0.78rem", color: "#555" }}>
+                          {f.fromDate || "—"} → {f.toDate || "—"}
+                        </span>
+                      )}
+                    </div>
+                  </label>
+                );
+              })}
+            </div>
+          ) : null}
         </div>
 
         {!loadingFileNo && fileNoError && (
           <div className="icf-error" style={{ marginTop: 8 }}>
-            ⚠ Could not load active file number: {fileNoError}
+            ⚠ Could not load active file numbers: {fileNoError}
           </div>
         )}
-        {!loadingFileNo && !fileNoError && !activeFileNo && (
+        {!loadingFileNo && !fileNoError && activeFileNumbers.length === 0 && (
           <div className="icf-error" style={{ marginTop: 8 }}>
             ⚠ Admin has not marked any file number as Active yet in Master Setup → Document File No.
           </div>
@@ -189,11 +246,12 @@ function AddFilePopup({ doc, activeFileNo, loadingFileNo, fileNoError, onConfirm
           <button
             className="icf-btn-done"
             disabled={!canConfirm}
-            onClick={() => onConfirm(activeFileNo)}
+            onClick={() => onConfirm(selectedFileNo)}
             style={{
               minWidth: 90, padding: "8px 18px", borderRadius: 8,
               background: "#7c3aed", color: "#fff", fontWeight: 600,
-              border: "none", cursor: "pointer",
+              border: "none", cursor: canConfirm ? "pointer" : "not-allowed",
+              opacity: canConfirm ? 1 : 0.6,
             }}
           >
             📁 Confirm
@@ -634,11 +692,13 @@ export default function IssueConfirm() {
   const [savingId, setSavingId] = useState(null);
   const [viewDoc,  setViewDoc]  = useState(null);
 
-  // Add-to-File popup
-  const [fileDoc,       setFileDoc]       = useState(null);
-  const [activeFileNo,  setActiveFileNo]  = useState(null);
-  const [loadingFileNo, setLoadingFileNo] = useState(false);
-  const [fileNoError,   setFileNoError]   = useState(null);
+  // Add-to-File popup — now holds the FULL list of active file numbers,
+  // plus which one the user has picked (radio selection in the popup).
+  const [fileDoc,            setFileDoc]            = useState(null);
+  const [activeFileNumbers,  setActiveFileNumbers]  = useState([]);
+  const [selectedFileNo,     setSelectedFileNo]     = useState(null);
+  const [loadingFileNo,      setLoadingFileNo]      = useState(false);
+  const [fileNoError,        setFileNoError]        = useState(null);
 
   // Edit/Delete FILE popup
   const [editFileDoc,      setEditFileDoc]      = useState(null);
@@ -737,12 +797,16 @@ export default function IssueConfirm() {
   // ── Add to File ──
   const handleAddToFileClick = async (doc) => {
     setFileDoc(doc);
-    setActiveFileNo(null);
+    setActiveFileNumbers([]);
+    setSelectedFileNo(null);
     setFileNoError(null);
     setLoadingFileNo(true);
     try {
-      const fno = await fetchActiveFileNumber();
-      setActiveFileNo(fno);
+      const list = await fetchActiveFileNumbers();
+      setActiveFileNumbers(list);
+      // If there's only one active file number, pre-select it so the
+      // common case (one active file) still needs just one click.
+      if (list.length === 1) setSelectedFileNo(list[0].fileNo);
     } catch (err) {
       setFileNoError(err.message);
     } finally {
@@ -752,7 +816,8 @@ export default function IssueConfirm() {
 
   const closeFilePopup = () => {
     setFileDoc(null);
-    setActiveFileNo(null);
+    setActiveFileNumbers([]);
+    setSelectedFileNo(null);
     setFileNoError(null);
   };
 
@@ -911,7 +976,9 @@ export default function IssueConfirm() {
       {fileDoc && (
         <AddFilePopup
           doc={fileDoc}
-          activeFileNo={activeFileNo}
+          activeFileNumbers={activeFileNumbers}
+          selectedFileNo={selectedFileNo}
+          onSelectFileNo={setSelectedFileNo}
           loadingFileNo={loadingFileNo}
           fileNoError={fileNoError}
           onConfirm={handleAddToFileConfirm}
