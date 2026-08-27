@@ -2,12 +2,76 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="icon" type="image/png" href="/logo.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>frontend</title>
+    <title>LOGI TRACK</title>
+    <style>
+      /* ── Preloader: white background, logo centered, aspect ratio kept
+         intact (object-fit: contain) so it never stretches/distorts. ── */
+      #app-preloader {
+        position: fixed;
+        inset: 0;
+        z-index: 9999;
+        background: #ffffff;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transition: opacity 0.35s ease;
+      }
+      #app-preloader img {
+        width: 160px;
+        max-width: 40vw;
+        height: auto;
+        object-fit: contain;
+        animation: app-preloader-pulse 1.4s ease-in-out infinite;
+      }
+      @keyframes app-preloader-pulse {
+        0%, 100% { opacity: 1; transform: scale(1); }
+        50% { opacity: 0.85; transform: scale(0.97); }
+      }
+      #app-preloader.app-preloader-hidden {
+        opacity: 0;
+        pointer-events: none;
+      }
+    </style>
   </head>
   <body>
     <div id="root"></div>
+
+    <!-- Shown until React mounts real content into #root, then removed. -->
+    <div id="app-preloader">
+      <img src="/logo.png" alt="LOGI TRACK" />
+    </div>
+    <script>
+      (function () {
+        function hidePreloader() {
+          var el = document.getElementById("app-preloader");
+          if (!el) return;
+          el.classList.add("app-preloader-hidden");
+          setTimeout(function () {
+            if (el && el.parentNode) el.parentNode.removeChild(el);
+          }, 400);
+        }
+
+        var root = document.getElementById("root");
+        if (root) {
+          // Hide as soon as React actually renders something into #root.
+          var observer = new MutationObserver(function () {
+            if (root.childNodes.length > 0) {
+              observer.disconnect();
+              hidePreloader();
+            }
+          });
+          observer.observe(root, { childList: true });
+        }
+
+        // Safety net in case #root stays empty for some reason.
+        window.addEventListener("load", function () {
+          setTimeout(hidePreloader, 3000);
+        });
+      })();
+    </script>
+
     <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>

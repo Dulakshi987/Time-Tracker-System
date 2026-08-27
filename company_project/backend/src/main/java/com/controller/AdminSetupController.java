@@ -43,7 +43,7 @@ public class AdminSetupController {
         u.setFullName(body.get("fullName"));
         u.setNic(body.get("nic"));
         u.setUsername(body.get("username"));
-        u.setDivisionNo(body.get("divisionNo")); // ← was missing, so edits never persisted the division(s)
+        u.setDivisionNo(body.get("divisionNo"));
         return service.updateUser(id, u, body.get("password"), body.get("confirmPassword"));
     }
 
@@ -97,8 +97,12 @@ public class AdminSetupController {
     @DeleteMapping("/job-categories/{id}") public void deleteJobCategory(@PathVariable Long id) { service.deleteJobCategory(id); }
 
     // ── File Number Setup ─────────────────────────────────────────────────
+    // Multiple File Numbers can be ACTIVE at the same time now — creating
+    // or updating one no longer deactivates any other row (see
+    // AdminSetupService). GET /file-numbers/active returns the full list
+    // of currently-active rows instead of a single one/null.
     @GetMapping("/file-numbers") public List<FileNumberSetup> getFileNumbers() { return service.getAllFileNumbers(); }
-    @GetMapping("/file-numbers/active") public FileNumberSetup getActiveFileNumber() { return service.getActiveFileNumber().orElse(null); }
+    @GetMapping("/file-numbers/active") public List<FileNumberSetup> getActiveFileNumbers() { return service.getActiveFileNumbers(); }
     @PostMapping("/file-numbers") public FileNumberSetup createFileNumber(@RequestBody FileNumberSetup f) { return service.createFileNumber(f); }
     @PutMapping("/file-numbers/{id}") public FileNumberSetup updateFileNumber(@PathVariable Long id, @RequestBody FileNumberSetup f) { return service.updateFileNumber(id, f); }
     @DeleteMapping("/file-numbers/{id}") public void deleteFileNumber(@PathVariable Long id) { service.deleteFileNumber(id); }

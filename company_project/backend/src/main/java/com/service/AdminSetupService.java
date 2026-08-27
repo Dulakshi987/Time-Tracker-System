@@ -65,7 +65,7 @@ public class AdminSetupService {
         existing.setFullName(u.getFullName());
         existing.setNic(u.getNic());
         existing.setUsername(u.getUsername());
-        existing.setDivisionNo(u.getDivisionNo()); // ← was missing, so edits never persisted the division(s)
+        existing.setDivisionNo(u.getDivisionNo());
         if (password != null && !password.isBlank()) {
             if (!password.equals(confirmPassword)) {
                 throw new IllegalArgumentException("Password and Confirm Password do not match");
@@ -174,11 +174,16 @@ public class AdminSetupService {
     }
     public void deleteJobCategory(Long id) { jobCategoryRepo.deleteById(id); }
 
-    // ── File Number Setup (only one ACTIVE at a time) ────────────────────
+    // ── File Number Setup ─────────────────────────────────────────────────
+    // NOTE: Multiple File Numbers can now be ACTIVE at the same time.
+    // Previously, activating one automatically deactivated every other
+    // active record (see the old `deactivateAllExcept` helper) — that
+    // auto-deactivate behaviour has been intentionally removed. Create
+    // and Update now simply persist whatever `active` value is sent from
+    // the Master Setup form, with no side effects on any other row.
     public List<FileNumberSetup> getAllFileNumbers() { return fileNumberRepo.findAll(); }
 
     public FileNumberSetup createFileNumber(FileNumberSetup f) {
-        if (Boolean.TRUE.equals(f.getActive())) deactivateAllExcept(null);
         return fileNumberRepo.save(f);
     }
 
@@ -187,30 +192,21 @@ public class AdminSetupService {
         existing.setFileNo(f.getFileNo());
         existing.setFromDate(f.getFromDate());
         existing.setToDate(f.getToDate());
-        if (Boolean.TRUE.equals(f.getActive()) && !Boolean.TRUE.equals(existing.getActive())) {
-            deactivateAllExcept(id);
-        }
         existing.setActive(f.getActive());
         return fileNumberRepo.save(existing);
     }
 
     public void deleteFileNumber(Long id) { fileNumberRepo.deleteById(id); }
 
-    // Activating one File No automatically deactivates every other one —
-    // this is what the Filing Portal reads to know which file is "open".
-    private void deactivateAllExcept(Long keepId) {
-        for (FileNumberSetup f : fileNumberRepo.findAll()) {
-            if (keepId != null && f.getId().equals(keepId)) continue;
-            if (Boolean.TRUE.equals(f.getActive())) {
-                f.setActive(false);
-                fileNumberRepo.save(f);
-            }
-        }
-    }
-
-    public Optional<FileNumberSetup> getActiveFileNumber() {
+    // Returns every File No currently marked ACTIVE (zero, one, or many).
+    // Replaces the old single-result `getActiveFileNumber()` /
+    // `Optional<FileNumberSetup>` version, since more than one row can be
+    // active simultaneously now. If any other part of the system (e.g. a
+    // Filing Portal) previously called the singular version expecting one
+    // object back, it needs to be updated to consume a list instead.
+    public List<FileNumberSetup> getActiveFileNumbers() {
         return fileNumberRepo.findAll().stream()
                 .filter(f -> Boolean.TRUE.equals(f.getActive()))
-                .findFirst();
+                .toList();
     }
 }
