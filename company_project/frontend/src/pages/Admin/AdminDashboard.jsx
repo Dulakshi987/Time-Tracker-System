@@ -1778,7 +1778,31 @@ export default function AdminDashboard() {
             loading={loading}
           />
         )}
+
+        <AppFooter />
       </div>
+    </div>
+  );
+}
+
+// ── Footer ─────────────────────────────────────────────────────────────
+// Sits at the very bottom of the main content area, under every view.
+function AppFooter() {
+  const year = new Date().getFullYear();
+  return (
+    <div
+      style={{
+        marginTop: 32,
+        padding: "16px 4px",
+        borderTop: "1px solid #1c2c44",
+        color: "#7d93b2",
+        fontSize: 12,
+        textAlign: "center",
+        lineHeight: 1.6,
+      }}
+    >
+      <div>© {year} Fentons. All rights reserved.</div>
+      <div>Developed BY Dulakshi Keshani</div>
     </div>
   );
 }
