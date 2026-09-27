@@ -476,7 +476,7 @@ function Sidebar({ active, onSelect, open, onClose }) {
   return (
     <>
       {open && <div className="adm-sidebar-scrim" onClick={onClose} />}
-      <div className={`adm-sidebar ${open ? "open" : ""}`} style={{ display: "flex", flexDirection: "column" }}>
+      <div className={`adm-sidebar ${open ? "open" : ""}`} style={{ display: "flex", flexDirection: "column", paddingBottom: 40 }}>
         <div className="adm-sidebar-title">Fentons Admin</div>
         <div style={{ flex: 1 }}>
           {visibleItems.map(item => (
