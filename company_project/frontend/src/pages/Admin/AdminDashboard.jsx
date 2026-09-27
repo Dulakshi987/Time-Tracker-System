@@ -1681,6 +1681,7 @@ export default function AdminDashboard() {
   const activeLabel = NAV_ITEMS.find(n => n.key === activeView)?.label || "Dashboard";
 
   return (
+    <>
     <div className="adm-page">
       <Sidebar
         active={activeView}
@@ -1689,7 +1690,7 @@ export default function AdminDashboard() {
         onClose={() => setSidebarOpen(false)}
       />
 
-      <div className="adm-main">
+      <div className="adm-main" style={{ paddingBottom: 56 }}>
         <div className="adm-topbar">
           <button
             className="adm-menu-btn"
@@ -1779,30 +1780,37 @@ export default function AdminDashboard() {
           />
         )}
 
-        <AppFooter />
       </div>
     </div>
+    <AppFooter />
+    </>
   );
 }
 
 // ── Footer ─────────────────────────────────────────────────────────────
-// Sits at the very bottom of the main content area, under every view.
+// Fixed to the very bottom of the viewport, full page width (spans over
+// the sidebar too), in the same blue used for the primary buttons
+// ("Load Data" etc.) — it stays put and never scrolls up with the page.
 function AppFooter() {
   const year = new Date().getFullYear();
   return (
     <div
       style={{
-        marginTop: 32,
-        padding: "16px 4px",
-        borderTop: "1px solid #1c2c44",
-        color: "#7d93b2",
+        position: "fixed",
+        left: 0,
+        right: 0,
+        bottom: 0,
+        zIndex: 100,
+        background: "#0b63ce",
+        color: "#eaf2ff",
         fontSize: 12,
+        lineHeight: 1.5,
         textAlign: "center",
-        lineHeight: 1.6,
+        padding: "8px 12px",
+        boxShadow: "0 -2px 10px rgba(0,0,0,0.15)",
       }}
     >
-      <div>© {year} Fentons. All rights reserved.</div>
-      <div>Developed BY Dulakshi Keshani</div>
+      <div>© {year} Fentons. All rights reserved. — Developed BY Dulakshi Keshani</div>
     </div>
   );
 }
