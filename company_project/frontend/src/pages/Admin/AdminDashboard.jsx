@@ -13,21 +13,10 @@ import {
   getCurrentUser, canSeeNavKey, hasAllDivisionAccess, getUserDivisions, canSeeDivision,
 } from "../../config/permissions";
 import { formatSriLankaTime } from "../../utils/dateUtils";
-// NOTE: AdminConfigCenter (old "usersetup" page) removed — replaced by
-// MasterSetupPanel below, which now lives inside this same file and saves
-// everything straight to the database through AdminSetupController.
 
-// ── Config ───────────────────────────────────────────────────────────────
-// const MASTER_API   = "http://localhost:8080/api/print-portal";
-// const SETUP_API    = "http://localhost:8080/api/admin-setup";
 const MASTER_API   = "https://time-tracker-system-production.up.railway.app/api/print-portal";
 const SETUP_API    = "https://time-tracker-system-production.up.railway.app/api/admin-setup";
-// NOTE: Auto-refresh (setInterval polling) has been removed everywhere in
-// this file on purpose — it was hitting the Railway backend once every
-// second per open tab, which burns through Railway usage and mobile data
-// for no reason. Every panel now loads data ONCE on mount, and again only
-// when the user explicitly presses a "🔄 Load Data" button. Nothing here
-// refreshes itself automatically anymore.
+
 
 // ── Generic helpers ──────────────────────────────────────────────────────
 
@@ -151,9 +140,14 @@ function docOperators(doc) {
 }
 
 // Division filter — every document already carries its own `divisionNo`.
-function docMatchesDivision(doc, divisionNo) {
-  if (!divisionNo || divisionNo === "ALL") return true;
-  return String(doc.divisionNo || "") === String(divisionNo);
+// `divisionFilter` is now a comma-separated string of selected division
+// codes (multi-select), same convention as MultiDivisionSelect below.
+// "" / "ALL" / no selection at all means "show every division".
+function docMatchesDivision(doc, divisionFilter) {
+  if (!divisionFilter || divisionFilter === "ALL") return true;
+  const selected = String(divisionFilter).split(",").map(s => s.trim()).filter(Boolean);
+  if (selected.length === 0) return true;
+  return selected.includes(String(doc.divisionNo || ""));
 }
 
 // Job type / job category filter — every document carries its own `jobType`.
@@ -567,25 +561,25 @@ function FilterBar({
 
       {/* Division + Job Category are kept together as one group with a
           small gap between them, instead of getting spread apart by the
-          filterbar's own flex spacing (adm-filterbar). */}
+          filterbar's own flex spacing (adm-filterbar). Division is now a
+          multi-select (checkbox dropdown) so more than one division can
+          be viewed at once; Job Category still resets whenever the
+          division selection changes, since job categories are scoped
+          per division. */}
       <div style={{ display: "flex", gap: 8, marginLeft: "auto" }}>
-        <select
-          className="adm-operator-select"
-          value={division}
-          onChange={e => {
-            setDivision(e.target.value);
-            // Selecting a new division invalidates the previous job-type
-            // pick, since job categories are scoped per division.
-            setJobType("ALL");
-          }}
-        >
-          <option value="ALL">All Divisions</option>
-          {divisions.map(d => (
-            <option key={d.id ?? d.divisionNo} value={d.divisionNo}>
-              {d.divisionNo} — {d.divisionName}
-            </option>
-          ))}
-        </select>
+        <div style={{ minWidth: 220 }}>
+          <MultiDivisionSelect
+            divisions={divisions}
+            value={division === "ALL" ? "" : division}
+            placeholder="All Divisions"
+            onChange={(next) => {
+              setDivision(next || "ALL");
+              // Selecting a new set of divisions invalidates the previous
+              // job-type pick, since job categories are scoped per division.
+              setJobType("ALL");
+            }}
+          />
+        </div>
 
         <select
           className="adm-operator-select"
@@ -745,7 +739,7 @@ function StaffPanel() {
   );
 }
 
-function MultiDivisionSelect({ divisions, value, onChange }) {
+function MultiDivisionSelect({ divisions, value, onChange, placeholder }) {
   const [open, setOpen] = useState(false);
   const selectedArr = (value || "").split(",").map(s => s.trim()).filter(Boolean);
 
@@ -756,7 +750,14 @@ function MultiDivisionSelect({ divisions, value, onChange }) {
     onChange(next.join(","));
   };
 
-  const summary = selectedArr.length === 0 ? "Select division(s)…" : selectedArr.join(", ");
+  const summary = selectedArr.length === 0
+    ? (placeholder || "Select division(s)…")
+    : selectedArr.length === 1
+      ? (() => {
+          const d = divisions.find(dv => dv.divisionNo === selectedArr[0]);
+          return d ? `${d.divisionNo} — ${d.divisionName}` : selectedArr[0];
+        })()
+      : `${selectedArr.length} divisions selected`;
 
   return (
     <div style={{ position: "relative" }}>
@@ -783,6 +784,16 @@ function MultiDivisionSelect({ divisions, value, onChange }) {
               boxShadow: "0 8px 20px rgba(0,0,0,0.35)",
             }}
           >
+            <label
+              style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 4px", cursor: "pointer", color: "#9fb6d8", fontSize: 13, borderBottom: "1px solid #1c2c44", marginBottom: 4 }}
+            >
+              <input
+                type="checkbox"
+                checked={selectedArr.length === 0}
+                onChange={() => onChange("")}
+              />
+              All Divisions
+            </label>
             {divisions.length === 0 ? (
               <div style={{ color: "#7d93b2", fontSize: 13, padding: 4 }}>No divisions found</div>
             ) : divisions.map(d => (
@@ -1341,19 +1352,28 @@ function buildJobTypeCards(jobTypes, documents) {
 }
 
 function DashboardPanel({ documents, jobCategories, divisionsList, division, jobType, range, fromDate, toDate }) {
-  const selectedDivisionName = useMemo(() => {
-    if (!division || division === "ALL") return null;
-    const d = divisionsList.find(dv => dv.divisionNo === division);
-    return d ? d.divisionName : null;
-  }, [division, divisionsList]);
+  // `division` is now a comma-separated string of selected division codes
+  // (or "ALL"/"" for every division). Resolve it to the matching division
+  // *names*, since job categories are stored against divisionName.
+  const selectedDivisionCodes = useMemo(() => {
+    if (!division || division === "ALL") return [];
+    return division.split(",").map(s => s.trim()).filter(Boolean);
+  }, [division]);
+
+  const selectedDivisionNames = useMemo(() => {
+    if (selectedDivisionCodes.length === 0) return [];
+    return divisionsList
+      .filter(d => selectedDivisionCodes.includes(d.divisionNo))
+      .map(d => d.divisionName);
+  }, [selectedDivisionCodes, divisionsList]);
 
   const scopedJobTypes = useMemo(() => {
-    const relevant = selectedDivisionName
-      ? jobCategories.filter(c => c.divisionName === selectedDivisionName)
+    const relevant = selectedDivisionNames.length > 0
+      ? jobCategories.filter(c => selectedDivisionNames.includes(c.divisionName))
       : jobCategories;
     const names = relevant.map(c => c.categoryName).filter(Boolean);
     return Array.from(new Set(names)).sort((a, b) => a.localeCompare(b));
-  }, [jobCategories, selectedDivisionName]);
+  }, [jobCategories, selectedDivisionNames]);
 
   const requestDateFiltered = useMemo(
     () => documents.filter(d => inRangeGeneric(d.requestDate, range, fromDate, toDate)),
@@ -1395,7 +1415,7 @@ function DashboardPanel({ documents, jobCategories, divisionsList, division, job
   const deliveryEff = operatorEfficiency(deliveryDocs, "deliveredBy", "delivery", d => deliveryStatusClass(d.deliveryStatus) === "completed");
 
   const scopeLabel = [
-    division && division !== "ALL" ? division : null,
+    selectedDivisionCodes.length > 0 ? selectedDivisionCodes.join(", ") : null,
     jobType && jobType !== "ALL" ? jobType : null,
   ].filter(Boolean).join(" · ");
 
@@ -1485,12 +1505,21 @@ export default function AdminDashboard() {
   const [operator, setOperator] = useState("ALL");
 
   // ── Division filter state ────────────────────────────────────────────
+  // Now a comma-separated string of selected division codes to support
+  // choosing more than one division at once (e.g. "4017,4020"). "ALL"
+  // (the default) or "" both mean "every division".
   const [division, setDivision] = useState("ALL");
   const [divisionsList, setDivisionsList] = useState([]);
 
+  const selectedDivisionCodesTop = useMemo(() => {
+    if (!division || division === "ALL") return [];
+    return division.split(",").map(s => s.trim()).filter(Boolean);
+  }, [division]);
+
   // ── Job category / job type filter state ─────────────────────────────
-  // Scoped to the selected division below (jobTypeOptionsForDivision) so
-  // the dropdown only ever shows categories that belong to that division.
+  // Scoped to the selected division(s) below (jobTypeOptionsForDivision)
+  // so the dropdown only ever shows categories that belong to one of the
+  // currently-selected divisions.
   const [jobType, setJobType] = useState("ALL");
 
   // ── Logged-in user's own division access ─────────────────────────────
@@ -1510,24 +1539,26 @@ export default function AdminDashboard() {
     return Array.from(new Set(names)).sort((a, b) => a.localeCompare(b));
   }, [jobCategories]);
 
-  // Division name that corresponds to the currently selected division code
-  // — job categories are stored against divisionName, not divisionNo.
-  const selectedDivisionName = useMemo(() => {
-    if (!division || division === "ALL") return null;
-    const d = divisionsList.find(dv => dv.divisionNo === division);
-    return d ? d.divisionName : null;
-  }, [division, divisionsList]);
+  // Division name(s) that correspond to the currently selected division
+  // code(s) — job categories are stored against divisionName, not divisionNo.
+  const selectedDivisionNamesTop = useMemo(() => {
+    if (selectedDivisionCodesTop.length === 0) return [];
+    return divisionsList
+      .filter(d => selectedDivisionCodesTop.includes(d.divisionNo))
+      .map(d => d.divisionName);
+  }, [selectedDivisionCodesTop, divisionsList]);
 
-  // Job type dropdown options, scoped to the selected division. Selecting
-  // "4017 — Solar" here means only that division's job categories show up
-  // in the Job Category dropdown, per the requested flow.
+  // Job type dropdown options, scoped to the selected division(s). Selecting
+  // "4017 — Solar" (or several divisions at once) here means only those
+  // divisions' job categories show up in the Job Category dropdown, per
+  // the requested flow.
   const jobTypeOptionsForDivision = useMemo(() => {
-    const relevant = selectedDivisionName
-      ? jobCategories.filter(c => c.divisionName === selectedDivisionName)
+    const relevant = selectedDivisionNamesTop.length > 0
+      ? jobCategories.filter(c => selectedDivisionNamesTop.includes(c.divisionName))
       : jobCategories;
     const names = relevant.map(c => c.categoryName).filter(Boolean);
     return Array.from(new Set(names)).sort((a, b) => a.localeCompare(b));
-  }, [jobCategories, selectedDivisionName]);
+  }, [jobCategories, selectedDivisionNamesTop]);
 
   const fetchDocuments = useCallback(async (silent = false) => {
     // Cancel anything still in flight before starting a new request —
@@ -1632,12 +1663,12 @@ export default function AdminDashboard() {
   }, [divisionScopedDocuments]);
 
   // Division + job type + operator scoping — division scoping is now two
-  // layers: the manual dropdown (docMatchesDivision) narrows within what
-  // the user is allowed to see, and divisionScopedDocuments (above) is the
-  // hard ceiling that manual filter can never exceed. Job type narrows the
-  // same result set further, so every KPI, the four portal triple-stat
-  // cards, and all four efficiency tables move together whenever either
-  // dropdown changes.
+  // layers: the manual dropdown (docMatchesDivision, multi-select aware)
+  // narrows within what the user is allowed to see, and
+  // divisionScopedDocuments (above) is the hard ceiling that manual filter
+  // can never exceed. Job type narrows the same result set further, so
+  // every KPI, the four portal triple-stat cards, and all four efficiency
+  // tables move together whenever either dropdown changes.
   const filtered = useMemo(() => {
     return divisionScopedDocuments.filter(d => {
       if (operator !== "ALL" && !docOperators(d).includes(operator)) return false;
