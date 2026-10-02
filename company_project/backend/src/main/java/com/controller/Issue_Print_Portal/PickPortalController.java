@@ -39,10 +39,13 @@ public class PickPortalController {
         );
     }
 
-    // ── NEW: picking-error banner/popup data (independent of page/search/filters) ──
+    // ── Picking-error banner/popup data — scoped by date range + divisions ──
     @GetMapping("/alerts")
-    public ResponseEntity<List<Issue>> alerts(@RequestParam(required = false) String divisions) {
-        return ResponseEntity.ok(issuePickService.getPickingErrorAlerts(divisions));
+    public ResponseEntity<List<Issue>> alerts(
+            @RequestParam(required = false) String from,
+            @RequestParam(required = false) String to,
+            @RequestParam(required = false) String divisions) {
+        return ResponseEntity.ok(issuePickService.getPickingErrorAlerts(from, to, divisions));
     }
 
     // ── Full distinct job-type list, independent of pagination ──

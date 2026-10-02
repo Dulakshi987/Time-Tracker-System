@@ -865,12 +865,17 @@ export default function IssuPikFormt() {
   const [activePopup, setActivePopup] = useState(null);
   const [activeId, setActiveId] = useState(null);
 
-  // ── Picking-error alerts (independent of page / search / filters) ──
+  // ── Picking-error alerts (independent of page / search / status filters,
+  // but scoped by the same date range + divisions as the grid) ──
   const [alertDocs, setAlertDocs] = useState([]);           // top banner data
   const [errorAlertDocs, setErrorAlertDocs] = useState([]); // popup data
   const seenAlertIds = useRef(new Set());
   const alertAbortRef = useRef(null);
   const mountedRef = useRef(true);
+  // CHANGED: remembers the last date scope the alerts were fetched for, so
+  // switching Today/All/Custom only swaps the banner and never pops up
+  // old errors as if they were brand new.
+  const lastAlertScopeRef = useRef(null);
 
   const cardRefs = useRef({});
   const [jumpHighlightId, setJumpHighlightId] = useState(null);
@@ -922,6 +927,7 @@ export default function IssuPikFormt() {
     return () => clearTimeout(t);
   }, [pendingJumpId]);
 
+  // CHANGED: now sends the same from/to date range as the grid.
   const fetchAlerts = useCallback(async () => {
     // Cancel any in-flight request so responses never overlap / arrive out of order
     if (alertAbortRef.current) alertAbortRef.current.abort();
@@ -931,6 +937,16 @@ export default function IssuPikFormt() {
     try {
       const params = new URLSearchParams();
       if (allowedDivisions) params.set("divisions", allowedDivisions.join(","));
+
+      // Same date scope as the grid
+      if (dateFilterMode === "TODAY") {
+        const today = getSriLankaTodayKey();
+        params.set("from", today);
+        params.set("to", today);
+      } else if (dateFilterMode === "CUSTOM") {
+        if (fromDate) params.set("from", fromDate);
+        if (toDate) params.set("to", toDate);
+      }
 
       const res = await fetch(`${API_BASE}/alerts?${params.toString()}`, { signal: controller.signal });
       if (!res.ok) {
@@ -953,8 +969,20 @@ export default function IssuPikFormt() {
 
       setAlertDocs(data);
 
-      // Forget alerts that were resolved, so they can alert again if re-flagged
       const currentIds = new Set(data.map(d => d.id));
+
+      // CHANGED: date filter changed → only swap the banner, don't pop up
+      // the errors of the newly selected range as "new".
+      const scopeKey = `${dateFilterMode}|${fromDate}|${toDate}`;
+      if (lastAlertScopeRef.current !== null && lastAlertScopeRef.current !== scopeKey) {
+        lastAlertScopeRef.current = scopeKey;
+        seenAlertIds.current = new Set(currentIds);
+        setErrorAlertDocs([]);
+        return;
+      }
+      lastAlertScopeRef.current = scopeKey;
+
+      // Forget alerts that were resolved, so they can alert again if re-flagged
       seenAlertIds.current = new Set(
         [...seenAlertIds.current].filter(id => currentIds.has(id))
       );
@@ -974,7 +1002,7 @@ export default function IssuPikFormt() {
     } catch (e) {
       if (e.name !== "AbortError") console.warn("Failed to load alerts", e);
     }
-  }, [allowedDivisions]);
+  }, [allowedDivisions, dateFilterMode, fromDate, toDate]); // CHANGED: date deps added
 
   useEffect(() => {
     mountedRef.current = true;
@@ -1354,7 +1382,7 @@ export default function IssuPikFormt() {
         />
       )}
 
-      {/* Sticky top notification — always visible while errors are unresolved */}
+      {/* Sticky top notification — pending errors for the selected date range */}
       {alertDocs.length > 0 && (
         <div className="ip-error-banner" style={{ position: "sticky", top: 0, zIndex: 50 }}>
           <div className="ip-error-banner-title">

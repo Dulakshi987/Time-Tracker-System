@@ -131,6 +131,13 @@ public class IssuePickService {
         }
     }
 
+    // YYYY-MM-DD key of a document's request date (null if missing)
+    private String dateKeyOf(Issue d) {
+        String rd = d.getRequestDate();
+        if (rd == null || rd.isBlank()) return null;
+        return rd.substring(0, Math.min(10, rd.length()));
+    }
+
     // ══════════════════════════════════════════════════════════════════
     // Search + Pagination
     // Pick Portal only shows documents that already have a printDocumentNo.
@@ -217,18 +224,35 @@ public class IssuePickService {
     }
 
     // ── Picking-error banner/popup payload ──
-    // Flagged + not yet re-picked docs, independent of page/search/filters.
-    public List<Issue> getPickingErrorAlerts(String divisionsCsv) {
+    // Flagged + not yet re-picked docs. Independent of page/search/status
+    // filters, BUT scoped by the same date range (from/to) and divisions
+    // as the grid, so "Today" only shows today's pending errors.
+    public List<Issue> getPickingErrorAlerts(String from, String to, String divisionsCsv) {
         List<Issue> eligible = issueRepository.findAll().stream()
                 .filter(d -> d.getPrintDocumentNo() != null && !d.getPrintDocumentNo().trim().isEmpty())
                 .collect(Collectors.toList());
 
+        // Request IDs over everything so IDs never change with the filter
         assignRequestIds(eligible);
 
         List<Issue> base = eligible.stream()
                 .filter(d -> "YES".equalsIgnoreCase(d.getHasWrongMaterial()))
                 .filter(d -> !Boolean.TRUE.equals(d.getEmergencyPickResolved()))
                 .collect(Collectors.toList());
+
+        // Date range — requestDate is a plain YYYY-MM-DD string, so string
+        // comparison is correct (same rule as the grid).
+        final boolean hasFrom = from != null && !from.isBlank();
+        final boolean hasTo = to != null && !to.isBlank();
+        if (hasFrom || hasTo) {
+            base = base.stream().filter(d -> {
+                String key = dateKeyOf(d);
+                if (key == null) return false;
+                if (hasFrom && key.compareTo(from) < 0) return false;
+                if (hasTo && key.compareTo(to) > 0) return false;
+                return true;
+            }).collect(Collectors.toList());
+        }
 
         if (divisionsCsv != null && !divisionsCsv.isBlank()) {
             Set<String> allowed = Arrays.stream(divisionsCsv.split(","))
