@@ -137,6 +137,18 @@ function parsePickingErrorGroups(doc) {
   }));
 }
 
+// A picking error is "open" only if Check flagged it AND no Emergency Pick
+// Done has been recorded. Any resolve signal (flag, time, or who) counts, so a
+// resolved doc can never come back as an alert.
+function isOpenPickingError(d) {
+  if (!d) return false;
+  if ((d.hasWrongMaterial || "").toUpperCase() !== "YES") return false;
+  if (d.emergencyPickResolved) return false;
+  if (d.emergencyResolvedTime) return false;
+  if (d.emergencyPickResolvedBy && String(d.emergencyPickResolvedBy).trim()) return false;
+  return true;
+}
+
 function getSriLankaTodayKey() {
   const now = new Date();
   const utcMs = now.getTime() + now.getTimezoneOffset() * 60000;
@@ -580,8 +592,7 @@ function DocumentCard({
   const canHold = isStarted && canHoldBtn;
   const canEnd = isStarted && canEndBtn;
 
-  const hasCheckError =
-    (doc.hasWrongMaterial || "").toUpperCase() === "YES" && !doc.emergencyPickResolved;
+  const hasCheckError = isOpenPickingError(doc);
 
   const cardClassName = `ip-card status-${sc}${hasCheckError ? " ip-card-emergency" : ""}`;
 
@@ -916,8 +927,9 @@ export default function IssuPikFormt() {
       // Defence in depth: re-apply the division scope on the client too.
       // (The real enforcement must be on the server — see notes.)
       const data = raw.filter(d =>
-        !allowedDivisions ||
-        (d.divisionNo != null && allowedDivisions.includes(String(d.divisionNo)))
+        isOpenPickingError(d) &&
+        (!allowedDivisions ||
+          (d.divisionNo != null && allowedDivisions.includes(String(d.divisionNo))))
       );
 
       setAlertDocs(data);
