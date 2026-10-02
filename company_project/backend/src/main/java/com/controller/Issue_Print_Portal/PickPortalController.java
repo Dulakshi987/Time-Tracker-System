@@ -23,7 +23,7 @@ public class PickPortalController {
         return ResponseEntity.ok(issuePickService.getAllDocuments());
     }
 
-    // ── Filtered + paginated search, used by the Pick Portal UI ──
+    // ── New: filtered + paginated search, used by the Pick Portal UI ──
     @GetMapping("/search")
     public ResponseEntity<IssuePrintPageResponse> search(
             @RequestParam(required = false) String from,
@@ -39,16 +39,7 @@ public class PickPortalController {
         );
     }
 
-    // ── Picking-error banner/popup data — scoped by date range + divisions ──
-    @GetMapping("/alerts")
-    public ResponseEntity<List<Issue>> alerts(
-            @RequestParam(required = false) String from,
-            @RequestParam(required = false) String to,
-            @RequestParam(required = false) String divisions) {
-        return ResponseEntity.ok(issuePickService.getPickingErrorAlerts(from, to, divisions));
-    }
-
-    // ── Full distinct job-type list, independent of pagination ──
+    // ── New: full distinct job-type list, independent of pagination ──
     @GetMapping("/job-types")
     public ResponseEntity<List<String>> jobTypes() {
         return ResponseEntity.ok(issuePickService.getDistinctJobTypes());

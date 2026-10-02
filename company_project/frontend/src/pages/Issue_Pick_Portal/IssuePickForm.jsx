@@ -2,13 +2,12 @@ import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import "./IssuePick.css";
 import { formatSriLankaTime } from "../../utils/dateUtils";
-import { getCurrentUser, canUseButton, logoutUser, hasAllDivisionAccess } from "../../config/permissions";
+import { getCurrentUser, canUseButton, logoutUser, hasAllDivisionAccess, canSeeDivision } from "../../config/permissions";
 // const API_BASE = "http://localhost:8080/api/pick-portal";
 // const SETUP_API = "http://localhost:8080/api/admin-setup";
 const API_BASE = "https://time-tracker-system-production.up.railway.app/api/pick-portal";
 const SETUP_API = "https://time-tracker-system-production.up.railway.app/api/admin-setup";
-
-const ALERT_POLL_MS = 15000;
+// const AUTO_REFRESH = 10000;
 
 const HOLD_REASONS = [
   "Printer not available",
@@ -39,7 +38,8 @@ function formatDuration(seconds) {
   return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
 }
 
-// Fallback only — the backend now sends `requestId` on each document.
+// Same scheme as Print Portal — groups by request date, numbers within the
+// day, e.g. 20260816/0001. Resets automatically when the date changes.
 function computeRequestIds(documents) {
   const dateKeyOf = (doc) => {
     if (doc.requestDate) return String(doc.requestDate).substring(0, 10);
@@ -81,7 +81,9 @@ function jobTypeColor(jt) {
 // ── Status helpers ───────────────────────────────────────────────────────────
 // PENDING → [Handover] → HANDED_OVER → [Start] → IN_PROGRESS
 // IN_PROGRESS → [Hold] → ON_HOLD → [Start = Resume] → IN_PROGRESS
-// IN_PROGRESS → [End] → COMPLETED   (End only while In Progress)
+// IN_PROGRESS → [End] → COMPLETED   (End is ONLY available while In Progress —
+// after a Hold, the user must click Resume first before End becomes
+// available again.)
 
 function statusClass(s) {
   const v = (s || "").toLowerCase();
@@ -103,9 +105,11 @@ function statusLabel(s) {
   }[c];
 }
 
-// Parses reason-wise SKU/Qty groups saved by the Check Portal's Hold popup.
-// New format: "Reason::sku1,sku2||Reason2::sku3". Falls back to the old flat
-// format for older records.
+// Parses the reason-wise SKU/Qty groups saved by the Check Portal's Hold
+// popup. New format: "Reason::sku1,sku2||Reason2::sku3" (self-labelled
+// groups, one per picking-error reason, each with its own SKU/Qty list).
+// Falls back to the old flat format (single reason, single SKU/Qty list)
+// for records saved before this change.
 function parsePickingErrorGroups(doc) {
   const sku = doc.wrongMaterialSku || "";
   const qty = doc.wrongMaterialQty || "";
@@ -137,25 +141,7 @@ function parsePickingErrorGroups(doc) {
   }));
 }
 
-// Short reason text for the banner chips (works for both old and new formats).
-function errorReasonText(doc) {
-  const reasons = parsePickingErrorGroups(doc).map(g => g.reason).filter(Boolean);
-  if (reasons.length) return [...new Set(reasons)].join(", ");
-  return doc.pickingErrorReason || "";
-}
-
-// A picking error is "open" only if Check flagged it AND no Emergency Pick
-// Done has been recorded. Any resolve signal (flag, time, or who) counts, so a
-// resolved doc can never come back as an alert.
-function isOpenPickingError(d) {
-  if (!d) return false;
-  if ((d.hasWrongMaterial || "").toUpperCase() !== "YES") return false;
-  if (d.emergencyPickResolved) return false;
-  if (d.emergencyResolvedTime) return false;
-  if (d.emergencyPickResolvedBy && String(d.emergencyPickResolvedBy).trim()) return false;
-  return true;
-}
-
+// ── Date filter helpers ──────────────────────────────────────────────────
 function getSriLankaTodayKey() {
   const now = new Date();
   const utcMs = now.getTime() + now.getTimezoneOffset() * 60000;
@@ -163,6 +149,30 @@ function getSriLankaTodayKey() {
   const colombo = new Date(colomboMs);
   const pad = (n) => String(n).padStart(2, "0");
   return `${colombo.getFullYear()}-${pad(colombo.getMonth() + 1)}-${pad(colombo.getDate())}`;
+}
+
+function docDateKey(doc) {
+  return doc.requestDate ? String(doc.requestDate).substring(0, 10) : null;
+}
+
+function matchesDateFilter(doc, mode, fromDate, toDate) {
+  if (mode === "ALL") return true;
+
+  const key = docDateKey(doc);
+
+  if (mode === "TODAY") {
+    return key === getSriLankaTodayKey();
+  }
+
+  if (mode === "CUSTOM") {
+    if (!fromDate && !toDate) return true;
+    if (!key) return false;
+    if (fromDate && key < fromDate) return false;
+    if (toDate && key > toDate) return false;
+    return true;
+  }
+
+  return true;
 }
 
 // ── Person Picker ─────────────────────────────────────────────────────────
@@ -188,7 +198,7 @@ function PersonPicker({ value, onChange, people, loading }) {
   );
 }
 
-// ── Popup: Handover ─────────────────────────────────────────────────────────
+// ── Popup: Handover (Step 1) ─────────────────────────────────────────────────
 function HandoverPopup({ onConfirm, onCancel, pickers, pickersLoading }) {
   const [handedOverBy, setHandedOverBy] = useState("");
 
@@ -219,7 +229,7 @@ function HandoverPopup({ onConfirm, onCancel, pickers, pickersLoading }) {
   );
 }
 
-// ── Popup: Hold ─────────────────────────────────────────────────────────────
+// ── Popup: Hold Reason + Held By ────────────────────────────────────────────
 function HoldPopup({ onConfirm, onCancel, pickers, pickersLoading }) {
   const [reason, setReason] = useState("");
   const [otherReason, setOtherReason] = useState("");
@@ -253,7 +263,6 @@ function HoldPopup({ onConfirm, onCancel, pickers, pickersLoading }) {
             <input
               className="ip-popup-input"
               type="text"
-              maxLength={200}
               placeholder="Type reason..."
               value={otherReason}
               onChange={e => setOtherReason(e.target.value)}
@@ -313,7 +322,7 @@ function PickedByPopup({ onConfirm, onCancel, pickers, pickersLoading }) {
 // ── Popup: Emergency Pick Done ──────────────────────────────────────────────
 function EmergencyPickDonePopup({ doc, onConfirm, onCancel, pickers, pickersLoading }) {
   const [resolvedBy, setResolvedBy] = useState("");
-  const groups = doc ? parsePickingErrorGroups(doc) : [];
+  const groups = parsePickingErrorGroups(doc);
 
   return (
     <div className="ip-popup-overlay">
@@ -369,7 +378,7 @@ function EmergencyPickDonePopup({ doc, onConfirm, onCancel, pickers, pickersLoad
   );
 }
 
-// ── Popup: Edit ──────────────────────────────────────────────────────────────
+// ── Popup: Edit (Held By / Picked By only) ──────────────────────────────────
 function EditPopup({ doc, onConfirm, onCancel, pickers, pickersLoading }) {
   const [heldBy, setHeldBy] = useState(doc?.heldBy || "");
   const [pickedBy, setPickedBy] = useState(doc?.pickedBy || "");
@@ -530,8 +539,8 @@ function ViewDetailsPopup({ doc, requestId, divisionLabel, onClose }) {
 // ── Popup: New Picking Error Alert ──────────────────────────────────────────
 function PickingErrorAlertPopup({ docs, requestIdMap, onJump, onClose }) {
   return (
-    <div className="ip-popup-overlay" style={{ zIndex: 1000 }}>
-      <div className="ip-popup" style={{ borderTop: "4px solid #ef4444" }}>
+    <div className="ip-popup-overlay">
+      <div className="ip-popup">
         <div className="ip-popup-head">
           <span>🚨 New Picking Error{docs.length > 1 ? "s" : ""} Reported</span>
           <button className="ip-popup-close" onClick={onClose}>✕</button>
@@ -540,11 +549,11 @@ function PickingErrorAlertPopup({ docs, requestIdMap, onJump, onClose }) {
           Check Portal found {docs.length} issue{docs.length > 1 ? "s" : ""} — click one to jump to it
         </p>
 
-        <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 16, maxHeight: "50vh", overflowY: "auto" }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 16 }}>
           {docs.map(d => (
             <button
               key={d.id}
-              onClick={() => onJump(d)}
+              onClick={() => onJump(d.id)}
               style={{
                 textAlign: "left",
                 background: "rgba(239,68,68,0.1)",
@@ -556,13 +565,13 @@ function PickingErrorAlertPopup({ docs, requestIdMap, onJump, onClose }) {
               }}
             >
               <div style={{ fontWeight: 700, color: "#ef4444", marginBottom: 4 }}>
-                {d.requestId || requestIdMap[d.id] || "—"} · Doc No: {d.printDocumentNo || "—"}
+                {requestIdMap[d.id] || "—"} · Doc No: {d.printDocumentNo || "—"}
               </div>
-              {parsePickingErrorGroups(d).map((g, i) => (
-                <div key={i} style={{ fontSize: "0.8rem", color: "#fca5a5" }}>
-                  ⚠️ {g.reason || "Reason"} · SKU: {g.skus.join(", ") || "—"} · Qty: {g.qtys.join(", ") || "—"}
-                </div>
-              ))}
+              <div style={{ fontSize: "0.8rem", color: "#fca5a5" }}>
+                {d.pickingErrorReason ? `${d.pickingErrorReason} · ` : ""}
+                {d.wrongMaterialSku ? `SKU: ${d.wrongMaterialSku}` : ""}
+                {d.wrongMaterialQty ? ` · Qty: ${d.wrongMaterialQty}` : ""}
+              </div>
             </button>
           ))}
         </div>
@@ -592,14 +601,22 @@ function DocumentCard({
   const isOnHold = sc === "onhold";
   const isDone = sc === "completed";
 
-  // Button availability = correct workflow state AND role permission.
-  // While On Hold only "Resume" is available; End only when In Progress.
+  // Button availability = correct workflow state AND the logged-in role is
+  // permitted to use that button (permissions.js).
+  //
+  // Hold -> Resume -> End flow:
+  //   While a document is On Hold, ONLY "Resume" (the Start button, which
+  //   relabels itself to "Resume") is available. "End" must NOT be
+  //   accessible until the user has clicked Resume and the document is
+  //   back "In Progress". So `canEnd` only checks isStarted — it no
+  //   longer includes isOnHold.
   const canHandover = isPending && canHandoverBtn;
   const canStart = (isHandedOver || isOnHold) && canStartBtn;
   const canHold = isStarted && canHoldBtn;
   const canEnd = isStarted && canEndBtn;
 
-  const hasCheckError = isOpenPickingError(doc);
+  const hasCheckError =
+    (doc.hasWrongMaterial || "").toUpperCase() === "YES" && !doc.emergencyPickResolved;
 
   const cardClassName = `ip-card status-${sc}${hasCheckError ? " ip-card-emergency" : ""}`;
 
@@ -633,7 +650,7 @@ function DocumentCard({
           </div>
           {divisionLabel && (
             <div className="ip-doc-division-sub">
-              {divisionLabel}
+               {divisionLabel}
             </div>
           )}
         </div>
@@ -669,47 +686,48 @@ function DocumentCard({
         )}
 
         {(isOnHold || doc.printHoldReason) && (
-          <div className="ip-hold-box">
-            <div className="ip-hold-row"><span>Hold Reason</span><span>{doc.printHoldReason || "—"}</span></div>
-            <div className="ip-hold-row"><span>Held By</span><span>👤 {doc.printHeldBy || "—"}</span></div>
-            <div className="ip-hold-row"><span>Held At</span><span>{formatSriLankaTime(doc.printHoldTime)}</span></div>
-            {doc.printResumeTime && (
-              <div className="ip-hold-row"><span>Resumed At</span><span>{formatSriLankaTime(doc.printResumeTime)}</span></div>
-            )}
-          </div>
+                <div className="ip-hold-box">
+                  <div className="ip-hold-row"><span>Hold Reason</span><span>{doc.printHoldReason || "—"}</span></div>
+                  <div className="ip-hold-row"><span>Held By</span><span>👤 {doc.printHeldBy || "—"}</span></div>
+                  <div className="ip-hold-row"><span>Held At</span><span>{formatSriLankaTime(doc.printHoldTime)}</span></div>
+                  {doc.printResumeTime && (
+                    <div className="ip-hold-row"><span>Resumed At</span><span>{formatSriLankaTime(doc.printResumeTime)}</span></div>
+                  )}
+                </div>
         )}
 
-        {isDone && (
-          <div className="ip-duration-box">
-            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-              <span className="ip-duration-label">Picked By</span>
-              <span style={{ fontSize: "0.85rem", fontWeight: 600, color: "#e2e8f0" }}>
-                👤 {doc.pickedBy || "—"}
-              </span>
-            </div>
-            <div style={{ textAlign: "right" }}>
-              <span className="ip-duration-label">Total Duration</span>
-              <div className="ip-duration-value">⏱ {formatDuration(doc.durationSeconds)}</div>
-            </div>
-          </div>
-        )}
 
         {isDone && (
-          <div className="ip-duration-box">
-            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-              <span className="ip-duration-label">Started At</span>
-              <span style={{ fontSize: "0.85rem", fontWeight: 600, color: "#e2e8f0" }}>
-                {formatSriLankaTime(doc.startTime)}
-              </span>
-            </div>
-            <div style={{ textAlign: "right" }}>
-              <span className="ip-duration-label">Ended At</span>
-              <div style={{ fontSize: "0.85rem", fontWeight: 600, color: "#e2e8f0" }}>
-                {formatSriLankaTime(doc.endTime)}
-              </div>
-            </div>
-          </div>
-        )}
+  <div className="ip-duration-box">
+    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+      <span className="ip-duration-label">Picked By</span>
+      <span style={{ fontSize: "0.85rem", fontWeight: 600, color: "#e2e8f0" }}>
+        👤 {doc.pickedBy || "—"}
+      </span>
+    </div>
+    <div style={{ textAlign: "right" }}>
+      <span className="ip-duration-label">Total Duration</span>
+      <div className="ip-duration-value">⏱ {formatDuration(doc.durationSeconds)}</div>
+    </div>
+  </div>
+)}
+
+{isDone && (
+  <div className="ip-duration-box">
+    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+      <span className="ip-duration-label">Started At</span>
+      <span style={{ fontSize: "0.85rem", fontWeight: 600, color: "#e2e8f0" }}>
+        {formatSriLankaTime(doc.startTime)}
+      </span>
+    </div>
+    <div style={{ textAlign: "right" }}>
+      <span className="ip-duration-label">Ended At</span>
+      <div style={{ fontSize: "0.85rem", fontWeight: 600, color: "#e2e8f0" }}>
+        {formatSriLankaTime(doc.endTime)}
+      </div>
+    </div>
+  </div>
+)}
 
         {hasCheckError && (
           <div
@@ -865,193 +883,79 @@ export default function IssuPikFormt() {
   const [activePopup, setActivePopup] = useState(null);
   const [activeId, setActiveId] = useState(null);
 
-  // ── Picking-error alerts (independent of page / search / filters) ──
-  const [alertDocs, setAlertDocs] = useState([]);           // top banner data
-  const [errorAlertDocs, setErrorAlertDocs] = useState([]); // popup data
-  const seenAlertIds = useRef(new Set());
-  const alertAbortRef = useRef(null);
-  const mountedRef = useRef(true);
+  const [errorAlertDocs, setErrorAlertDocs] = useState([]);
+  const [seenErrorIds, setSeenErrorIds] = useState(() => new Set());
 
   const cardRefs = useRef({});
   const [jumpHighlightId, setJumpHighlightId] = useState(null);
-  const [pendingJumpId, setPendingJumpId] = useState(null);
 
-  // Divisions the logged-in user is allowed to see (null = all divisions).
-  const allowedDivisions = useMemo(() => {
-    if (hasAllDivisionAccess(currentUser)) return null;
-    const list = currentUser?.divisions;
-    return Array.isArray(list) && list.length ? list.map(String) : null;
-  }, [currentUser]);
-
-  const scrollAndHighlight = (id) => {
+  const handleJumpToCard = (id) => {
+    setErrorAlertDocs([]);
     const el = cardRefs.current[id];
     if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
     setJumpHighlightId(id);
     setTimeout(() => setJumpHighlightId(prev => (prev === id ? null : prev)), 2500);
   };
 
-  // Click on popup item OR top-banner chip → go to that card.
-  const handleJumpToCard = (doc) => {
-    setErrorAlertDocs([]);
-    if (cardRefs.current[doc.id]) {
-      scrollAndHighlight(doc.id);
-      return;
-    }
-    // Card isn't on the current page / filters → clear filters, then find it
-    setDateFilterMode("ALL");
-    setFilterType("ALL");
-    setFilterStatus("ALL");
-    setPage(0);
-    setSearch(doc.printDocumentNo || "");
-    setPendingJumpId(doc.id);
-  };
-
-  // Once the filtered list has loaded, scroll to the pending card.
-  useEffect(() => {
-    if (!pendingJumpId || loading) return;
-    if (cardRefs.current[pendingJumpId]) {
-      scrollAndHighlight(pendingJumpId);
-      setPendingJumpId(null);
-    }
-  }, [documents, loading, pendingJumpId]);
-
-  // Safety: never leave a pending jump hanging forever.
-  useEffect(() => {
-    if (!pendingJumpId) return;
-    const t = setTimeout(() => setPendingJumpId(null), 8000);
-    return () => clearTimeout(t);
-  }, [pendingJumpId]);
-
-  const fetchAlerts = useCallback(async () => {
-    // Cancel any in-flight request so responses never overlap / arrive out of order
-    if (alertAbortRef.current) alertAbortRef.current.abort();
-    const controller = new AbortController();
-    alertAbortRef.current = controller;
-
-    try {
-      const params = new URLSearchParams();
-      if (allowedDivisions) params.set("divisions", allowedDivisions.join(","));
-
-      const res = await fetch(`${API_BASE}/alerts?${params.toString()}`, { signal: controller.signal });
-      if (!res.ok) {
-        // 404 here usually means the backend with /alerts is not deployed yet
-        console.warn(`Alerts request failed: ${res.status}`);
-        if ((res.status === 401 || res.status === 403) && mountedRef.current) {
-          setAlertDocs([]); // never keep showing data after access is lost
-        }
-        return;
-      }
-      const raw = await res.json();
-      if (!mountedRef.current || !Array.isArray(raw)) return;
-
-      // Defence in depth: re-apply the division scope on the client too.
-      const data = raw.filter(d =>
-        isOpenPickingError(d) &&
-        (!allowedDivisions ||
-          (d.divisionNo != null && allowedDivisions.includes(String(d.divisionNo))))
-      );
-
-      setAlertDocs(data);
-
-      // Forget alerts that were resolved, so they can alert again if re-flagged
-      const currentIds = new Set(data.map(d => d.id));
-      seenAlertIds.current = new Set(
-        [...seenAlertIds.current].filter(id => currentIds.has(id))
-      );
-
-      // Only brand-new alerts open the popup
-      const fresh = data.filter(d => !seenAlertIds.current.has(d.id));
-      if (fresh.length > 0) {
-        fresh.forEach(d => seenAlertIds.current.add(d.id));
-        setErrorAlertDocs(prev => {
-          const ids = new Set(prev.map(d => d.id));
-          return [...prev, ...fresh.filter(d => !ids.has(d.id))];
-        });
-      }
-
-      // Drop popup entries that were resolved in the meantime
-      setErrorAlertDocs(prev => prev.filter(d => currentIds.has(d.id)));
-    } catch (e) {
-      if (e.name !== "AbortError") console.warn("Failed to load alerts", e);
-    }
-  }, [allowedDivisions]);
-
-  useEffect(() => {
-    mountedRef.current = true;
-    fetchAlerts();
-
-    const tick = () => {
-      if (document.visibilityState === "visible") fetchAlerts(); // no polling in background tabs
-    };
-    const intervalId = setInterval(tick, ALERT_POLL_MS);
-    const onVisible = () => { if (document.visibilityState === "visible") fetchAlerts(); };
-    document.addEventListener("visibilitychange", onVisible);
-
-    return () => {
-      mountedRef.current = false;
-      clearInterval(intervalId);
-      document.removeEventListener("visibilitychange", onVisible);
-      if (alertAbortRef.current) alertAbortRef.current.abort();
-    };
-  }, [fetchAlerts]);
-
   const fetchDocuments = useCallback(async (silent = false) => {
-    if (!silent) setLoading(true);
-    else setRefreshing(true);
-    setError(null);
-    try {
-      const params = new URLSearchParams();
+  if (!silent) setLoading(true);
+  else setRefreshing(true);
+  setError(null);
+  try {
+    const params = new URLSearchParams();
 
-      if (dateFilterMode === "TODAY") {
-        const today = getSriLankaTodayKey();
-        params.set("from", today);
-        params.set("to", today);
-      } else if (dateFilterMode === "CUSTOM") {
-        if (fromDate) params.set("from", fromDate);
-        if (toDate) params.set("to", toDate);
-      }
-      if (filterType !== "ALL") params.set("jobType", filterType);
-      if (filterStatus !== "ALL") params.set("status", filterStatus);
-      if (search.trim()) params.set("search", search.trim());
-      if (allowedDivisions) params.set("divisions", allowedDivisions.join(","));
-      params.set("page", String(page));
-      params.set("size", String(PAGE_SIZE));
+    if (dateFilterMode === "TODAY") {
+      const today = getSriLankaTodayKey();
+      params.set("from", today);
+      params.set("to", today);
+    } else if (dateFilterMode === "CUSTOM") {
+      if (fromDate) params.set("from", fromDate);
+      if (toDate) params.set("to", toDate);
+    }
+    if (filterType !== "ALL") params.set("jobType", filterType);
+    if (filterStatus !== "ALL") params.set("status", filterStatus);
+    if (search.trim()) params.set("search", search.trim());
+    if (!hasAllDivisionAccess(currentUser) && currentUser?.divisions?.length) {
+      params.set("divisions", currentUser.divisions.join(","));
+    }
+    params.set("page", String(page));
+    params.set("size", String(PAGE_SIZE));
 
-      const res = await fetch(`${API_BASE}/search?${params.toString()}`);
-      if (!res.ok) throw new Error(`Server error: ${res.status}`);
+    const res = await fetch(`${API_BASE}/search?${params.toString()}`);
+    if (!res.ok) throw new Error(`Server error: ${res.status}`);
+    const data = await res.json();
+
+    setDocuments(data.content || []);
+    setTotalPages(data.totalPages || 0);
+    setTotalElements(data.totalElements || 0);
+    setStatsFromServer({
+      total: data.stats?.total || 0,
+      pending: data.stats?.pending || 0,
+      handedOver: data.stats?.handedOver || 0,
+      inProgress: data.stats?.inProgress || 0,
+      onHold: data.stats?.onHold || 0,
+      completed: data.stats?.completed || 0,
+    });
+    setLastUpdated(new Date());
+  } catch (err) {
+    setError(err.message);
+  } finally {
+    setLoading(false);
+    setRefreshing(false);
+  }
+}, [dateFilterMode, fromDate, toDate, filterType, filterStatus, search, page, currentUser]);
+
+const fetchJobTypes = useCallback(async () => {
+  try {
+    const res = await fetch(`${API_BASE}/job-types`);
+    if (res.ok) {
       const data = await res.json();
-
-      setDocuments(data.content || []);
-      setTotalPages(data.totalPages || 0);
-      setTotalElements(data.totalElements || 0);
-      setStatsFromServer({
-        total: data.stats?.total || 0,
-        pending: data.stats?.pending || 0,
-        handedOver: data.stats?.handedOver || 0,
-        inProgress: data.stats?.inProgress || 0,
-        onHold: data.stats?.onHold || 0,
-        completed: data.stats?.completed || 0,
-      });
-      setLastUpdated(new Date());
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
+      setAllJobTypes(data || []);
     }
-  }, [dateFilterMode, fromDate, toDate, filterType, filterStatus, search, page, allowedDivisions]);
-
-  const fetchJobTypes = useCallback(async () => {
-    try {
-      const res = await fetch(`${API_BASE}/job-types`);
-      if (res.ok) {
-        const data = await res.json();
-        setAllJobTypes(Array.isArray(data) ? data : []);
-      }
-    } catch (e) {
-      console.warn("Failed to load job types");
-    }
-  }, []);
+  } catch (e) {
+    console.warn("Failed to load job types", e);
+  }
+}, []);
 
   const fetchDivisions = useCallback(async () => {
     try {
@@ -1061,7 +965,7 @@ export default function IssuPikFormt() {
         setDivisions(data || []);
       }
     } catch (e) {
-      console.warn("Failed to load divisions");
+      console.warn("Failed to load divisions", e);
     }
   }, []);
 
@@ -1094,32 +998,33 @@ export default function IssuPikFormt() {
         setPopupPickers([]);
       }
     } catch (e) {
-      console.warn("Failed to load pickers for division");
+      console.warn("Failed to load pickers for division", e);
       setPopupPickers([]);
     } finally {
       setPopupPickersLoading(false);
     }
   }, []);
 
-  useEffect(() => {
-    fetchDocuments(false);
-  }, [fetchDocuments]);
+ useEffect(() => {
+  fetchDocuments(false);
+}, [fetchDocuments]);
 
-  useEffect(() => {
-    fetchDivisions();
-    fetchJobTypes();
-  }, [fetchDivisions, fetchJobTypes]);
+useEffect(() => {
+  fetchDivisions();
+  fetchJobTypes();
+}, [fetchDivisions, fetchJobTypes]);
 
-  // Reset to page 0 whenever filter / search / date changes
-  useEffect(() => {
-    setPage(0);
-  }, [dateFilterMode, fromDate, toDate, filterType, filterStatus, search]);
+// filter/search/date වෙනස් වෙනකොට page 0ට reset කරන්න
+useEffect(() => {
+  setPage(0);
+}, [dateFilterMode, fromDate, toDate, filterType, filterStatus, search]);
 
-  // The doc may come from the grid OR from the alert list (when the card isn't on the page)
-  const getDocById = useCallback(
-    (id) => documents.find(d => d.id === id) || alertDocs.find(d => d.id === id),
-    [documents, alertDocs]
-  );
+  // useEffect(() => {
+  //   const id = setInterval(() => fetchDocuments(true), AUTO_REFRESH);
+  //   return () => clearInterval(id);
+  // }, [fetchDocuments]);
+
+  const getDocById = useCallback((id) => documents.find(d => d.id === id), [documents]);
 
   const closePopup = () => {
     setActivePopup(null);
@@ -1176,7 +1081,6 @@ export default function IssuPikFormt() {
   };
 
   const handleHandoverConfirm = async (handedOverBy) => {
-    if (!buttonPerms.handover) return;
     const id = activeId; closePopup();
     try {
       const res = await fetch(`${API_BASE}/${id}/handover`, {
@@ -1199,7 +1103,6 @@ export default function IssuPikFormt() {
   };
 
   const handleHoldConfirm = async (holdReason, heldBy) => {
-    if (!buttonPerms.hold) return;
     const id = activeId; closePopup();
     try {
       const res = await fetch(`${API_BASE}/${id}/hold`, {
@@ -1213,7 +1116,6 @@ export default function IssuPikFormt() {
   };
 
   const handleEndConfirm = async (pickedBy) => {
-    if (!buttonPerms.end) return;
     const id = activeId; closePopup();
     try {
       const res = await fetch(`${API_BASE}/${id}/end`, {
@@ -1227,7 +1129,6 @@ export default function IssuPikFormt() {
   };
 
   const handleEmergencyConfirm = async (resolvedBy) => {
-    if (!buttonPerms.emergency_done) return;
     const id = activeId; closePopup();
     try {
       const res = await fetch(`${API_BASE}/${id}/emergency-resolve`, {
@@ -1237,12 +1138,10 @@ export default function IssuPikFormt() {
       });
       await assertOk(res, "Emergency Pick Done");
       fetchDocuments(true);
-      fetchAlerts(); // banner / popup refresh immediately
     } catch (err) { alert(err.message); }
   };
 
   const handleEditConfirm = async ({ heldBy, pickedBy }) => {
-    if (!buttonPerms.edit) return;
     const id = activeId; closePopup();
     try {
       const res = await fetch(`${API_BASE}/${id}/edit`, {
@@ -1262,19 +1161,33 @@ export default function IssuPikFormt() {
       const res = await fetch(`${API_BASE}/${id}`, { method: "DELETE" });
       await assertOk(res, "Delete");
       fetchDocuments(true);
-      fetchAlerts();
     } catch (err) { alert(err.message); }
   };
 
-  // Backend sends the stable requestId; fall back to the local computation.
-  const requestIdMap = useMemo(() => {
-    const fallback = computeRequestIds(documents);
-    const map = {};
-    documents.forEach(d => { map[d.id] = d.requestId || fallback[d.id]; });
-    return map;
-  }, [documents]);
+  const requestIdMap = useMemo(() => computeRequestIds(documents), [documents]);
 
-  const jobTypes = ["ALL", ...allJobTypes];
+  const activeCheckErrorDocs = useMemo(
+    () => documents.filter(d =>
+      (d.hasWrongMaterial || "").toUpperCase() === "YES" && !d.emergencyPickResolved
+    ),
+    [documents]
+  );
+
+  useEffect(() => {
+    setSeenErrorIds(prevSeen => {
+      const newOnes = activeCheckErrorDocs.filter(d => !prevSeen.has(d.id));
+      if (newOnes.length > 0) {
+        setErrorAlertDocs(prevAlert => {
+          const existingIds = new Set(prevAlert.map(d => d.id));
+          return [...prevAlert, ...newOnes.filter(d => !existingIds.has(d.id))];
+        });
+      }
+      return new Set(activeCheckErrorDocs.map(d => d.id));
+    });
+  }, [activeCheckErrorDocs]);
+
+  const jobTypes = ["ALL", ...new Set(documents.map(d => d.jobType).filter(Boolean))];
+  // const visible = documents;
 
   const STATUS_FILTERS = [
     { value: "ALL", label: "All Status" },
@@ -1291,8 +1204,23 @@ export default function IssuPikFormt() {
     { value: "CUSTOM", label: "Custom" },
   ];
 
-  // The server already applied date / type / status / search / division filters.
-  const visible = documents;
+  const visible = documents.filter(doc => {
+    const q = search.toLowerCase();
+    const matchSearch = !q || [
+      String(doc.id), doc.jobwbs, doc.reservationNo, doc.enteredBy, doc.jobType,
+    ].some(v => (v || "").toLowerCase().includes(q));
+
+    const matchType = filterType === "ALL" || doc.jobType === filterType;
+    const matchStatus = filterStatus === "ALL" || statusClass(doc.status) === filterStatus;
+    const matchDate = matchesDateFilter(doc, dateFilterMode, fromDate, toDate);
+
+    return matchSearch && matchType && matchStatus && matchDate;
+  });
+
+  const dateScoped = useMemo(
+    () => documents.filter(doc => matchesDateFilter(doc, dateFilterMode, fromDate, toDate)),
+    [documents, dateFilterMode, fromDate, toDate]
+  );
 
   const total = statsFromServer.total;
   const pending = statsFromServer.pending;
@@ -1303,7 +1231,7 @@ export default function IssuPikFormt() {
 
   const handleStatClick = (statusValue) => setFilterStatus(statusValue);
 
-  const activeDoc = getDocById(activeId) || null;
+  const activeDoc = documents.find(d => d.id === activeId) || null;
   const activeDivisionLabel = activeDoc?.divisionNo
     ? `${activeDoc.divisionNo} — ${divisionNoToName[activeDoc.divisionNo] || ""}`
     : null;
@@ -1322,12 +1250,12 @@ export default function IssuPikFormt() {
       {activePopup === "view" && (
         <ViewDetailsPopup
           doc={activeDoc}
-          requestId={activeId ? (requestIdMap[activeId] || activeDoc?.requestId) : null}
+          requestId={activeId ? requestIdMap[activeId] : null}
           divisionLabel={activeDivisionLabel}
           onClose={closePopup}
         />
       )}
-      {activePopup === "emergency" && activeDoc && (
+      {activePopup === "emergency" && (
         <EmergencyPickDonePopup
           doc={activeDoc}
           onConfirm={handleEmergencyConfirm}
@@ -1336,7 +1264,7 @@ export default function IssuPikFormt() {
           pickersLoading={popupPickersLoading}
         />
       )}
-      {activePopup === "edit" && activeDoc && (
+      {activePopup === "edit" && (
         <EditPopup
           doc={activeDoc}
           onConfirm={handleEditConfirm}
@@ -1352,32 +1280,6 @@ export default function IssuPikFormt() {
           onJump={handleJumpToCard}
           onClose={() => setErrorAlertDocs([])}
         />
-      )}
-
-      {/* Sticky top notification — always visible while errors are unresolved */}
-      {alertDocs.length > 0 && (
-        <div className="ip-error-banner" style={{ position: "sticky", top: 0, zIndex: 50 }}>
-          <div className="ip-error-banner-title">
-            🚨 {alertDocs.length} Picking Error{alertDocs.length > 1 ? "s" : ""} Reported by Check Portal — needs Emergency Pick
-          </div>
-          <div className="ip-error-banner-chips">
-            {alertDocs.map(d => {
-              const reason = errorReasonText(d);
-              return (
-                <span
-                  key={d.id}
-                  className="ip-error-chip"
-                  style={{ cursor: "pointer" }}
-                  title="Click to open this document"
-                  onClick={() => handleJumpToCard(d)}
-                >
-                  {d.requestId || requestIdMap[d.id] || "—"} · Doc No: {d.printDocumentNo || "—"}
-                  {reason ? ` · ${reason}` : ""}
-                </span>
-              );
-            })}
-          </div>
-        </div>
       )}
 
       <div className="ip-header">
@@ -1397,7 +1299,7 @@ export default function IssuPikFormt() {
           <button
             className="ip-btn ip-btn-outline"
             style={{ flex: "unset", padding: "8px 18px" }}
-            onClick={() => { fetchDocuments(false); fetchAlerts(); }}
+            onClick={() => fetchDocuments(false)}
           >
             ↻ Refresh
           </button>
@@ -1413,14 +1315,29 @@ export default function IssuPikFormt() {
         </div>
       </div>
 
+      {activeCheckErrorDocs.length > 0 && (
+        <div className="ip-error-banner">
+          <div className="ip-error-banner-title">
+            🚨 {activeCheckErrorDocs.length} Picking Error{activeCheckErrorDocs.length > 1 ? "s" : ""} Reported by Check Portal — needs Emergency Pick
+          </div>
+          <div className="ip-error-banner-chips">
+            {activeCheckErrorDocs.map(d => (
+              <span key={d.id} className="ip-error-chip">
+                {requestIdMap[d.id] || "—"} · Doc No: {d.printDocumentNo || "—"}
+                {d.pickingErrorReason ? ` · ${d.pickingErrorReason}` : ""}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
       <div className="ip-toolbar">
         <div className="ip-search-wrap">
           <span className="ip-search-icon">🔍</span>
           <input
             className="ip-search"
             type="text"
-            maxLength={100}
-            placeholder="Search by Request ID, Doc No, WBS, Reservation, Entered By..."
+            placeholder="Search by ID, WBS, Reservation, Entered By..."
             value={search}
             onChange={e => setSearch(e.target.value)}
           />
@@ -1494,7 +1411,7 @@ export default function IssuPikFormt() {
         <button type="button" className={`ip-stat-chip green ip-stat-chip-clickable ${filterStatus === "completed" ? "active" : ""}`} onClick={() => handleStatClick("completed")}>
           Done <strong>{completed}</strong>
         </button>
-        <div className="ip-stat-chip">Showing <strong style={{ color: "#a78bfa" }}>{visible.length}</strong> of {totalElements}</div>
+        <div className="ip-stat-chip">Showing <strong style={{ color: "#a78bfa" }}>{visible.length}</strong> of {total}</div>
       </div>
 
       {error && (
@@ -1542,16 +1459,16 @@ export default function IssuPikFormt() {
       </div>
 
       {!loading && totalPages > 1 && (
-        <div className="ip-toolbar" style={{ justifyContent: "center", marginTop: 20 }}>
-          <button type="button" className="ip-btn ip-btn-outline" style={{ flex: "unset", padding: "8px 16px" }}
-            disabled={page <= 0} onClick={() => setPage(p => Math.max(0, p - 1))}>← Prev</button>
-          <span style={{ color: "#6c8bb3", fontSize: "0.85rem" }}>
-            Page {page + 1} of {totalPages} · {totalElements} total
-          </span>
-          <button type="button" className="ip-btn ip-btn-outline" style={{ flex: "unset", padding: "8px 16px" }}
-            disabled={page >= totalPages - 1} onClick={() => setPage(p => Math.min(totalPages - 1, p + 1))}>Next →</button>
-        </div>
-      )}
+    <div className="ip-toolbar" style={{ justifyContent: "center", marginTop: 20 }}>
+      <button type="button" className="ip-btn ip-btn-outline" style={{ flex: "unset", padding: "8px 16px" }}
+        disabled={page <= 0} onClick={() => setPage(p => Math.max(0, p - 1))}>← Prev</button>
+      <span style={{ color: "#6c8bb3", fontSize: "0.85rem" }}>
+        Page {page + 1} of {totalPages} · {totalElements} total
+      </span>
+      <button type="button" className="ip-btn ip-btn-outline" style={{ flex: "unset", padding: "8px 16px" }}
+        disabled={page >= totalPages - 1} onClick={() => setPage(p => Math.min(totalPages - 1, p + 1))}>Next →</button>
+    </div>
+  )}
     </div>
   );
 }

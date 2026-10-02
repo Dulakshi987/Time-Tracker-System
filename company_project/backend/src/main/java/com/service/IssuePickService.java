@@ -1,6 +1,6 @@
 package com.service;
 
-import com.dto.IssuePrintPageResponse;
+import com.dto.IssuePrintPageResponse; // reusing the same page-response DTO shape
 import com.entity.Issue;
 import com.repository.IssueRepository;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -108,39 +108,11 @@ public class IssuePickService {
     }
 
     // ══════════════════════════════════════════════════════════════════
-    // Request ID — computed over ALL eligible documents (before any
-    // division / jobType / status / search filter), so the ID of a document
-    // never changes when the user searches, filters or changes page.
-    // Used by both search() and getPickingErrorAlerts().
-    // ══════════════════════════════════════════════════════════════════
-    private void assignRequestIds(List<Issue> eligible) {
-        List<Issue> sorted = new ArrayList<>(eligible);
-        sorted.sort(Comparator
-                .comparing((Issue d) -> d.getRequestDate() == null ? "" : d.getRequestDate())
-                .thenComparing(d -> d.getCreatedDatetime() == null ? LocalDate.MIN.atStartOfDay() : d.getCreatedDatetime())
-                .thenComparing(Issue::getId));
-
-        Map<String, Integer> counters = new HashMap<>();
-        for (Issue d : sorted) {
-            String key = d.getRequestDate() != null
-                    ? d.getRequestDate().substring(0, Math.min(10, d.getRequestDate().length()))
-                    : "unknown";
-            int idx = counters.merge(key, 1, Integer::sum);
-            String compactDate = "unknown".equals(key) ? "00000000" : key.replace("-", "");
-            d.setRequestId(compactDate + "/" + String.format("%04d", idx));
-        }
-    }
-
-    // YYYY-MM-DD key of a document's request date (null if missing)
-    private String dateKeyOf(Issue d) {
-        String rd = d.getRequestDate();
-        if (rd == null || rd.isBlank()) return null;
-        return rd.substring(0, Math.min(10, rd.length()));
-    }
-
-    // ══════════════════════════════════════════════════════════════════
-    // Search + Pagination
-    // Pick Portal only shows documents that already have a printDocumentNo.
+    // ── Search + Pagination (new) ────────────────────────────────────
+    // Pick Portal only ever shows documents that already have a
+    // printDocumentNo (i.e. have passed through Print) — that condition
+    // used to be applied client-side after fetching everything; it's now
+    // applied here so unrelated rows never even leave the database.
     // ══════════════════════════════════════════════════════════════════
     public IssuePrintPageResponse search(
             String from, String to, String jobType, String status,
@@ -155,12 +127,10 @@ public class IssuePickService {
             base = issueRepository.findAll();
         }
 
+        // Only documents that have moved past Print (mandatory for Pick Portal)
         base = base.stream()
                 .filter(d -> d.getPrintDocumentNo() != null && !d.getPrintDocumentNo().trim().isEmpty())
                 .collect(Collectors.toList());
-
-        // Request IDs — BEFORE division/jobType/status/search filters
-        assignRequestIds(base);
 
         if (divisionsCsv != null && !divisionsCsv.isBlank()) {
             Set<String> allowed = Arrays.stream(divisionsCsv.split(","))
@@ -170,14 +140,6 @@ public class IssuePickService {
                     .filter(d -> d.getDivisionNo() != null && allowed.contains(String.valueOf(d.getDivisionNo())))
                     .collect(Collectors.toList());
         }
-
-        // Stats: date + division scoped (before jobType/status/search)
-        long total      = base.size();
-        long pending    = base.stream().filter(d -> matchesStatus(d.getStatus(), "pending")).count();
-        long handedOver = base.stream().filter(d -> matchesStatus(d.getStatus(), "handedover")).count();
-        long inProgress = base.stream().filter(d -> matchesStatus(d.getStatus(), "inprogress")).count();
-        long onHold     = base.stream().filter(d -> matchesStatus(d.getStatus(), "onhold")).count();
-        long completed  = base.stream().filter(d -> matchesStatus(d.getStatus(), "completed")).count();
 
         if (jobType != null && !jobType.isBlank() && !"ALL".equalsIgnoreCase(jobType)) {
             base = base.stream()
@@ -190,16 +152,13 @@ public class IssuePickService {
                     .collect(Collectors.toList());
         }
 
-        // Search: Request ID, Document No, WBS, Reservation No, Entered By, Job Type, Customer
+        // Search: Document Number, WBS, Reservation No, Customer Name
         if (search != null && !search.isBlank()) {
             String q = search.toLowerCase();
             base = base.stream().filter(d ->
-                    containsIgnoreCase(d.getRequestId(), q) ||
                     containsIgnoreCase(d.getPrintDocumentNo(), q) ||
                     containsIgnoreCase(d.getJobwbs(), q) ||
                     containsIgnoreCase(d.getReservationNo(), q) ||
-                    containsIgnoreCase(d.getEnteredBy(), q) ||
-                    containsIgnoreCase(d.getJobType(), q) ||
                     containsIgnoreCase(d.getCustomerName(), q)
             ).collect(Collectors.toList());
         }
@@ -209,63 +168,37 @@ public class IssuePickService {
                 .thenComparing(d -> d.getCreatedDatetime() == null ? LocalDate.MIN.atStartOfDay() : d.getCreatedDatetime())
                 .thenComparing(Issue::getId));
 
-        long filteredTotal = base.size();
+        // Compute requestId per requestDate group — same scheme as Print Portal
+        Map<String, Integer> counters = new HashMap<>();
+        for (Issue d : base) {
+            String key = d.getRequestDate() != null
+                    ? d.getRequestDate().substring(0, Math.min(10, d.getRequestDate().length()))
+                    : "unknown";
+            int idx = counters.merge(key, 1, Integer::sum);
+            String compactDate = "unknown".equals(key) ? "00000000" : key.replace("-", "");
+            d.setRequestId(compactDate + "/" + String.format("%04d", idx));
+        }
+
+        long total = base.size();
+        long pending = base.stream().filter(d -> matchesStatus(d.getStatus(), "pending")).count();
+        long handedOver = base.stream().filter(d -> matchesStatus(d.getStatus(), "handedover")).count();
+        long inProgress = base.stream().filter(d -> matchesStatus(d.getStatus(), "inprogress")).count();
+        long onHold = base.stream().filter(d -> matchesStatus(d.getStatus(), "onhold")).count();
+        long completed = base.stream().filter(d -> matchesStatus(d.getStatus(), "completed")).count();
+
         int safeSize = Math.max(1, size);
-        int totalPages = (int) Math.ceil((double) filteredTotal / safeSize);
+        int totalPages = (int) Math.ceil((double) total / safeSize);
         int safePage = Math.max(0, Math.min(page, Math.max(0, totalPages - 1)));
         int fromIdx = safePage * safeSize;
         int toIdx = Math.min(fromIdx + safeSize, base.size());
         List<Issue> content = fromIdx < toIdx ? base.subList(fromIdx, toIdx) : Collections.emptyList();
 
         return new IssuePrintPageResponse(
-                content, safePage, safeSize, filteredTotal, totalPages,
-                new IssuePrintPageResponse.Stats(total, pending, inProgress, onHold, completed, handedOver)
-        );
+                content, safePage, safeSize, total, totalPages,
+                 new IssuePrintPageResponse.Stats(total, pending, inProgress, onHold, completed, handedOver)        );
     }
 
-    // ── Picking-error banner/popup payload ──
-    // Flagged + not yet re-picked docs. Independent of page/search/status
-    // filters, BUT scoped by the same date range (from/to) and divisions
-    // as the grid, so "Today" only shows today's pending errors.
-    public List<Issue> getPickingErrorAlerts(String from, String to, String divisionsCsv) {
-        List<Issue> eligible = issueRepository.findAll().stream()
-                .filter(d -> d.getPrintDocumentNo() != null && !d.getPrintDocumentNo().trim().isEmpty())
-                .collect(Collectors.toList());
-
-        // Request IDs over everything so IDs never change with the filter
-        assignRequestIds(eligible);
-
-        List<Issue> base = eligible.stream()
-                .filter(d -> "YES".equalsIgnoreCase(d.getHasWrongMaterial()))
-                .filter(d -> !Boolean.TRUE.equals(d.getEmergencyPickResolved()))
-                .collect(Collectors.toList());
-
-        // Date range — requestDate is a plain YYYY-MM-DD string, so string
-        // comparison is correct (same rule as the grid).
-        final boolean hasFrom = from != null && !from.isBlank();
-        final boolean hasTo = to != null && !to.isBlank();
-        if (hasFrom || hasTo) {
-            base = base.stream().filter(d -> {
-                String key = dateKeyOf(d);
-                if (key == null) return false;
-                if (hasFrom && key.compareTo(from) < 0) return false;
-                if (hasTo && key.compareTo(to) > 0) return false;
-                return true;
-            }).collect(Collectors.toList());
-        }
-
-        if (divisionsCsv != null && !divisionsCsv.isBlank()) {
-            Set<String> allowed = Arrays.stream(divisionsCsv.split(","))
-                    .map(String::trim).filter(s -> !s.isEmpty())
-                    .collect(Collectors.toSet());
-            base = base.stream()
-                    .filter(d -> d.getDivisionNo() != null && allowed.contains(String.valueOf(d.getDivisionNo())))
-                    .collect(Collectors.toList());
-        }
-        return base;
-    }
-
-    // Distinct Job Types across ALL Pick-eligible documents
+    // Distinct Job Types across ALL Pick-eligible documents (has printDocumentNo)
     public List<String> getDistinctJobTypes() {
         return issueRepository.findAll().stream()
                 .filter(d -> d.getPrintDocumentNo() != null && !d.getPrintDocumentNo().trim().isEmpty())

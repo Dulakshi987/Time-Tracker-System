@@ -1,6 +1,6 @@
 package com.service;
 
-import com.dto.IssuePrintPageResponse;
+import com.dto.IssuePrintPageResponse; // reusing same page-response DTO shape
 import com.entity.Issue;
 import com.repository.IssueRepository;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -124,33 +124,10 @@ public class CheckPortalService {
     }
 
     // ══════════════════════════════════════════════════════════════════
-    // Request ID — computed over ALL eligible documents (before any
-    // division / jobType / status / search filter), so the ID of a document
-    // never changes when the user searches, filters or changes page.
-    // Used by both search() and getPickingErrorAlerts().
-    // ══════════════════════════════════════════════════════════════════
-    private void assignRequestIds(List<Issue> eligible) {
-        List<Issue> sorted = new ArrayList<>(eligible);
-        sorted.sort(Comparator
-                .comparing((Issue d) -> d.getRequestDate() == null ? "" : d.getRequestDate())
-                .thenComparing(d -> d.getCreatedDatetime() == null ? LocalDate.MIN.atStartOfDay() : d.getCreatedDatetime())
-                .thenComparing(Issue::getId));
-
-        Map<String, Integer> counters = new HashMap<>();
-        for (Issue d : sorted) {
-            String key = d.getRequestDate() != null
-                    ? d.getRequestDate().substring(0, Math.min(10, d.getRequestDate().length()))
-                    : "unknown";
-            int idx = counters.merge(key, 1, Integer::sum);
-            String compactDate = "unknown".equals(key) ? "00000000" : key.replace("-", "");
-            d.setRequestId(compactDate + "/" + String.format("%04d", idx));
-        }
-    }
-
-    // ══════════════════════════════════════════════════════════════════
-    // Search + Pagination (server-side)
+    // ── NEW: Search + Pagination (server-side, cuts data usage) ──────
     // Only documents ready for check (Pick status = COMPLETED and has a
-    // printDocumentNo) are ever considered.
+    // printDocumentNo) are ever considered — same "readyForCheck" filter
+    // the frontend used to apply client-side after fetching everything.
     // ══════════════════════════════════════════════════════════════════
     public IssuePrintPageResponse search(
             String from, String to, String jobType, String status,
@@ -165,14 +142,11 @@ public class CheckPortalService {
             base = issueRepository.findAll();
         }
 
-        // Ready-for-check gate
+        // Ready-for-check gate: pick portal must be done, and doc number set
         base = base.stream()
                 .filter(d -> matchesPickStatus(d.getStatus(), "completed"))
                 .filter(d -> d.getPrintDocumentNo() != null && !d.getPrintDocumentNo().trim().isEmpty())
                 .collect(Collectors.toList());
-
-        // Request IDs — BEFORE division/jobType/status/search filters
-        assignRequestIds(base);
 
         if (divisionsCsv != null && !divisionsCsv.isBlank()) {
             Set<String> allowed = Arrays.stream(divisionsCsv.split(","))
@@ -205,8 +179,6 @@ public class CheckPortalService {
             String q = search.toLowerCase();
             base = base.stream().filter(d ->
                     containsIgnoreCase(String.valueOf(d.getId()), q) ||
-                    containsIgnoreCase(d.getRequestId(), q) ||
-                    containsIgnoreCase(d.getPrintDocumentNo(), q) ||
                     containsIgnoreCase(d.getRequestedBy(), q) ||
                     containsIgnoreCase(d.getJobwbs(), q) ||
                     containsIgnoreCase(d.getReservationNo(), q) ||
@@ -219,6 +191,17 @@ public class CheckPortalService {
                 .comparing((Issue d) -> d.getRequestDate() == null ? "" : d.getRequestDate())
                 .thenComparing(d -> d.getCreatedDatetime() == null ? LocalDate.MIN.atStartOfDay() : d.getCreatedDatetime())
                 .thenComparing(Issue::getId));
+
+        // Request ID: grouped by requestDate, same scheme as Pick/Print Portal
+        Map<String, Integer> counters = new HashMap<>();
+        for (Issue d : base) {
+            String key = d.getRequestDate() != null
+                    ? d.getRequestDate().substring(0, Math.min(10, d.getRequestDate().length()))
+                    : "unknown";
+            int idx = counters.merge(key, 1, Integer::sum);
+            String compactDate = "unknown".equals(key) ? "00000000" : key.replace("-", "");
+            d.setRequestId(compactDate + "/" + String.format("%04d", idx));
+        }
 
         long total = base.size();
         int safeSize = Math.max(1, size);
@@ -234,18 +217,13 @@ public class CheckPortalService {
         );
     }
 
-    // ── Lightweight endpoint for the red/green picking-error banners ──
-    // Flagged, not-yet-check-completed docs only. Request IDs are assigned
-    // over all eligible docs first, so they match the grid cards exactly.
+    // ── NEW: lightweight endpoint for the red/green picking-error banners ──
+    // Returns ONLY flagged documents (small payload) instead of the whole list,
+    // so the alert banners don't need a full fetch to stay accurate.
     public List<Issue> getPickingErrorAlerts(String divisionsCsv) {
-        List<Issue> eligible = issueRepository.findAll().stream()
+        List<Issue> base = issueRepository.findAll().stream()
                 .filter(d -> matchesPickStatus(d.getStatus(), "completed"))
                 .filter(d -> d.getPrintDocumentNo() != null && !d.getPrintDocumentNo().trim().isEmpty())
-                .collect(Collectors.toList());
-
-        assignRequestIds(eligible);
-
-        List<Issue> base = eligible.stream()
                 .filter(d -> "YES".equalsIgnoreCase(d.getHasWrongMaterial()))
                 .filter(d -> !matchesCheckStatus(d, "completed"))
                 .collect(Collectors.toList());
@@ -261,7 +239,7 @@ public class CheckPortalService {
         return base;
     }
 
-    // ── Distinct job types for the dropdown, without a full fetch ──
+    // ── NEW: distinct job types for the dropdown, without a full fetch ──
     public List<String> getDistinctJobTypes() {
         return issueRepository.findAll().stream()
                 .filter(d -> matchesPickStatus(d.getStatus(), "completed"))
@@ -289,6 +267,8 @@ public class CheckPortalService {
         boolean isPending = !isHold && !isProgress && !isCompleted;
 
         boolean isFlagged = "YES".equalsIgnoreCase(d.getHasWrongMaterial());
+        // NOTE: adjust getter name below to match your Issue entity
+        // (isEmergencyPickResolved() if it's a primitive boolean field)
         boolean resolved = Boolean.TRUE.equals(d.getEmergencyPickResolved());
         boolean unresolvedError = isFlagged && !resolved && !isCompleted;
 
